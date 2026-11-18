@@ -976,8 +976,16 @@ impl Engine {
                 if let Some(i) = seen.iter().position(|s| *s == id) {
                     return Ok(WireValue::Ref(i as u32));
                 }
+                let arr_len = match self.heap.obj(id).map(|o| &o.kind) {
+                    Some(ObjKind::Array(a)) => a.len() as usize,
+                    _ => 0,
+                };
+                // Matérialisation bornée : un backing sparse de
+                // `length` géante est refusé avant d'allouer
+                // `0..len` (JS-C613).
+                self.alloc_guard(arr_len.saturating_mul(std::mem::size_of::<Value>()))?;
                 let shape = match self.heap.obj(id).map(|o| &o.kind) {
-                    Some(ObjKind::Array(elems)) => Shape::Arr(elems.clone()),
+                    Some(ObjKind::Array(elems)) => Shape::Arr(elems.to_vec()),
                     Some(ObjKind::ByteBuf(b)) => Shape::Buf(b.clone()),
                     Some(ObjKind::TypedArray {
                         ta,

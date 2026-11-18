@@ -3966,7 +3966,7 @@ fn collection_named_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<V
     if let Value::Obj(id) = t {
         let elems = match e.heap.obj(id) {
             Some(o) => match &o.kind {
-                ObjKind::Array(elems) => elems.clone(),
+                ObjKind::Array(elems) => elems.to_vec(),
                 _ => Vec::new(),
             },
             None => Vec::new(),
@@ -9008,7 +9008,7 @@ impl Host for DocumentHost {
                 let sheets: Vec<ObjId> = {
                     match e.heap.obj(aid).map(|o| &o.kind) {
                         Some(ObjKind::Array(elems)) => elems
-                            .iter()
+                            .stored_vals()
                             .filter_map(|el| match el {
                                 Value::Obj(id) => Some(*id),
                                 _ => None,
@@ -13942,7 +13942,7 @@ impl Host for NodeHost {
                     if multi {
                         let elems = match v {
                             Value::Obj(oid) => match e.heap.obj(oid).map(|o| &o.kind) {
-                                Some(ObjKind::Array(elems)) => elems.clone(),
+                                Some(ObjKind::Array(elems)) => elems.to_vec(),
                                 _ => Vec::new(),
                             },
                             _ => Vec::new(),
@@ -18531,7 +18531,7 @@ impl Host for CustomElementsHost {
                 let mut observed = Vec::new();
                 if let Value::Obj(oid) = e.get_prop_value(ctor.clone(), "observedAttributes")? {
                     if let Some(ObjKind::Array(elems)) = e.heap.obj(oid).map(|o| &o.kind) {
-                        for el in elems.clone() {
+                        for el in elems.to_vec() {
                             observed.push(e.to_js_string(el)?.to_lowercase());
                         }
                     }
@@ -20101,7 +20101,7 @@ fn font_faces(e: &Engine, this: Value) -> Vec<Value> {
         return Vec::new();
     };
     match e.heap.obj(arr).map(|o| &o.kind) {
-        Some(ObjKind::Array(elems)) => elems.clone(),
+        Some(ObjKind::Array(elems)) => elems.to_vec(),
         _ => Vec::new(),
     }
 }
@@ -25024,7 +25024,7 @@ fn ff_queue_event(e: &mut Engine, set: Value, ty: &str, faces: Value) -> JsResul
     e.set_own(ev, "fontfaces", faces, true);
     let mut evs = match e.get_prop(sid, "__ff_ev") {
         Some(Value::Obj(a)) => match e.heap.obj(a).map(|o| &o.kind) {
-            Some(ObjKind::Array(v)) => v.clone(),
+            Some(ObjKind::Array(v)) => v.to_vec(),
             _ => Vec::new(),
         },
         _ => Vec::new(),
@@ -25062,7 +25062,7 @@ fn ff_events_flush(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value>
     e.set_own(sid, "__ff_q", Value::Bool(false), false);
     let evs = match e.get_prop(sid, "__ff_ev") {
         Some(Value::Obj(a)) => match e.heap.obj(a).map(|o| &o.kind) {
-            Some(ObjKind::Array(v)) => v.clone(),
+            Some(ObjKind::Array(v)) => v.to_vec(),
             _ => Vec::new(),
         },
         _ => Vec::new(),

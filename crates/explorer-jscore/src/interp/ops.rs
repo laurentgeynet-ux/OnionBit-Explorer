@@ -165,9 +165,7 @@ pub(crate) fn array_index(key: &str) -> Option<usize> {
     }
     // Spec : un index de tableau est < 2**32-1 — `"4294967295"`
     // et au-delà sont des props nommées ordinaires (JS-C613).
-    key.parse::<usize>()
-        .ok()
-        .filter(|&i| i < u32::MAX as usize)
+    key.parse::<usize>().ok().filter(|&i| i < u32::MAX as usize)
 }
 
 /// Spec `CanonicalNumericIndexString` (JS-C606) : `key` est la

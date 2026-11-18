@@ -2510,7 +2510,7 @@ impl Engine {
                 if let Ok(Value::Obj(rid)) = self.get_prop_value(Value::Obj(sid), "cssRules") {
                     let rule_ids: Vec<ObjId> = match self.heap.obj(rid).map(|o| &o.kind) {
                         Some(ObjKind::Array(elems)) => elems
-                            .iter()
+                            .stored_vals()
                             .filter_map(|el| match el {
                                 Value::Obj(id) => Some(*id),
                                 _ => None,
@@ -5087,6 +5087,14 @@ impl Engine {
         crate::j17_tick(&crate::J17_ARRAY);
         let proto = Value::Obj(self.protos.array);
         Value::Obj(self.heap.alloc_obj(Object::array(elems, proto)))
+    }
+
+    /// New array à `length` posée, aucun élément (`new Array(n)`
+    /// — backing sparse, JS-C613).
+    pub(crate) fn new_array_len(&mut self, len: u32) -> Value {
+        crate::j17_tick(&crate::J17_ARRAY);
+        let proto = Value::Obj(self.protos.array);
+        Value::Obj(self.heap.alloc_obj(Object::array_len(len, proto)))
     }
 
     /// New native function value.
@@ -7835,7 +7843,7 @@ impl Engine {
                     }
                 }
                 let (arr_len, ta_view) = match self.heap.obj(id).map(|o| &o.kind) {
-                    Some(ObjKind::Array(elems)) => (Some(elems.len()), None),
+                    Some(ObjKind::Array(elems)) => (Some(elems.len() as usize), None),
                     Some(ObjKind::TypedArray {
                         ta,
                         buffer: Value::Obj(bid),
@@ -7859,7 +7867,7 @@ impl Engine {
                     // un `Vec<Value>` hors compteur (§B-59).
                     self.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
                     if let Some(ObjKind::Array(elems)) = self.heap.obj(id).map(|o| &o.kind) {
-                        return Ok(elems.clone());
+                        return Ok(elems.to_vec());
                     }
                     return Err(self.type_error("object is not iterable"));
                 }
@@ -10911,28 +10919,10 @@ impl Engine {
             }
             arr_new_len = Some(u as usize);
         }
-        // Garde d'alloc AVANT le `&mut` heap : écrire `a[2^32-1]=x`
-        // ou `a.length = 4e9` densifierait le Vec d'éléments (~64
-        // Gio) — `alloc_guard` refuse avant l'allocateur (JS-C55).
-        let grow = match self.heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::Array(elems)) => {
-                let need = if key == "length" {
-                    arr_new_len
-                } else {
-                    ai.map(|i| i + 1)
-                };
-                need.filter(|n| *n > elems.len())
-            }
-            _ => None,
-        };
-        if let Some(n) = grow {
-            // Sur le **total** résultant, pas le delta : un
-            // `arr[i]=v` séquentiel (d=1) laisse le Vec doubler
-            // en interne — reserve de ~4 Go dans UNE écriture
-            // (§B-59, drain GTM `b[k]=v`). Le backing est borné
-            // au même plafond que `array_ctor` (256 Mio).
-            self.alloc_guard(n.saturating_mul(std::mem::size_of::<Value>()))?;
-        }
+        // Plus de garde d'alloc ici (JS-C613) : `arr[i]=v` et
+        // `arr.length=n` ne densifient plus — les indices hauts
+        // vivent dans la map sparse et `len` est découplée du
+        // backing ; la croissance dense reste ≤ `DENSE_SLACK`.
         // Garde `props` (même fenêtre pré-emprunt) : une clé
         // nommée nouvelle fait `props.push` — le Vec double par
         // reserve+memcpy dans UNE écriture (`b[k]=v` drainée
@@ -10960,30 +10950,32 @@ impl Engine {
                 if o.elem_integrity & 4 != 0 {
                     return Ok(false);
                 }
-                let n = arr_new_len.unwrap_or(elems.len());
+                let n = arr_new_len.unwrap_or(elems.len() as usize) as u32;
                 // Réduction sous `seal`/`freeze` : la spec supprime
-                // les éléments un à un → élément non-configurable
-                // → `TypeError` abrupt (même en sloppy, `Set` jette).
-                if o.elem_integrity & 3 != 0 && n < elems.len() {
+                // les éléments `>= n` un à un → échec seulement si
+                // l'un est *présent* (les trous se suppriment
+                // librement) — même en sloppy, `Set` jette.
+                if o.elem_integrity & 3 != 0 && elems.any_present_from(n) {
                     return Err(self.type_error("cannot shrink a sealed array"));
                 }
-                elems.resize(n, Value::Hole);
+                // Croissance sparse : `len` posée, rien stocké.
+                elems.set_len(n);
                 return Ok(true);
             }
             if let Some(i) = ai {
-                // Élément gelé → écriture refusée (spec [[Set]]).
-                if o.elem_integrity & 2 != 0 && i < elems.len() {
+                // Index dans la length → élément gelé ou prop
+                // nouvelle sur non-extensible → refusé (spec).
+                if o.elem_integrity & 2 != 0 && i < elems.len() as usize {
                     return Ok(false);
                 }
                 // Ajout hors bornes → met à jour `length` — refusé
                 // si cible non-extensible ou `length` verrouillée.
-                if i >= elems.len() && (!o.extensible || o.elem_integrity & 4 != 0) {
+                if i >= elems.len() as usize && (!o.extensible || o.elem_integrity & 4 != 0) {
                     return Ok(false);
                 }
-                if i >= elems.len() {
-                    elems.resize(i + 1, Value::Hole);
-                }
-                elems[i] = v;
+                // Dense si proche du tronçon, map sparse sinon —
+                // `len` suit `i + 1` dans `Arr::set`.
+                elems.set(i as u32, v);
                 return Ok(true);
             }
         }
@@ -11236,8 +11228,9 @@ impl Engine {
                 }
                 if let Some(i) = array_index(key) {
                     // `seal`/`freeze` → éléments non-configurables,
-                    // la suppression est refusée (spec).
-                    if o.elem_integrity & 3 != 0 && i < elems.len() {
+                    // la suppression est refusée (spec) — trou ou
+                    // absent → supprimable librement.
+                    if o.elem_integrity & 3 != 0 && elems.has(i as u32) {
                         return false;
                     }
                     // `arguments` mappé : `delete` retire le
@@ -11247,9 +11240,7 @@ impl Engine {
                             *m = None;
                         }
                     }
-                    if i < elems.len() {
-                        elems[i] = Value::Hole;
-                    }
+                    elems.delete(i as u32);
                     return true;
                 }
             }
@@ -11312,10 +11303,8 @@ impl Engine {
         if let Some(o) = self.heap.obj(id) {
             match &o.kind {
                 ObjKind::Array(elems) => {
-                    for (i, v) in elems.iter().enumerate() {
-                        if !v.is_hole() {
-                            out.push(i.to_string());
-                        }
+                    for (i, _) in elems.present() {
+                        out.push(i.to_string());
                     }
                 }
                 ObjKind::TypedArray {
@@ -11348,10 +11337,8 @@ impl Engine {
         if let Some(o) = self.heap.obj(id) {
             match &o.kind {
                 ObjKind::Array(elems) => {
-                    for (i, v) in elems.iter().enumerate() {
-                        if !v.is_hole() {
-                            out.push(i.to_string());
-                        }
+                    for (i, _) in elems.present() {
+                        out.push(i.to_string());
                     }
                 }
                 ObjKind::TypedArray {
@@ -11414,7 +11401,7 @@ impl Engine {
                     return Err(self.type_error("proxy ownKeys trap must return an array"));
                 };
                 let elems = match self.heap.obj(arr).map(|o| &o.kind) {
-                    Some(ObjKind::Array(e)) => e.clone(),
+                    Some(ObjKind::Array(e)) => e.to_vec(),
                     _ => Vec::new(),
                 };
                 let mut out = Vec::new();
@@ -11623,8 +11610,8 @@ impl Engine {
                 };
             } else if let Some(o) = self.heap.obj(cid) {
                 if let ObjKind::Array(elems) = &o.kind {
-                    for (i, v) in elems.iter().enumerate() {
-                        if !v.is_hole() && seen.insert(i.to_string()) {
+                    for (i, _) in elems.present() {
+                        if seen.insert(i.to_string()) {
                             out.push(i.to_string());
                         }
                     }

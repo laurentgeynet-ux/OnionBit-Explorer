@@ -23,7 +23,7 @@ pub(crate) fn has_own(e: &Engine, id: ObjId, key: &str) -> bool {
         Some(o) => match &o.kind {
             ObjKind::Array(elems) => {
                 key == "length"
-                    || crate::interp::array_index(key).is_some_and(|i| i < elems.len())
+                    || crate::interp::array_index(key).is_some_and(|i| elems.has(i as u32))
                     || o.find(key).is_some()
             }
             // Index canonique d'une vue typée : own ssi index
@@ -185,7 +185,7 @@ pub(crate) fn flat_into(
                     // proto sans `unregisterActionMap`).
                     let kids = match e.heap.obj(id) {
                         Some(o) => match &o.kind {
-                            ObjKind::Array(v) => v.clone(),
+                            ObjKind::Array(v) => v.to_vec(),
                             _ => Vec::new(),
                         },
                         None => Vec::new(),
@@ -311,7 +311,7 @@ pub(crate) fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<
     // écrirait des indices fantômes sur les array-likes
     // (JS-C319). La borne `length` suit `take_elems` (4 M).
     let n = match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Array(v)) => v.len(),
+        Some(ObjKind::Array(v)) => v.len() as usize,
         _ => match e.get_prop(id, "length") {
             Some(v) => (e.to_number(v).unwrap_or(0.0).max(0.0) as usize).min(4_000_000),
             None => 0,

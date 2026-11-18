@@ -28,7 +28,7 @@ pub(crate) fn function_apply(e: &mut Engine, this: Value, args: &[Value]) -> JsR
         Value::Undefined | Value::Null => Vec::new(),
         Value::Obj(id) => {
             let arr_len = match e.heap.obj(id).map(|o| &o.kind) {
-                Some(ObjKind::Array(elems)) => Some(elems.len()),
+                Some(ObjKind::Array(elems)) => Some(elems.len() as usize),
                 _ => None,
             };
             if let Some(len) = arr_len {
@@ -39,7 +39,7 @@ pub(crate) fn function_apply(e: &mut Engine, this: Value, args: &[Value]) -> JsR
                 e.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
             }
             if let Some(ObjKind::Array(elems)) = e.heap.obj(id).map(|o| &o.kind) {
-                elems.clone()
+                elems.to_vec()
             } else {
                 let len = match e.get_prop_value(arr.clone(), "length")? {
                     Value::Num(n) => (n.max(0.0) as usize).min(1_000_000),

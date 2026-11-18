@@ -29,13 +29,13 @@ pub(crate) fn object_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
 pub(crate) fn array_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if args.len() == 1 {
         if let Value::Num(n) = args[0] {
-            if n >= 0.0 && n.fract() == 0.0 {
+            if n >= 0.0 && n.fract() == 0.0 && n <= u32::MAX as f64 {
                 // `Array(n)` crée un tableau *épars* (n trous —
-                // spec `ArrayCreate`), pas n `undefined`. Garde
-                // d'alloc : `n` hostile doit refuser, pas avorter
-                // le processus (JS-C55).
-                e.alloc_guard((n as usize).saturating_mul(std::mem::size_of::<Value>()))?;
-                return Ok(arr_of(e, vec![Value::Hole; n as usize]));
+                // spec `ArrayCreate`), pas n `undefined` : `len`
+                // posée, zéro élément stocké (JS-C613 — plus de
+                // `vec![Hole; n]` ni de garde d'alloc : rien ne
+                // se matérialise).
+                return Ok(e.new_array_len(n as u32));
             }
             return Err(e.range_error("invalid array length"));
         }

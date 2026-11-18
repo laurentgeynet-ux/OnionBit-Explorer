@@ -298,7 +298,7 @@ pub(crate) fn populate_sheet_rules(e: &mut Engine, sheet: ObjId, css: &str) -> J
     if let Some(arr) = crate::misc_apis::sheet_rules_obj(e, Value::Obj(sheet)) {
         if let Some(o) = e.heap.obj_mut(arr) {
             if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
-                *elems = rules;
+                *elems = crate::heap::Arr::from_vec(rules);
             }
         }
     }

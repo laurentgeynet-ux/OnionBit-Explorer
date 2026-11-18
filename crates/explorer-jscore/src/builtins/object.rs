@@ -747,49 +747,70 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
     if key == "length" {
         let is_arr = matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)));
         if is_arr {
-            let (integ, len) =
-                e.heap
-                    .obj(id)
-                    .map(|o| (o.elem_integrity, 0usize))
-                    .map_or((0, 0), |(i, _)| {
-                        let l = match e.heap.obj(id).map(|o| &o.kind) {
-                            Some(ObjKind::Array(elems)) => elems.len(),
-                            _ => 0,
-                        };
-                        (i, l)
-                    });
-            if has_enumerable && enumerable || has_configurable && configurable {
-                return Ok(false);
-            }
-            if integ & 4 != 0 {
-                if has_writable && writable {
-                    return Ok(false);
+            // Spec `ArraySetLength` : `[[Value]]` est coercée/
+            // validée AVANT toute vérification de compatibilité
+            // du descripteur — `valueOf` s'exécute deux fois
+            // (`ToUint32` puis `ToNumber`), `TypeError` propage,
+            // divergence → `RangeError`.
+            let new_len = if has_value {
+                let u = crate::value::to_uint32(e.to_number(v.clone())?);
+                let num = e.to_number(v.clone())?;
+                #[allow(clippy::float_cmp)]
+                if u as f64 != num {
+                    return Err(e.range_error("Invalid array length"));
                 }
-                if has_value {
-                    let n = match v {
-                        Value::Num(x) if x >= 0.0 && x.fract() == 0.0 => x as usize,
-                        _ => return Err(e.range_error("invalid array length")),
-                    };
-                    if n != len {
-                        return Ok(false);
-                    }
+                Some(u)
+            } else {
+                None
+            };
+            // `oldLenDesc` est lu APRÈS la coercition : `valueOf`
+            // peut avoir muté l'array (verrouillé `length`,
+            // scellé, redimensionné) — l'état post-coercion
+            // gouverne les refus (`define-own-prop-length-
+            // coercion-order.js`).
+            let (integ, len) = e.heap.obj(id).map_or((0, 0), |o| {
+                let l = match &o.kind {
+                    ObjKind::Array(elems) => elems.len() as usize,
+                    _ => 0,
+                };
+                (o.elem_integrity, l)
+            });
+            if integ & 4 != 0 {
+                // `length` verrouillée : valeur modifiée,
+                // `writable:true`, accessor, `e`/`c` → refus.
+                if has_writable && writable
+                    || has_acc
+                    || (has_enumerable && enumerable)
+                    || (has_configurable && configurable)
+                    || new_len.is_some_and(|n| n as usize != len)
+                {
+                    return Ok(false);
                 }
                 return Ok(true);
             }
-            if has_value {
-                let n = match v {
-                    Value::Num(x) if x >= 0.0 && x.fract() == 0.0 => x as usize,
-                    _ => return Err(e.range_error("invalid array length")),
-                };
-                if integ & 3 != 0 && n < len {
-                    return Ok(false);
+            // Compatibilité du descripteur : `length` est data
+            // `{¬e,¬c}` — accessor, `enumerable`/`configurable`
+            // `true` → refus (`Ok(false)` → `TypeError`).
+            if has_acc || (has_enumerable && enumerable) || (has_configurable && configurable) {
+                return Ok(false);
+            }
+            if let Some(n) = new_len {
+                // Scellé : la réduction supprime les éléments
+                // `>= n` — échec seulement si l'un est *présent*
+                // (les trous se suppriment librement, spec).
+                if integ & 3 != 0 && (n as usize) < len {
+                    let blocked = e.heap.obj(id).is_some_and(|o| match &o.kind {
+                        ObjKind::Array(a) => a.any_present_from(n),
+                        _ => false,
+                    });
+                    if blocked {
+                        return Ok(false);
+                    }
                 }
-                // Garde d'alloc avant densification (JS-C55).
-                if n > len {
-                    e.alloc_guard((n - len).saturating_mul(std::mem::size_of::<Value>()))?;
-                }
+                // Croissance sparse : aucune densification — `len`
+                // est découplée du backing (JS-C613).
                 if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
-                    elems.resize(n, Value::Hole);
+                    elems.set_len(n);
                 }
             }
             if has_writable && !writable {
@@ -808,7 +829,11 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                 .obj(id)
                 .map(|o| {
                     if let ObjKind::Array(elems) = &o.kind {
-                        (o.elem_integrity, elems.len(), elems.get(i).cloned())
+                        (
+                            o.elem_integrity,
+                            elems.len() as usize,
+                            elems.get(i).cloned(),
+                        )
                     } else {
                         (0, 0, None)
                     }
@@ -994,8 +1019,12 @@ pub(crate) fn object_get_own_property_descriptors(
                 Some(o) => {
                     let mut ks: Vec<String> = o.props.iter().map(|(k, _)| k.to_string()).collect();
                     if let ObjKind::Array(elems) = &o.kind {
-                        ks.splice(0..0, (0..elems.len()).map(|i| i.to_string()));
-                        ks.insert(elems.len(), "length".into());
+                        // Éléments *présents* seuls — les trous ne
+                        // sont pas des clés propres (JS-C613 :
+                        // jamais `0..len` sur un backing sparse).
+                        let nk = elems.present().count();
+                        ks.splice(0..0, elems.present().map(|(i, _)| i.to_string()));
+                        ks.insert(nk, "length".into());
                     }
                     ks
                 }

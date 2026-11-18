@@ -405,8 +405,8 @@ impl Heap {
             trace_env(env, out, envs);
         }
         match &o.kind {
-            ObjKind::Array(elems) => {
-                for v in elems {
+            ObjKind::Array(arr) => {
+                for v in arr.stored_vals() {
                     push_value(out, v);
                 }
             }
@@ -902,9 +902,8 @@ fn cell_bytes(data: &CellData) -> usize {
                 + match &o.kind {
                     ObjKind::ByteBuf(b) => b.len(),
                     ObjKind::Blob { data, .. } => data.len(),
-                    ObjKind::Array(v) | ObjKind::Set(v) => {
-                        v.capacity() * std::mem::size_of::<Value>()
-                    }
+                    ObjKind::Array(a) => a.cell_bytes(),
+                    ObjKind::Set(v) => v.capacity() * std::mem::size_of::<Value>(),
                     ObjKind::Map(v) => {
                         v.capacity() * std::mem::size_of::<(Value, Value)>()
                     }
@@ -1255,13 +1254,322 @@ pub enum TempData {
     Duration { f: [i64; 10] },
 }
 
+/// Slack de croissance dense d'un [`Arr`] : écrire l'index
+/// `dense.len() + d` avec `d <= DENSE_SLACK` étend le Vec (les
+/// positions intermédiaires deviennent des `Hole` stockés) ;
+/// au-delà, l'élément part dans la map sparse — `a[2**30] = x`
+/// ne densifie pas ~16 Gio.
+const DENSE_SLACK: usize = 1024;
+
+/// Backing d'array dense + sparse (JS-C613 tranche 2).
+///
+/// Invariants :
+/// - `dense` couvre les indices bas (`dense[i] == Hole` = absent),
+///   `hi` les indices présents au-delà du slack — jamais les deux
+///   pour un même index : `hi` ne contient que des clés
+///   `> dense.len()` (rétabli à chaque croissance dense).
+/// - `len` = `length` JS logique, découplée du stockage :
+///   `new Array(2**32-1)` n'alloue rien, `a.length = n` ne
+///   densifie jamais, les indices ≥ slack vivent dans la map.
+#[derive(Debug, Default, Clone)]
+pub struct Arr {
+    dense: Vec<Value>,
+    hi: Option<std::collections::BTreeMap<u32, Value>>,
+    len: u32,
+}
+
+impl Arr {
+    /// Backing dense complet — `len = dense.len()`.
+    pub fn from_vec(dense: Vec<Value>) -> Self {
+        let len = dense.len() as u32;
+        Arr {
+            dense,
+            hi: None,
+            len,
+        }
+    }
+
+    /// `new Array(n)` / `a.length = n` : length posée, aucun
+    /// élément stocké (trous non matérialisés).
+    pub fn with_len(len: u32) -> Self {
+        Arr {
+            dense: Vec::new(),
+            hi: None,
+            len,
+        }
+    }
+
+    /// `length` JS logique (`u32` — max 2**32-1).
+    pub fn len(&self) -> u32 {
+        self.len
+    }
+
+    /// Aucun élément *présent* (ni dense non-Hole, ni sparse).
+    pub fn is_empty(&self) -> bool {
+        self.dense.iter().all(super::value::Value::is_hole)
+            && self
+                .hi
+                .as_ref()
+                .is_none_or(std::collections::BTreeMap::is_empty)
+    }
+
+    /// Élément à l'index `i` — `Some(Hole)` si tronçon dense
+    /// réservé mais absent, `None` au-delà du stockage.
+    pub fn get(&self, i: usize) -> Option<&Value> {
+        if let Some(v) = self.dense.get(i) {
+            return Some(v);
+        }
+        self.hi.as_ref()?.get(&(i as u32))
+    }
+
+    /// Élément *présent* à `i` (non-Hole).
+    pub fn has(&self, i: u32) -> bool {
+        self.get(i as usize).is_some_and(|v| !v.is_hole())
+    }
+
+    /// Au moins un élément présent à un index `>= n` — utilisé
+    /// par `ArraySetLength` pour le refus de réduction sur
+    /// array scellé/figé (les trous se suppriment librement).
+    pub fn any_present_from(&self, n: u32) -> bool {
+        if self.dense.iter().skip(n as usize).any(|v| !v.is_hole()) {
+            return true;
+        }
+        self.hi
+            .as_ref()
+            .is_some_and(|h| h.range(n..).next().is_some())
+    }
+
+    /// `[[Set]]` index canonique : dense si proche de la
+    /// tronçonne existante, map sinon ; `len` suit `i + 1`.
+    pub fn set(&mut self, i: u32, v: Value) {
+        let iu = i as usize;
+        if iu < self.dense.len() {
+            self.dense[iu] = v;
+        } else if iu - self.dense.len() <= DENSE_SLACK {
+            self.dense.resize(iu + 1, Value::Hole);
+            // Réabsorption : les clés de la map passées sous le
+            // bord dense migrent (invariant `hi > dense.len()`).
+            if let Some(h) = &mut self.hi {
+                while let Some((&k, _)) = h.iter().next() {
+                    if (k as usize) > iu {
+                        break;
+                    }
+                    let val = h.remove(&k).unwrap_or(Value::Hole);
+                    self.dense[k as usize] = val;
+                }
+            }
+            self.dense[iu] = v;
+        } else {
+            self.hi
+                .get_or_insert_with(std::collections::BTreeMap::new)
+                .insert(i, v);
+        }
+        self.len = self.len.max(i.saturating_add(1));
+    }
+
+    /// `ArraySetLength` : `n > dense.len()` ne stocke rien ;
+    /// `n < dense.len()` tronque le dense ET coupe la map à `n`
+    /// (les clés `>= n` disparaissent — spec : les éléments
+    /// supprimés à la réduction).
+    pub fn set_len(&mut self, n: u32) {
+        self.len = n;
+        self.dense.truncate(n as usize);
+        if let Some(h) = &mut self.hi {
+            h.split_off(&n);
+            if h.is_empty() {
+                self.hi = None;
+            }
+        }
+    }
+
+    /// Ajout en queue (`push`/`concat`) — l'index `len` prend
+    /// le chemin dense/sparse selon le slack.
+    pub fn push(&mut self, v: Value) {
+        let i = self.len;
+        self.set(i, v);
+    }
+
+    /// `a.push(...args)` : éléments à `len..len+args.len()`.
+    pub fn extend(&mut self, vs: &[Value]) {
+        for v in vs {
+            self.push(v.clone());
+        }
+    }
+
+    /// `pop` : supprime le dernier index logique, `len - 1`.
+    /// `Hole`/absent → `undefined` (comportement `Get`).
+    pub fn pop(&mut self) -> Value {
+        if self.len == 0 {
+            return Value::Undefined;
+        }
+        let i = self.len - 1;
+        let v = self.get(i as usize).cloned().unwrap_or(Value::Hole);
+        self.delete(i);
+        self.len -= 1;
+        v
+    }
+
+    /// `[[Delete]]` sur index : trou dense (`Hole`) ou retrait
+    /// de la map — `len` inchangée (spec).
+    pub fn delete(&mut self, i: u32) {
+        if (i as usize) < self.dense.len() {
+            self.dense[i as usize] = Value::Hole;
+        } else if let Some(h) = &mut self.hi {
+            h.remove(&i);
+            if h.is_empty() {
+                self.hi = None;
+            }
+        }
+    }
+
+    /// Itère les éléments *présents* en ordre d'index —
+    /// énumération spec (`own_keys`, `Object.keys`, `for-in`,
+    /// `JSON`) : jamais de densification des trous.
+    pub fn present(&self) -> impl Iterator<Item = (u32, &Value)> + '_ {
+        let d = self
+            .dense
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !v.is_hole())
+            .map(|(i, v)| (i as u32, v));
+        let h = self.hi.iter().flat_map(|m| m.iter()).map(|(k, v)| (*k, v));
+        d.chain(h)
+    }
+
+    /// Toutes les valeurs stockées (trous `Hole` compris) —
+    /// traçage GC : `Hole` n'est jamais une référence.
+    pub fn stored_vals(&self) -> impl Iterator<Item = &Value> + '_ {
+        self.dense
+            .iter()
+            .chain(self.hi.iter().flat_map(|m| m.values()))
+    }
+
+    /// Matérialise `0..len` (`Hole` aux absents) — borne
+    /// `alloc_guard` à la charge de l'appelant.
+    pub fn to_vec(&self) -> Vec<Value> {
+        let mut v = Vec::with_capacity(self.dense.len().min(self.len as usize));
+        v.resize(self.len as usize, Value::Hole);
+        for (i, val) in self.dense.iter().enumerate() {
+            v[i] = val.clone();
+        }
+        if let Some(h) = &self.hi {
+            for (&k, val) in h {
+                v[k as usize] = val.clone();
+            }
+        }
+        v
+    }
+
+    /// Réabsorbe le backing — `take_elems` : retourne la
+    /// matérialisation `0..len` et laisse un backing vide.
+    pub fn take_vec(&mut self) -> Vec<Value> {
+        let old = std::mem::take(self);
+        old.to_vec()
+    }
+
+    /// `reverse` : les présents d'index `i` passent à `len-1-i`,
+    /// les trous restent absents (spec).
+    pub fn reverse(&mut self) {
+        self.dense.reverse();
+        if let Some(h) = self.hi.take() {
+            if !h.is_empty() {
+                let n = self.len;
+                self.hi = Some(h.into_iter().map(|(k, v)| (n - 1 - k, v)).collect());
+            }
+        }
+    }
+
+    /// Octets de stockage éléments — `cell_bytes` : capacité
+    /// dense + entrées de la map.
+    pub fn cell_bytes(&self) -> usize {
+        self.dense.capacity() * std::mem::size_of::<Value>()
+            + self
+                .hi
+                .as_ref()
+                .map_or(0, |h| h.len() * std::mem::size_of::<(u32, Value)>())
+    }
+
+    /// Référence mutable sur l'élément `i` — écriture en place
+    /// (slots de résolution `Promise.all`…), dense ou map.
+    pub fn get_mut(&mut self, i: usize) -> Option<&mut Value> {
+        if i < self.dense.len() {
+            return self.dense.get_mut(i);
+        }
+        self.hi.as_mut()?.get_mut(&(i as u32))
+    }
+
+    /// Valeurs des éléments *présents* (trous exclus) —
+    /// itérateur de lecture pour les consumers d'éléments.
+    pub fn vals(&self) -> impl Iterator<Item = &Value> + '_ {
+        self.present().map(|(_, v)| v)
+    }
+
+    /// `insert(at, v)` — décale les indices `>= at` de +1
+    /// (dense et map), `len` suit. Coût map : O(présents ≥ at).
+    pub fn insert(&mut self, at: usize, v: Value) {
+        if let Some(h) = self.hi.take() {
+            if !h.is_empty() {
+                self.hi = Some(
+                    h.into_iter()
+                        .map(|(k, val)| (if (k as usize) >= at { k + 1 } else { k }, val))
+                        .collect(),
+                );
+            }
+        }
+        if at <= self.dense.len() {
+            self.dense.insert(at, v);
+        } else {
+            self.set(at as u32, v);
+        }
+        self.len = self.len.saturating_add(1);
+    }
+
+    /// `remove(at)` — retire l'index, décale `> at` de −1
+    /// (dense et map), `len - 1`. Renvoie la valeur (Hole →
+    /// `undefined` à la charge de l'appelant).
+    pub fn remove_at(&mut self, at: usize) -> Value {
+        let out = if at < self.dense.len() {
+            self.dense.remove(at)
+        } else {
+            self.hi
+                .as_mut()
+                .and_then(|h| h.remove(&(at as u32)))
+                .unwrap_or(Value::Hole)
+        };
+        if let Some(h) = self.hi.take() {
+            if !h.is_empty() {
+                self.hi = Some(
+                    h.into_iter()
+                        .map(|(k, val)| {
+                            if (k as usize) > at {
+                                (k - 1, val)
+                            } else {
+                                (k, val)
+                            }
+                        })
+                        .collect(),
+                );
+            }
+        }
+        self.len = self.len.saturating_sub(1);
+        out
+    }
+
+    /// Vide tous les éléments, `len` → 0.
+    pub fn clear(&mut self) {
+        self.dense.clear();
+        self.hi = None;
+        self.len = 0;
+    }
+}
+
 pub enum ObjKind {
     /// `Temporal.*` — slots internes [`TempData`] (JS-C22).
     Temp(TempData),
     /// Plain `{}`.
     Ordinary,
     /// Dense array elements; `length` and numeric indices are derived.
-    Array(Vec<Value>),
+    Array(Arr),
     /// Callable.
     Fun(Fun),
     /// Host-provided object (DOM node, `document`, style map…) —
@@ -1795,7 +2103,12 @@ impl Object {
 
     /// New array.
     pub fn array(elems: Vec<Value>, proto: Value) -> Self {
-        Object::blank(proto, ObjKind::Array(elems))
+        Object::blank(proto, ObjKind::Array(Arr::from_vec(elems)))
+    }
+
+    /// New sparse-length array (`new Array(n)` — aucun élément).
+    pub fn array_len(len: u32, proto: Value) -> Self {
+        Object::blank(proto, ObjKind::Array(Arr::with_len(len)))
     }
 
     /// New callable.

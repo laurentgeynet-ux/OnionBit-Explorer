@@ -1392,7 +1392,7 @@ fn headers_pairs(e: &mut Engine, v: Value) -> JsResult<Vec<(String, String)>> {
         return Ok(Vec::new());
     };
     let arr = match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Array(elems)) => Some(elems.clone()),
+        Some(ObjKind::Array(elems)) => Some(elems.to_vec()),
         _ => None,
     };
     if let Some(elems) = arr {
@@ -1522,7 +1522,7 @@ fn set_cookie_list(e: &Engine, id: crate::value::ObjId) -> Vec<String> {
         return Vec::new();
     };
     match e.heap.obj(aid).map(|o| &o.kind) {
-        Some(ObjKind::Array(elems)) => elems.iter().filter_map(Engine::heap_string_of).collect(),
+        Some(ObjKind::Array(elems)) => elems.vals().filter_map(Engine::heap_string_of).collect(),
         _ => Vec::new(),
     }
 }

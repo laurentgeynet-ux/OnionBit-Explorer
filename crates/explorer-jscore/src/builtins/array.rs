@@ -60,13 +60,13 @@ pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     // une boucle `a.push(x)` commet ~4 Go de reserve dans une
     // seule op native (même classe que §B-59 `b[k]=v`).
     let cur_len = match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Array(v)) => v.len(),
+        Some(ObjKind::Array(v)) => v.len() as usize,
         _ => 0,
     };
     e.alloc_guard((cur_len + args.len()).saturating_mul(std::mem::size_of::<Value>()))?;
     let n = if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
-            v.extend_from_slice(args);
+            v.extend(args);
             v.len()
         } else {
             0
@@ -108,6 +108,24 @@ pub(crate) fn array_pop(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<V
         e.delete_prop(id, &key);
         let _ = e.set_prop(id, "length", Value::Num(last));
         return Ok(v);
+    }
+    // Chemin sparse O(1) (JS-C613) : `pop` = `Get(len-1)` +
+    // `Delete` + `len-1` — un backing sparse de length géante
+    // refuserait la matérialisation `take_elems` (spec : O(1)).
+    let big = e
+        .heap
+        .obj(id)
+        .is_some_and(|o| matches!(&o.kind, ObjKind::Array(a) if a.len() > 1_000_000));
+    if big {
+        let integ = e.heap.obj(id).map_or(0, |o| o.elem_integrity);
+        if integ & 3 != 0 {
+            return Err(e.type_error("cannot pop a sealed array"));
+        }
+        if let Some(o) = e.heap.obj_mut(id) {
+            if let ObjKind::Array(a) = &mut o.kind {
+                return Ok(a.pop().unhole());
+            }
+        }
     }
     let mut elems = take_elems(e, id)?;
     let orig = elems.clone();

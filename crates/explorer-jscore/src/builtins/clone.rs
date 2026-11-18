@@ -156,13 +156,19 @@ pub(crate) fn clone_deep(
                 return Err(e.type_error("structuredClone: bad array"));
             };
             seen.push((id, cid));
-            let elems = match e.heap.obj(id).map(|o| &o.kind) {
-                Some(ObjKind::Array(elems)) => elems.clone(),
-                _ => Vec::new(),
+            // Sparse-préservant (JS-C613) : seuls les éléments
+            // présents sont clonés — `to_vec` sur un backing
+            // sparse 4 G matérialiserait des trilliards de trous.
+            let (alen, items) = match e.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Array(a)) => (
+                    a.len(),
+                    a.present().map(|(k, v)| (k, v.clone())).collect::<Vec<_>>(),
+                ),
+                _ => (0, Vec::new()),
             };
-            let mut out = Vec::with_capacity(elems.len());
-            for v in elems {
-                out.push(clone_deep(e, v, seen, depth + 1)?);
+            let mut out = crate::heap::Arr::with_len(alen);
+            for (k, v) in items {
+                out.set(k, clone_deep(e, v, seen, depth + 1)?);
             }
             if let Some(o) = e.heap.obj_mut(cid) {
                 if let ObjKind::Array(el) = &mut o.kind {

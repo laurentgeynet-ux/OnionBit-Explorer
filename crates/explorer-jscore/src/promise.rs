@@ -1548,7 +1548,7 @@ fn iter_values(e: &mut Engine, v: Value) -> JsResult<Vec<Value>> {
     };
     if let Some(o) = e.heap.obj(id) {
         if let ObjKind::Array(elems) = &o.kind {
-            return Ok(elems.clone());
+            return Ok(elems.to_vec());
         }
     }
     // Array-like: length + numeric props.
@@ -2005,7 +2005,7 @@ fn promise_any_reject(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
     if rem <= 0.0 {
         if let (Value::Obj(tid), Value::Obj(rid)) = (target, errors) {
             let errs = match e.heap.obj(rid).map(|o| &o.kind) {
-                Some(ObjKind::Array(elems)) => elems.clone(),
+                Some(ObjKind::Array(elems)) => elems.to_vec(),
                 _ => Vec::new(),
             };
             let err = aggregate(e, errs);

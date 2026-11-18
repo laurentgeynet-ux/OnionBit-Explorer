@@ -308,7 +308,7 @@ impl Host for MutObsHost {
                 let attribute_filter = match opt(e, opts.clone(), "attributeFilter") {
                     Value::Obj(o) => match e.heap.obj(o).map(|ob| &ob.kind) {
                         Some(ObjKind::Array(elems)) => {
-                            let elems = elems.clone();
+                            let elems = elems.to_vec();
                             Some(
                                 elems
                                     .iter()

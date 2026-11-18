@@ -2754,7 +2754,7 @@ pub(crate) fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> 
     };
     let at = {
         if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
-            let at = want.min(elems.len());
+            let at = want.min(elems.len() as usize);
             elems.insert(at, Value::Obj(rule));
             at
         } else {
@@ -2774,8 +2774,8 @@ pub(crate) fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> 
         return Err(e.type_error("deleteRule: detached"));
     };
     if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
-        if idx < elems.len() {
-            elems.remove(idx);
+        if idx < elems.len() as usize {
+            elems.remove_at(idx);
         }
     }
     Ok(Value::Undefined)

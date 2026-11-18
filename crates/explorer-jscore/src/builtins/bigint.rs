@@ -689,7 +689,7 @@ pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> J
     let mark_time = |e: &mut Engine, this: Value, nm: &str| -> Option<f64> {
         let arr = perf_slot(e, this, PERF_MARKS)?;
         let elems = match e.heap.obj(arr).map(|o| &o.kind) {
-            Some(ObjKind::Array(elems)) => elems.clone(),
+            Some(ObjKind::Array(elems)) => elems.to_vec(),
             _ => return None,
         };
         for m in elems {
@@ -751,7 +751,7 @@ fn perf_clear_slot(e: &mut Engine, this: Value, slot: &str, a: &[Value]) -> JsRe
     };
     if let Some(arr) = perf_slot(e, this, slot) {
         let cur: Vec<Value> = match e.heap.obj(arr).map(|o| &o.kind) {
-            Some(ObjKind::Array(elems)) => elems.clone(),
+            Some(ObjKind::Array(elems)) => elems.to_vec(),
             _ => Vec::new(),
         };
         let keep: Vec<Value> = match &filter_nm {
@@ -763,7 +763,7 @@ fn perf_clear_slot(e: &mut Engine, this: Value, slot: &str, a: &[Value]) -> JsRe
         };
         if let Some(o) = e.heap.obj_mut(arr) {
             if let ObjKind::Array(elems) = &mut o.kind {
-                *elems = keep;
+                *elems = crate::heap::Arr::from_vec(keep);
             }
         }
     }
@@ -792,7 +792,7 @@ fn perf_collect(e: &mut Engine, this: Value, slot: &str) -> Vec<Value> {
         return Vec::new();
     };
     match e.heap.obj(arr).map(|o| &o.kind) {
-        Some(ObjKind::Array(elems)) => elems.clone(),
+        Some(ObjKind::Array(elems)) => elems.to_vec(),
         _ => Vec::new(),
     }
 }

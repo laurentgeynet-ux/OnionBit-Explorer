@@ -1806,15 +1806,15 @@ fn take_elems(e: &mut Engine, id: ObjId) -> JsResult<Vec<Value>> {
     // burst §B-59 (dispatcher `ib` GTM : `b.slice(1)`).
     let len = match e.heap.obj(id) {
         Some(o) => match &o.kind {
-            ObjKind::Array(v) => v.len(),
+            ObjKind::Array(v) => v.len() as usize,
             _ => 0,
         },
         None => 0,
     };
-    e.alloc_guard(len * std::mem::size_of::<Value>())?;
+    e.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
     Ok(match e.heap.obj_mut(id) {
         Some(o) => match &mut o.kind {
-            ObjKind::Array(v) => std::mem::take(v),
+            ObjKind::Array(v) => v.take_vec(),
             _ => Vec::new(),
         },
         None => Vec::new(),
@@ -1847,7 +1847,7 @@ fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) -> JsResult<()> {
     }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
-            *v = elems;
+            *v = crate::heap::Arr::from_vec(elems);
         }
     }
     Ok(())

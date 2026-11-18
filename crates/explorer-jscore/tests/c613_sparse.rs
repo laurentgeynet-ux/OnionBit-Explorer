@@ -69,17 +69,13 @@ fn index_au_dela_du_max_nomme() {
     assert_eq!(out, "0,1,true,4294967295,true");
 }
 
-/// `4294967294` reste un index valide (2**32-2) — écriture sur
-/// un array existant à petite capacité via prop nommée impossible ;
-/// on vérifie la borne via `array_index` indirectement : la clé
-/// doit entrer dans le chemin index (length s'ajuste) ou rester
-/// nommée — ici la garde d'alloc refuse la densification.
+/// `4294967294` reste un index valide (2**32-2) — écriture
+/// sparse : `length` passe à 4294967295 sans densification.
 #[test]
 fn index_max_valide() {
-    // `a[4294967294]=x` exige length=4294967295 : sparse à
-    // l'atterrissage C613 — aujourd'hui `alloc_guard` RangeError.
-    let out = run("let a=[];try{a[4294967294]=1;'no:'+a.length}catch(e){e instanceof RangeError}");
-    assert_eq!(out, "true");
+    let out =
+        run("let a=[];try{a[4294967294]=1;'ok:'+a.length+':'+a[4294967294]}catch(e){'err:'+e}");
+    assert_eq!(out, "ok:4294967295:1");
 }
 
 /// La valeur `length` négative en string passe aussi par
@@ -90,12 +86,11 @@ fn length_string_negative() {
     assert_eq!(out, "true");
 }
 
-// ---- Contrat C613-représentation (à activer) ----
+// ---- Contrat C613-représentation ----
 
 /// `a.length = 4294967295` réussit sans allocation : length
 /// découplée du backing, relue à l'identique.
 #[test]
-#[ignore = "C613 représentation : len découplée du Vec"]
 fn length_max_sparse() {
     let out = run("let a=[];a.length=4294967295;a.length");
     assert_eq!(out, "4294967295");
@@ -104,7 +99,6 @@ fn length_max_sparse() {
 /// `new Array(4294967295)` : length géante, zéro élément, tout
 /// trou — `'0' in a` faux, `a[0]` undefined.
 #[test]
-#[ignore = "C613 représentation : ctor sparse sans densification"]
 fn ctor_geant_trous() {
     let out = run(
         "let a=new Array(4294967295);[a.length,'0' in a,a[0]===undefined,Object.keys(a).length].join(',')",
@@ -116,7 +110,6 @@ fn ctor_geant_trous() {
 /// sans densifier — `keys`/`for-in`/JSON ne parcourent que le
 /// seul élément réel.
 #[test]
-#[ignore = "C613 représentation : write haut ne densifie pas"]
 fn index_haut_sans_densifier() {
     let out = run("let a=[];a[1073741824]='x';let n=0;for(let k in a)n++;\
          [a.length,a[1073741824],n,Object.keys(a).join('.'),'0' in a,a[0]===undefined].join(',')");
@@ -126,7 +119,6 @@ fn index_haut_sans_densifier() {
 /// Réduction sparse : `length` descend sous les éléments réels
 /// → ceux-ci disparaissent, y compris dans la map sparse.
 #[test]
-#[ignore = "C613 représentation : shrink traverse dense+sparse"]
 fn shrink_traverse_sparse() {
     let out = run("let a=[1,2];a[100000]='x';a.length=3;\
          [a.length,a[0],a[1],'100000' in a,Object.keys(a).join('.')].join(',')");
@@ -135,9 +127,17 @@ fn shrink_traverse_sparse() {
 
 /// `delete` sur index sparse + `in` / lecture traversent la map.
 #[test]
-#[ignore = "C613 représentation : delete sur index sparse"]
 fn delete_index_sparse() {
     let out = run("let a=[];a[2**30]='x';delete a[2**30];\
          ['x'===a[2**30]?'bad':'ok',2**30 in a,a.length].join(',')");
     assert_eq!(out, "ok,false,1073741825");
+}
+
+/// `a[4294967294]=x` (index max valide) → sparse : length =
+/// 4294967295, élément présent, clés non-densifiées.
+#[test]
+fn index_max_sparse() {
+    let out =
+        run("let a=[];a[4294967294]=1;[a.length,a[4294967294],Object.keys(a).length].join(',')");
+    assert_eq!(out, "4294967295,1,1");
 }

@@ -14996,20 +14996,23 @@ chaque gain rapporté contre les **deux** archétypes.
   `*-from-ctor-realm`), brand-check privés cross-realm,
   `eval-body-proto-realm`, `$262.agent`/`ShadowRealm`.
 
-- [ ] **JS-C613 — arrays sparse** (`interp/{mod,ops}.rs` +
-  `heap.rs` + `tests/c613_sparse.rs`). **Tranche 1/2 livrée —
-  règles de validation** : `ArraySetLength` spec (`length` =
-  `ToNumber` puis `ToUint32`, divergence → `RangeError` — deux
-  appels observables, `valueOf` avant le check writable) ;
-  `array_index` borné à 2³²−2 (`"4294967295"` = prop nommée).
-  Filtre `built-ins/Array/length` : **32 → 48/62**.
-  **Tranche 2 — représentation** (contrat = les 5 `#[ignore]`
-  de la gate) : `ObjKind::Array` dense+sparse, `len` découplée
-  du `Vec` — `a.length=2³²−1`/`new Array(4294967295)` sans
-  alloc, indices hauts en `BTreeMap`, shrink/delete traversants,
-  énumération/join non-densifiants, GC/`cell_bytes` couvrant la
-  map. **Reste à trier dans la tranche 2** : 8 échecs
-  `defineProperty(arr,"length",…)` (chemin exotique
-  `[[DefineOwnProperty]]` — `writable`→TypeError, `get` jamais
-  lu, ordre RangeError/TypeError). Cible élargie : ~80 fichiers
-  corpus à constantes 2³² + les 6 `zip` résiduels.
+- [x] **JS-C613 — arrays sparse** (`interp/{mod,ops}.rs` +
+  `heap.rs` + `builtins/*` + `tests/c613_sparse.rs`). **Livrée
+  en deux tranches.** Tranche 1 — règles de validation :
+  `ArraySetLength` spec (`length` = `ToNumber` puis `ToUint32`,
+  divergence → `RangeError` — deux appels observables,
+  `valueOf` avant le check writable) ; `array_index` borné à
+  2³²−2 (`"4294967295"` = prop nommée). Tranche 2 —
+  représentation : `ObjKind::Array` = `Arr { dense, hi:
+  BTreeMap<u32,Value>, len:u32 }` — `len` découplée du backing
+  (`a.length=2³²−1`/`new Array(4294967295)`/`a[2³⁰]=x` sans
+  alloc), indices hauts en map triée, shrink/delete traversants,
+  énumération/`join` non-densifiants (`present()` — les trous
+  ne sont plus matérialisés), GC/`cell_bytes` couvrant la map,
+  deep-clone préservant la sparsité. **`defineProperty
+  (arr,"length")` à l'ordre spec** : coercition `[[Value]]`
+  avant lecture de `oldLenDesc` — l'état post-coercion gouverne
+  (`valueOf` verrouillant `length` → `TypeError`/`false`).
+  **Mesures** : filtre `built-ins/Array/length` 32 → **62/62**,
+  cluster `Iterator.zip` → **164/164** (goulot confirmé),
+  gate `c613_sparse` **11/11**, lib 54/54, hostile 12/12.
