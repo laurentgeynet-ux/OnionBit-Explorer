@@ -975,27 +975,62 @@ impl Engine {
                                 break;
                             }
                             let Value::Obj(iid) = it else { break };
-                            let Some(nf) = self.get_prop(iid, "next") else {
-                                break;
+                            // Spec `GetIterator`/`IteratorStep` +
+                            // `IteratorValue` : `next` lu par Get,
+                            // résultat non-objet → `TypeError`,
+                            // getters `done`/`value` propagés —
+                            // `get_prop` data-only avalait un
+                            // `get done() { throw }` → boucle
+                            // infinie (JS-C603). Toute complétion
+                            // abrupte de la boucle passe par
+                            // `iterator_close` (spec).
+                            let nf = match self.get_prop_value(Value::Obj(iid), "next") {
+                                Ok(nf) if self.is_callable(nf.clone()) => nf,
+                                Ok(_) => {
+                                    let e = self.type_error("iterator next is not callable");
+                                    let _ = self.iterator_close(&it);
+                                    out = Err(e);
+                                    break;
+                                }
+                                Err(e) => {
+                                    let _ = self.iterator_close(&it);
+                                    out = Err(e);
+                                    break;
+                                }
                             };
-                            if !self.is_callable(nf.clone()) {
-                                break;
-                            }
                             let r = match self.call_value(nf, it.clone(), &[]) {
                                 Err(e) => {
+                                    let _ = self.iterator_close(&it);
                                     out = Err(e);
                                     break;
                                 }
                                 Ok(r) => r,
                             };
-                            let Value::Obj(rid) = r else { break };
-                            if self
-                                .get_prop(rid, "done")
-                                .is_some_and(|d| self.to_boolean(d))
-                            {
+                            let Value::Obj(rid) = r else {
+                                let e = self.type_error("iterator result is not an object");
+                                let _ = self.iterator_close(&it);
+                                out = Err(e);
+                                break;
+                            };
+                            let done = match self.get_prop_value(Value::Obj(rid), "done") {
+                                Ok(d) => self.to_boolean(d),
+                                Err(e) => {
+                                    let _ = self.iterator_close(&it);
+                                    out = Err(e);
+                                    break;
+                                }
+                            };
+                            if done {
                                 break;
                             }
-                            let item = self.get_prop(rid, "value").unwrap_or(Value::Undefined);
+                            let item = match self.get_prop_value(Value::Obj(rid), "value") {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    let _ = self.iterator_close(&it);
+                                    out = Err(e);
+                                    break;
+                                }
+                            };
                             if using {
                                 self.using_stack.push(Vec::new());
                             }
@@ -1292,14 +1327,14 @@ impl Engine {
     }
 
     /// `IteratorClose` (spec §13.7.5.14) — appelle
-    /// `it.return()` si présent/callable ; erreurs de `next`
-    /// déjà propagées ailleurs.
+    /// `it.return()` si présent/callable (lecture par Get —
+    /// un accesseur `get return` est honoré, JS-C603) ;
+    /// erreurs de `next` déjà propagées ailleurs.
     fn iterator_close(&mut self, it: &Value) -> JsResult<()> {
-        if let Value::Obj(iid) = it {
-            if let Some(rf) = self.get_prop(*iid, "return") {
-                if self.is_callable(rf.clone()) {
-                    self.call_value(rf, it.clone(), &[])?;
-                }
+        if matches!(it, Value::Obj(_)) {
+            let rf = self.get_prop_value(it.clone(), "return")?;
+            if self.is_callable(rf.clone()) {
+                self.call_value(rf, it.clone(), &[])?;
             }
         }
         Ok(())

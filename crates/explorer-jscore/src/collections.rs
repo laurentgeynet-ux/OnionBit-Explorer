@@ -10,10 +10,11 @@
 //! (spec semantics: live iterators — ours freeze a snapshot, a
 //! documented deviation).
 
-use crate::heap::{JsResult, ObjKind, Object, Thrown};
+use crate::heap::{IterHelperState, IterOp, JsResult, ObjKind, Object, Thrown};
 use crate::interp::SYM_ITERATOR;
 use crate::value::{ObjId, Value};
 use crate::Engine;
+use std::collections::VecDeque;
 
 fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Undefined)
@@ -607,6 +608,15 @@ fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
             return exec.next(e, arg(a, 0));
         }
     }
+    // Helper paresseux (spec `%IteratorHelperPrototype%`) —
+    // l'étape tire du sous-jacent via `call_value` : hors de
+    // tout emprunt `obj_mut`.
+    if matches!(
+        e.heap.obj(id).map(|o| &o.kind),
+        Some(ObjKind::IterHelper(_))
+    ) {
+        return it_helper_next(e, id);
+    }
     let (item, ret) = {
         let Some(o) = e.heap.obj_mut(id) else {
             return Err(e.type_error("next on non-iterator"));
@@ -656,6 +666,30 @@ fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             return exec.ret_at(e, arg(args, 0));
         }
     }
+    // Helper paresseux : `return` = `IteratorClose` du
+    // sous-jacent **pendant que la sentinelle `Running` est en
+    // place** (ré-entrance — un `return` du sous-jacent qui
+    // rappelle `helper.return()`/`next()`/`throw()` →
+    // `TypeError` « already running », sémantique générateur),
+    // puis `{value: undefined, done: true}` — spec
+    // `%IteratorHelperPrototype%.return`, l'argument n'est PAS
+    // propagé. Helper complété → pas de forward (verrou
+    // `done`), même résultat.
+    let st = take_helper(e, id)?;
+    if let Some(mut st) = st {
+        if !st.done {
+            st.done = true;
+            let src = st.source.clone();
+            let r = it_close(e, &src);
+            if let Some(o) = e.heap.obj_mut(id) {
+                o.kind = ObjKind::IterHelper(st);
+            }
+            r?;
+        } else if let Some(o) = e.heap.obj_mut(id) {
+            o.kind = ObjKind::IterHelper(st);
+        }
+        return Ok(iter_result(e, Value::Undefined, true));
+    }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Iter { items, idx, .. } = &mut o.kind {
             *idx = items.len();
@@ -679,6 +713,22 @@ fn iter_throw(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
                     return Err(e.type_error("sync iterator method on async generator"));
                 }
                 return exec.throw_at(e, arg(args, 0));
+            }
+        }
+        // Helper paresseux : fermer le sous-jacent sous
+        // sentinelle `Running` (`IteratorClose` sur complétion
+        // abrupte — son échec est masqué par la valeur jetée ;
+        // ré-entrance pendant le close → `TypeError`) puis
+        // lever. Helper complété → lever sans fermer.
+        let st = take_helper(e, id)?;
+        if let Some(mut st) = st {
+            if !st.done {
+                st.done = true;
+                let src = st.source.clone();
+                let _ = it_close(e, &src);
+            }
+            if let Some(o) = e.heap.obj_mut(id) {
+                o.kind = ObjKind::IterHelper(st);
             }
         }
     }
@@ -921,15 +971,437 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 // ------------------------------------------------------------------
-// JS-C8 — Iterator helpers (ES2025)
-//
-// Spec helpers are lazy; ours drain the source eagerly into the
-// shared `Iter` snapshot — same observable values, different
-// timing (documented deviation, same class as live-vs-snapshot).
+// Iterator helpers (ES2025) — **paresseux** (`ObjKind::IterHelper`,
+// spec `%IteratorHelperPrototype%`). La paresse est observable :
+// `map(f)` ne tire pas avant `next()`, les getters `done`/`value`
+// qui jettent propagent au pull, `take(n)` fonctionne sur source
+// infinie, `return` est forwardé (`IteratorClose`). L'ancien
+// snapshot eager drainait via `get_prop` data-only : un
+// `get done() { throw }` n'était jamais observé → boucle jusqu'au
+// cap heap (cluster test262 #1, ~178 fichiers — profil §B-114).
 // ------------------------------------------------------------------
 
-/// Drain `this` iterator's remaining items — fast path on
-/// `ObjKind::Iter`, else the generic `next()` protocol.
+/// Étape d'un record itérateur — spec `IteratorStep` +
+/// `IteratorValue` : résultat non-objet → `TypeError`, getters
+/// `done`/`value` propagés (`get_prop` data-only les avalait).
+fn it_step(e: &mut Engine, src: &Value, next: &Value) -> JsResult<Option<Value>> {
+    e.tick()?;
+    let r = e.call_value(next.clone(), src.clone(), &[])?;
+    let Value::Obj(rid) = r else {
+        return Err(e.type_error("iterator result is not an object"));
+    };
+    let done = e.get_prop_value(Value::Obj(rid), "done")?;
+    if e.to_boolean(done) {
+        return Ok(None);
+    }
+    Ok(Some(e.get_prop_value(Value::Obj(rid), "value")?))
+}
+
+/// `IteratorClose` (spec §7.4) — `GetMethod(src, "return")` :
+/// nullish → rien, **non-callable → `TypeError`** (`GetMethod`),
+/// sinon appelé avec zéro arg (complétion abrupte) ; résultat
+/// non-objet → `TypeError`, sinon ignoré.
+fn it_close(e: &mut Engine, src: &Value) -> JsResult<()> {
+    if !matches!(src, Value::Obj(_)) {
+        return Ok(());
+    }
+    let rf = e.get_prop_value(src.clone(), "return")?;
+    if matches!(rf, Value::Undefined | Value::Null) {
+        return Ok(());
+    }
+    if !e.is_callable(rf.clone()) {
+        return Err(e.type_error("iterator return is not callable"));
+    }
+    let r = e.call_value(rf, src.clone(), &[])?;
+    if matches!(r, Value::Obj(_)) {
+        Ok(())
+    } else {
+        Err(e.type_error("iterator return result is not an object"))
+    }
+}
+
+/// `GetIteratorDirect`/`Flattenable` — record `(obj, next)` :
+/// `{next}` callable direct ou via `@@iterator` (la spec
+/// accepte les deux — le fallback manquant était le cluster
+/// #4 « not iterable »).
+pub(crate) fn it_record(e: &mut Engine, v: Value) -> JsResult<(Value, Value)> {
+    if matches!(v, Value::Obj(_)) {
+        let nf = e.get_prop_value(v.clone(), "next")?;
+        if e.is_callable(nf.clone()) {
+            return Ok((v, nf));
+        }
+        let m = e.get_prop_value(v.clone(), SYM_ITERATOR)?;
+        if e.is_callable(m.clone()) {
+            let it = e.call_value(m, v.clone(), &[])?;
+            if matches!(it, Value::Obj(_)) {
+                let nf = e.get_prop_value(it.clone(), "next")?;
+                if e.is_callable(nf.clone()) {
+                    return Ok((it, nf));
+                }
+            }
+        }
+    }
+    // Primitif itérable (chaîne — spec `ToObject` + `@@iterator`)
+    // : snapshot matérialisé, comme nos itérateurs de chaîne.
+    if matches!(v, Value::Str(_)) {
+        let items = e.iter_values(v)?;
+        let it = iter_obj(e, items, e.protos.string_iter);
+        let nf = e.get_prop_value(it.clone(), "next")?;
+        if e.is_callable(nf.clone()) {
+            return Ok((it, nf));
+        }
+    }
+    Err(e.type_error("value is not iterable"))
+}
+
+/// `%WrapForValidIteratorPrototype%` (spec `Iterator.from`) —
+/// le record est forwardé **verbatim** par `next`.
+pub(crate) fn it_wrap(e: &mut Engine, source: Value, next: Value) -> Value {
+    let id = e
+        .heap
+        .alloc_obj(Object::ordinary(Value::Obj(e.protos.iter_helper)));
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::IterHelper(Box::new(IterHelperState {
+            source,
+            next,
+            inner: None,
+            done: false,
+            counter: 0,
+            op: IterOp::Wrap,
+        }));
+    }
+    Value::Obj(id)
+}
+
+/// `Iterator.concat(...)` — les args ont été validés à la
+/// construction (objet + `@@iterator` callable lu une fois —
+/// spec `GetMethod`, jamais appelé ici). La file porte des
+/// paires `(itérable, méthode)` **non ouvertes** : chaque
+/// record est créé paresseusement quand l'itération l'atteint
+/// (« the remaining iterables are never opened »). `st.next`
+/// `Undefined` = pas de record courant. `return`/`throw`
+/// ferment le record courant (verrou `done` partagé).
+pub(crate) fn it_concat(e: &mut Engine, recs: VecDeque<(Value, Value)>) -> Value {
+    let done = recs.is_empty();
+    let id = e
+        .heap
+        .alloc_obj(Object::ordinary(Value::Obj(e.protos.iter_helper)));
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::IterHelper(Box::new(IterHelperState {
+            done,
+            source: Value::Undefined,
+            next: Value::Undefined,
+            inner: None,
+            counter: 0,
+            op: IterOp::Concat(recs),
+        }));
+    }
+    Value::Obj(id)
+}
+
+/// Crée le helper paresseux — valide le receveur
+/// (`GetIteratorDirect`) puis pose le record + `op`.
+fn it_helper(e: &mut Engine, this: Value, op: IterOp) -> JsResult<Value> {
+    let (source, next) = it_record(e, this)?;
+    let id = e
+        .heap
+        .alloc_obj(Object::ordinary(Value::Obj(e.protos.iter_helper)));
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::IterHelper(Box::new(IterHelperState {
+            source,
+            next,
+            inner: None,
+            done: false,
+            counter: 0,
+            op,
+        }));
+    }
+    Ok(Value::Obj(id))
+}
+
+/// État sentinelle — posé dans le tas pendant qu'une méthode
+/// de helper exécute du code appelable (`next` du sous-jacent,
+/// callback, `return` de `it_close`). Une ré-entrance la lit
+/// → `TypeError` « generator is already running » (sémantique
+/// générateur spec — les helpers SONT des générateurs).
+fn running_sentinel() -> ObjKind {
+    ObjKind::IterHelper(Box::new(IterHelperState {
+        source: Value::Undefined,
+        next: Value::Undefined,
+        inner: None,
+        done: false,
+        counter: 0,
+        op: IterOp::Running,
+    }))
+}
+
+/// Extrait l'état `IterHelper` en posant la sentinelle
+/// [`running_sentinel`]. `Ok(None)` = pas un helper (kind
+/// restauré tel quel). Sentinelle déjà en place → `TypeError`
+/// (ré-entrance — la sentinelle est reposée, la course
+/// continue).
+fn take_helper(e: &mut Engine, id: ObjId) -> JsResult<Option<Box<IterHelperState>>> {
+    let st = match e
+        .heap
+        .obj_mut(id)
+        .map(|o| std::mem::replace(&mut o.kind, running_sentinel()))
+    {
+        Some(ObjKind::IterHelper(st)) => st,
+        Some(k) => {
+            if let Some(o) = e.heap.obj_mut(id) {
+                o.kind = k;
+            }
+            return Ok(None);
+        }
+        None => return Ok(None),
+    };
+    if matches!(st.op, IterOp::Running) {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.kind = ObjKind::IterHelper(st);
+        }
+        return Err(e.type_error("generator is already running"));
+    }
+    Ok(Some(st))
+}
+
+/// `next()` d'un helper paresseux — l'état est extrait
+/// ([`take_helper`], sentinelle `Running` en place), une étape
+/// appliquée, reposé. `%WrapForValidIteratorPrototype%` est
+/// traité **sans** extraction : appel brut, la ré-entrance y
+/// est légale.
+fn it_helper_next(e: &mut Engine, id: ObjId) -> JsResult<Value> {
+    // `Wrap` — appel brut : `next` cloné, invoqué, résultat
+    // forwardé verbatim (non-objet → `TypeError`).
+    if matches!(
+        e.heap.obj(id).map(|o| &o.kind),
+        Some(ObjKind::IterHelper(st)) if matches!(st.op, IterOp::Wrap)
+    ) {
+        let (src, next) = match e.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::IterHelper(st)) => (st.source.clone(), st.next.clone()),
+            _ => (Value::Undefined, Value::Undefined),
+        };
+        let r = e.call_value(next, src, &[])?;
+        if matches!(r, Value::Obj(_)) {
+            return Ok(r);
+        }
+        return Err(e.type_error("iterator result is not an object"));
+    }
+    let Some(mut st) = take_helper(e, id)? else {
+        return Err(e.type_error("next on non-iterator"));
+    };
+    let r = it_helper_step(e, &mut st);
+    // Abrupt : le helper est **complété** (sémantique
+    // générateur — `next` ultérieur → `{done:true}` sans
+    // re-step, `return` non forwardé).
+    // Le close n'est PAS fait ici : spec, un abrupt du *step*
+    // (`next`/getters) se propage tel quel sans fermer — seul
+    // l'abrupt du *callback* passe par `IfAbruptCloseIterator`
+    // (traité dans `it_helper_step`/`step_or_close`).
+    if r.is_err() {
+        st.done = true;
+    }
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::IterHelper(st);
+    }
+    match r? {
+        ItOut::Val(v) => Ok(iter_result(e, v, false)),
+        ItOut::Done => Ok(iter_result(e, Value::Undefined, true)),
+    }
+}
+
+/// `IfAbruptCloseIterator` (spec) — l'erreur du *callback*
+/// (mapper/predicate, ou `GetIteratorFlattenable` du résultat)
+/// ferme le sous-jacent puis se propage ; l'échec du close est
+/// masqué. Un abrupt du *step* lui-même (`next`, getters
+/// `done`/`value`) se propage au contraire **sans** fermer.
+fn step_or_close<T>(e: &mut Engine, src: &Value, r: JsResult<T>) -> JsResult<T> {
+    match r {
+        Err(t) => {
+            let _ = it_close(e, src);
+            Err(t)
+        }
+        ok => ok,
+    }
+}
+
+/// Sortie d'une étape de helper paresseux.
+enum ItOut {
+    /// `{value: v, done: false}` reconstruit.
+    Val(Value),
+    /// `{value: undefined, done: true}`.
+    Done,
+}
+
+/// Une étape paresseuse — [`ItOut::Val`] = `{value:v,
+/// done:false}` reconstruit, [`ItOut::Done`] = `done` (l'état
+/// passe `done`).
+fn it_helper_step(e: &mut Engine, st: &mut IterHelperState) -> JsResult<ItOut> {
+    if st.done {
+        return Ok(ItOut::Done);
+    }
+    e.tick()?;
+    let cb = |e: &mut Engine, f: &Value, v: Value, i: u64| {
+        e.call_value(f.clone(), Value::Undefined, &[v, Value::Num(i as f64)])
+    };
+    let out = match &mut st.op {
+        IterOp::Map(f) => match it_step(e, &st.source, &st.next)? {
+            Some(v) => {
+                let i = st.counter;
+                st.counter += 1;
+                let m = cb(e, f, v, i);
+                let m = step_or_close(e, &st.source, m)?;
+                ItOut::Val(m)
+            }
+            None => ItOut::Done,
+        },
+        IterOp::Filter(f) => {
+            let mut hit = ItOut::Done;
+            while let Some(v) = it_step(e, &st.source, &st.next)? {
+                let i = st.counter;
+                st.counter += 1;
+                let k = cb(e, f, v.clone(), i);
+                let k = step_or_close(e, &st.source, k)?;
+                if e.to_boolean(k) {
+                    hit = ItOut::Val(v);
+                    break;
+                }
+            }
+            hit
+        }
+        IterOp::Take(rem) => {
+            if *rem <= 0.0 {
+                it_close(e, &st.source)?;
+                ItOut::Done
+            } else {
+                *rem -= 1.0;
+                match it_step(e, &st.source, &st.next)? {
+                    Some(v) => ItOut::Val(v),
+                    None => ItOut::Done,
+                }
+            }
+        }
+        IterOp::Drop(rem) => {
+            let mut alive = true;
+            while *rem > 0.0 {
+                *rem -= 1.0;
+                if it_step(e, &st.source, &st.next)?.is_none() {
+                    alive = false;
+                    break;
+                }
+            }
+            if alive {
+                match it_step(e, &st.source, &st.next)? {
+                    Some(v) => ItOut::Val(v),
+                    None => ItOut::Done,
+                }
+            } else {
+                ItOut::Done
+            }
+        }
+        IterOp::FlatMap(f) => {
+            let mut out = ItOut::Done;
+            while matches!(out, ItOut::Done) {
+                if let Some((isrc, inext)) = st.inner.clone() {
+                    match it_step(e, &isrc, &inext)? {
+                        Some(v) => {
+                            out = ItOut::Val(v);
+                            break;
+                        }
+                        None => st.inner = None,
+                    }
+                }
+                match it_step(e, &st.source, &st.next)? {
+                    None => break,
+                    Some(v) => {
+                        let i = st.counter;
+                        st.counter += 1;
+                        let m = cb(e, f, v, i);
+                        let m = step_or_close(e, &st.source, m)?;
+                        let r = it_record(e, m);
+                        st.inner = Some(step_or_close(e, &st.source, r)?);
+                    }
+                }
+            }
+            out
+        }
+        IterOp::Concat(rest) => {
+            let mut out = ItOut::Done;
+            loop {
+                if e.is_callable(st.next.clone()) {
+                    match it_step(e, &st.source, &st.next)? {
+                        Some(v) => {
+                            out = ItOut::Val(v);
+                            break;
+                        }
+                        None => st.next = Value::Undefined,
+                    }
+                } else {
+                    // Le record s'ouvre **ici** — `Call(method,
+                    // item)` puis `GetIteratorDirect` sur le
+                    // résultat (spec ; les itérables jamais
+                    // atteints ne sont jamais ouverts).
+                    match rest.pop_front() {
+                        Some((item, method)) => {
+                            let it = e.call_value(method, item, &[])?;
+                            if !matches!(it, Value::Obj(_)) {
+                                return Err(e.type_error("iterator is not an object"));
+                            }
+                            let (s, n) = it_record(e, it)?;
+                            st.source = s;
+                            st.next = n;
+                        }
+                        None => break,
+                    }
+                }
+            }
+            out
+        }
+        IterOp::Chunks(n) => {
+            let mut buf = Vec::with_capacity(*n);
+            for _ in 0..*n {
+                match it_step(e, &st.source, &st.next)? {
+                    Some(v) => buf.push(v),
+                    None => break,
+                }
+            }
+            if buf.is_empty() {
+                ItOut::Done
+            } else {
+                ItOut::Val(e.new_array(buf))
+            }
+        }
+        IterOp::Windows { n, buf } => {
+            while buf.len() < *n {
+                match it_step(e, &st.source, &st.next)? {
+                    Some(v) => buf.push_back(v),
+                    None => break,
+                }
+            }
+            if buf.len() < *n {
+                ItOut::Done
+            } else {
+                let out = e.new_array(buf.iter().cloned().collect());
+                buf.pop_front();
+                ItOut::Val(out)
+            }
+        }
+        // `Wrap` est traité en amont (`it_helper_next`, appel
+        // brut sans extraction) ; `Running` = sentinelle de
+        // course — les deux sont interceptées avant ce point,
+        // filet de sécurité.
+        IterOp::Wrap | IterOp::Running => {
+            return Err(e.type_error("generator is already running"));
+        }
+    };
+    if matches!(out, ItOut::Done) {
+        st.done = true;
+    }
+    Ok(out)
+}
+
+/// Drain `this` — fast path `ObjKind::Iter`, sinon le protocole
+/// `next()` partagé (getters propagés). Utilisé par les
+/// terminaux sans early-exit ni callback-fermeture.
 fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
     if let Value::Obj(id) = this {
         if let Some(o) = e.heap.obj_mut(id) {
@@ -939,87 +1411,61 @@ fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
                 return Ok(rest);
             }
         }
-        // Itérateur arbitraire — protocole `next()`.
+        let (src, next) = it_record(e, this)?;
         let mut out = Vec::new();
-        loop {
-            e.tick()?;
-            let Some(nf) = e.get_prop(id, "next") else {
-                break;
-            };
-            if !e.is_callable(nf.clone()) {
-                break;
-            }
-            let r = e.call_value(nf, this.clone(), &[])?;
-            let Value::Obj(rid) = r else { break };
-            if e.get_prop(rid, "done").is_some_and(|d| e.to_boolean(d)) {
-                break;
-            }
-            out.push(e.get_prop(rid, "value").unwrap_or(Value::Undefined));
+        while let Some(v) = it_step(e, &src, &next)? {
+            out.push(v);
         }
         return Ok(out);
     }
     Err(e.type_error("iterator helper on non-iterator"))
 }
 
-fn it_callback(e: &mut Engine, f: Value, v: Value, i: usize) -> JsResult<Value> {
-    if !e.is_callable(f.clone()) {
-        return Err(e.type_error("iterator callback is not callable"));
-    }
-    e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])
-}
-
 fn it_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    let vals = it_pull_all(e, this)?;
-    let mut out = Vec::with_capacity(vals.len());
-    for (i, v) in vals.into_iter().enumerate() {
-        out.push(it_callback(e, f.clone(), v, i)?);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("mapper is not callable"));
     }
-    Ok(iter_obj(e, out, e.protos.iter_helper))
+    it_helper(e, this, IterOp::Map(f))
 }
 
 fn it_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    let vals = it_pull_all(e, this)?;
-    let mut out = Vec::new();
-    for (i, v) in vals.into_iter().enumerate() {
-        let k = it_callback(e, f.clone(), v.clone(), i)?;
-        if e.to_boolean(k) {
-            out.push(v);
-        }
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("predicate is not callable"));
     }
-    Ok(iter_obj(e, out, e.protos.iter_helper))
+    it_helper(e, this, IterOp::Filter(f))
+}
+
+/// `limit` spec `ToIntegerOrInfinity` — NaN → +0, négatif →
+/// `RangeError` (le `.max(0.0)` clampait silencieusement).
+fn it_limit(e: &mut Engine, v: Value, what: &str) -> JsResult<f64> {
+    let n = e.to_number(v)?;
+    if n.is_nan() {
+        return Ok(0.0);
+    }
+    if n < 0.0 {
+        return Err(e.range_error(format!("{what} must be non-negative")));
+    }
+    Ok(n)
 }
 
 fn it_take(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let n = e.to_number(arg(args, 0))?.max(0.0) as usize;
-    let vals = it_pull_all(e, this)?;
-    Ok(iter_obj(
-        e,
-        vals.into_iter().take(n).collect(),
-        e.protos.iter_helper,
-    ))
+    let n = it_limit(e, arg(args, 0), "take limit")?;
+    it_helper(e, this, IterOp::Take(n))
 }
 
 fn it_drop(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let n = e.to_number(arg(args, 0))?.max(0.0) as usize;
-    let vals = it_pull_all(e, this)?;
-    Ok(iter_obj(
-        e,
-        vals.into_iter().skip(n).collect(),
-        e.protos.iter_helper,
-    ))
+    let n = it_limit(e, arg(args, 0), "drop limit")?;
+    it_helper(e, this, IterOp::Drop(n))
 }
 
 fn it_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    let vals = it_pull_all(e, this)?;
-    let mut out = Vec::new();
-    for (i, v) in vals.into_iter().enumerate() {
-        let m = it_callback(e, f.clone(), v, i)?;
-        out.extend(e.iter_values(m)?);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("mapper is not callable"));
     }
-    Ok(iter_obj(e, out, e.protos.iter_helper))
+    it_helper(e, this, IterOp::FlatMap(f))
 }
 
 fn it_to_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -1027,38 +1473,74 @@ fn it_to_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(e.new_array(vals))
 }
 
+/// Terminal à callbacks — boucle par étape (spec) : l'erreur
+/// d'un callback ferme le sous-jacent (`IfAbruptCloseIterator`)
+/// au lieu de l'avoir déjà drainé en entier.
 fn it_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    let vals = it_pull_all(e, this)?;
-    for (i, v) in vals.into_iter().enumerate() {
-        it_callback(e, f.clone(), v, i)?;
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("callback is not callable"));
+    }
+    let (src, next) = it_record(e, this)?;
+    let mut i = 0u64;
+    while let Some(v) = it_step(e, &src, &next)? {
+        if let Err(t) = e.call_value(f.clone(), Value::Undefined, &[v, Value::Num(i as f64)]) {
+            let _ = it_close(e, &src);
+            return Err(t);
+        }
+        i += 1;
     }
     Ok(Value::Undefined)
 }
 
 fn it_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    let vals = it_pull_all(e, this)?;
-    let mut it = vals.into_iter().enumerate();
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("reducer is not callable"));
+    }
+    let (src, next) = it_record(e, this)?;
     let mut acc = match arg(args, 1) {
-        Value::Undefined => match it.next() {
-            Some((_, v)) => v,
+        Value::Undefined => match it_step(e, &src, &next)? {
+            Some(v) => v,
             None => return Err(e.type_error("reduce of empty iterator with no initial value")),
         },
         v => v,
     };
-    for (i, v) in it {
-        acc = e.call_value(f.clone(), Value::Undefined, &[acc, v, Value::Num(i as f64)])?;
+    let mut i = match arg(args, 1) {
+        Value::Undefined => 1u64,
+        _ => 0u64,
+    };
+    while let Some(v) = it_step(e, &src, &next)? {
+        match e.call_value(f.clone(), Value::Undefined, &[acc, v, Value::Num(i as f64)]) {
+            Ok(a) => acc = a,
+            Err(t) => {
+                let _ = it_close(e, &src);
+                return Err(t);
+            }
+        }
+        i += 1;
     }
     Ok(acc)
 }
 
 fn it_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
-        let k = it_callback(e, f.clone(), v, i)?;
-        if e.to_boolean(k) {
-            return Ok(Value::Bool(true));
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("predicate is not callable"));
+    }
+    let (src, next) = it_record(e, this)?;
+    let mut i = 0u64;
+    while let Some(v) = it_step(e, &src, &next)? {
+        match e.call_value(f.clone(), Value::Undefined, &[v, Value::Num(i as f64)]) {
+            Err(t) => {
+                let _ = it_close(e, &src);
+                return Err(t);
+            }
+            Ok(k) if e.to_boolean(k.clone()) => {
+                it_close(e, &src)?;
+                return Ok(Value::Bool(true));
+            }
+            _ => i += 1,
         }
     }
     Ok(Value::Bool(false))
@@ -1066,10 +1548,22 @@ fn it_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 fn it_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
-        let k = it_callback(e, f.clone(), v, i)?;
-        if !e.to_boolean(k) {
-            return Ok(Value::Bool(false));
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("predicate is not callable"));
+    }
+    let (src, next) = it_record(e, this)?;
+    let mut i = 0u64;
+    while let Some(v) = it_step(e, &src, &next)? {
+        match e.call_value(f.clone(), Value::Undefined, &[v, Value::Num(i as f64)]) {
+            Err(t) => {
+                let _ = it_close(e, &src);
+                return Err(t);
+            }
+            Ok(k) if !e.to_boolean(k.clone()) => {
+                it_close(e, &src)?;
+                return Ok(Value::Bool(false));
+            }
+            _ => i += 1,
         }
     }
     Ok(Value::Bool(true))
@@ -1077,25 +1571,43 @@ fn it_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 fn it_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
-        let k = it_callback(e, f.clone(), v.clone(), i)?;
-        if e.to_boolean(k) {
-            return Ok(v);
+    if !e.is_callable(f.clone()) {
+        return Err(e.type_error("predicate is not callable"));
+    }
+    let (src, next) = it_record(e, this)?;
+    let mut i = 0u64;
+    while let Some(v) = it_step(e, &src, &next)? {
+        match e.call_value(
+            f.clone(),
+            Value::Undefined,
+            &[v.clone(), Value::Num(i as f64)],
+        ) {
+            Err(t) => {
+                let _ = it_close(e, &src);
+                return Err(t);
+            }
+            Ok(k) if e.to_boolean(k.clone()) => {
+                it_close(e, &src)?;
+                return Ok(v);
+            }
+            _ => i += 1,
         }
     }
     Ok(Value::Undefined)
 }
 
 // -- Iterator helpers ES2026 (chunking/sequencing proposals) --------------
-// Snapshot eager, comme le reste de nos helpers (déviation
-// documentée vs la laziness spec).
+// Même mécanisme paresseux que les helpers ES2025.
 
-/// `iter.includes(v)` — `SameValueZero` (`===` + NaN).
+/// `iter.includes(v)` — `SameValueZero` (`===` + NaN), early-
+/// exit fermé (`IteratorClose`).
 fn it_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let needle = arg(args, 0);
-    for v in it_pull_all(e, this)? {
+    let (src, next) = it_record(e, this)?;
+    while let Some(v) = it_step(e, &src, &next)? {
         let nan = matches!((v.clone(), needle.clone()), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan());
         if nan || e.strict_eq(&v, &needle) {
+            it_close(e, &src)?;
             return Ok(Value::Bool(true));
         }
     }
@@ -1128,25 +1640,25 @@ fn it_chunk_size(e: &mut Engine, v: Value) -> JsResult<usize> {
 }
 
 /// `iter.chunks(n)` — lots consécutifs de `n` éléments (le
-/// dernier peut être plus court) → itérateur d'arrays.
+/// dernier peut être plus court) → itérateur d'arrays paresseux.
 fn it_chunks(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let n = it_chunk_size(e, arg(args, 0))?;
-    let vals = it_pull_all(e, this)?;
-    let out: Vec<Value> = vals.chunks(n).map(|c| e.new_array(c.to_vec())).collect();
-    Ok(iter_obj(e, out, e.protos.iter_helper))
+    it_helper(e, this, IterOp::Chunks(n))
 }
 
 /// `iter.windows(n)` — fenêtres glissantes de `n` (rien si
-/// l'itérateur est plus court que `n`) → itérateur d'arrays.
+/// l'itérateur est plus court que `n`) → itérateur d'arrays
+/// paresseux.
 fn it_windows(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let n = it_chunk_size(e, arg(args, 0))?;
-    let vals = it_pull_all(e, this)?;
-    let out: Vec<Value> = if vals.len() >= n {
-        vals.windows(n).map(|w| e.new_array(w.to_vec())).collect()
-    } else {
-        Vec::new()
-    };
-    Ok(iter_obj(e, out, e.protos.iter_helper))
+    it_helper(
+        e,
+        this,
+        IterOp::Windows {
+            n,
+            buf: std::collections::VecDeque::new(),
+        },
+    )
 }
 
 /// `Iterator.zip(iterables, {mode?})` — proposal : itérateur

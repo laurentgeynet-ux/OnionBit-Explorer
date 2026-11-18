@@ -611,6 +611,14 @@ pub const PROBES: &[(&str, &str)] = &[
     ("iter_ctor_subclass", "class X extends Iterator{};let x=new X();(x instanceof Iterator)+'|'+(Object.getPrototypeOf(x)===X.prototype)"),
     ("iter_ctor_reflect", "(function(){let r='ok';try{Reflect.construct(Iterator,[],class{})}catch(e){r='ERR:'+e}try{Reflect.construct(Iterator,[],Iterator)}catch(e){return r+'|'+e.constructor.name}return r+'|no-throw'})()"),
     ("iter_ctor_helpers", "class Z extends Iterator{};let z=new Z();typeof z.map+'|'+typeof z.take"),
+    ("iter_lazy_pulls", "let n=0;let s={next(){n++;return{value:1,done:false}}};let m=Iterator.from(s).map(x=>x);let b=n;m.next();b+'|'+n"),
+    ("iter_lazy_take_inf", "let i=0;[...Iterator.from({next(){return{value:i++,done:false}}}).take(3)].join(',')"),
+    ("iter_lazy_throwdone", "class T extends Iterator{next(){return{get done(){throw 9}}}};try{new T().map(x=>x).next()}catch(e){e}"),
+    ("iter_lazy_retfwd", "let r=0;let s={next(){return{value:1,done:false}},return(){r++;return{done:true}}};let t=Iterator.from(s).take(1);t.next();t.next();r"),
+    ("iter_from_wrap", "typeof Iterator.from({next(){return{done:true}}}).map+'|'+(Iterator.from(function*(){yield 1}())instanceof Iterator)"),
+    ("iter_take_neg", "try{Iterator.from([]).take(-1)}catch(e){e.constructor.name}"),
+    ("iter_early_close", "let r=0;let s={next(){return{value:1,done:false}},return(){r++;return{done:true}}};Iterator.from(s).find(x=>true);r"),
+    ("iter_lazy_flat", "let i=0;[...Iterator.from({next(){i++;return{value:[i],done:i>2}}}).flatMap(x=>x)].join(',')"),
     ("set_union_b", "new Set([1,2]).union(new Set([2,3])).size+'|'+[...new Set([1,2]).union(new Set([2,3]))].join(',')"),
     ("set_inter", "[...new Set([1,2,3]).intersection(new Set([2,3,4]))].join(',')"),
     ("set_diff", "[...new Set([1,2,3]).difference(new Set([2]))].join(',')"),
@@ -841,4 +849,8 @@ pub const PROBES: &[(&str, &str)] = &[
     ("delete_nonref", "delete (1,2,3)"),
     ("fn_restricted_props", "function f(){'use strict'}try{f.arguments}catch(e){e.constructor.name}"),
     ("fn_restricted_caller", "function f(){'use strict'}try{f.caller}catch(e){e.constructor.name}"),
+    // --- JS-C603 : Iterator helpers paresseux, concat, sentinelle Running ---
+    ("iter_concat_lazy", "let o=0;let a={[Symbol.iterator](){o++;return{next(){return{value:1,done:false}},return(){o+=10;return{}}}}};let it=Iterator.concat(a);let b=it.next();it.return();o+'|'+b.value+'|'+it.next().done"),
+    ("iter_running_guard", "let h;let s={next(){let r;try{r=h.next()}catch(e){r='E'}return{value:r||'ok',done:false}}};h=Iterator.from(s).map(x=>x);h.next().value"),
+    ("iter_close_getmethod", "try{Iterator.from({next(){return{done:false}},return:5}).map(x=>x).return()}catch(e){e.constructor.name}"),
 ];

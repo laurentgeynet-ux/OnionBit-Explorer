@@ -469,6 +469,31 @@ impl Heap {
                 }
                 push_value(out, ret);
             }
+            ObjKind::IterHelper(st) => {
+                push_value(out, &st.source);
+                push_value(out, &st.next);
+                if let Some((s, n)) = &st.inner {
+                    push_value(out, s);
+                    push_value(out, n);
+                }
+                match &st.op {
+                    IterOp::Map(f) | IterOp::Filter(f) | IterOp::FlatMap(f) => {
+                        push_value(out, f);
+                    }
+                    IterOp::Windows { buf, .. } => {
+                        for v in buf {
+                            push_value(out, v);
+                        }
+                    }
+                    IterOp::Concat(recs) => {
+                        for (s, n) in recs {
+                            push_value(out, s);
+                            push_value(out, n);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             ObjKind::GenLive { exec } => {
                 if let Ok(g) = exec.try_borrow() {
                     g.trace(out, envs);
@@ -877,6 +902,15 @@ fn cell_bytes(data: &CellData) -> usize {
                     ObjKind::Iter { items, .. } => {
                         items.capacity() * std::mem::size_of::<Value>()
                     }
+                    ObjKind::IterHelper(st) => match &st.op {
+                        IterOp::Windows { buf, .. } => {
+                            buf.capacity() * std::mem::size_of::<Value>()
+                        }
+                        IterOp::Concat(recs) => {
+                            recs.capacity() * std::mem::size_of::<(Value, Value)>()
+                        }
+                        _ => 0,
+                    },
                     ObjKind::FetchBody { body } => body.capacity(),
                     ObjKind::Promise(p) => {
                         p.reactions.capacity()
@@ -1241,6 +1275,14 @@ pub enum ObjKind {
         /// (generator `return v`; `Undefined` for plain iterators).
         ret: Value,
     },
+    /// Helper itérateur **paresseux** (spec
+    /// `%IteratorHelperPrototype%` — `map`/`filter`/`take`/
+    /// `drop`/`flatMap`/`chunks`/`windows`) : `next()` tire UNE
+    /// étape du sous-jacent et applique `op`. Remplace le
+    /// snapshot eager JS-C8 : la paresse est observable
+    /// (`throws` autour de `.next()`, sources infinies,
+    /// getters `done`/`value` qui jettent).
+    IterHelper(Box<IterHelperState>),
     /// Générateur lazy (`function*`) — exécuteur suspendable
     /// `GExec` (JS-C34) : pile de contrôle explicite partagée
     /// via `RefCell` (les natives `next`/`throw`/`return`
@@ -2283,6 +2325,64 @@ pub enum Fun {
     },
 }
 
+/// État d'un helper itérateur paresseux (`ObjKind::IterHelper`)
+/// — le record `GetIteratorDirect` du sous-jacent + l'opération.
+/// Sorti du tas par `std::mem::replace` le temps d'une étape
+/// `next` : les appels JS du sous-jacent peuvent ré-entrer, le
+/// placeholder `Iter` vide est alors lu « épuisé ».
+pub struct IterHelperState {
+    /// Itérateur sous-jacent (objet au protocole `next`).
+    pub source: Value,
+    /// Sa méthode `next` capturée à la création (spec lie
+    /// `[[NextMethod]]` une fois).
+    pub next: Value,
+    /// `flatMap` : l'itérateur courant issu du dernier mapper
+    /// (record `(source, next)`), `None` entre deux.
+    pub inner: Option<(Value, Value)>,
+    /// Fermé/épuisé — les étapes suivantes rendent `done`.
+    pub done: bool,
+    /// Index des callbacks (`f(v, i)`).
+    pub counter: u64,
+    /// L'opération paresseuse appliquée.
+    pub op: IterOp,
+}
+
+/// Opération d'un [`IterHelperState`].
+pub enum IterOp {
+    /// `map(f)` — `f(v, i)` transforme chaque valeur.
+    Map(Value),
+    /// `filter(f)` — saute tant que le prédicat est faux.
+    Filter(Value),
+    /// `take(n)` — `n` valeurs puis `IteratorClose`.
+    Take(f64),
+    /// `drop(n)` — jette `n` valeurs de tête.
+    Drop(f64),
+    /// `flatMap(f)` — chaque valeur est un itérable aplati.
+    FlatMap(Value),
+    /// `%WrapForValidIteratorPrototype%` (spec `Iterator.from`)
+    /// — forward le résultat **brut** (verbatim, sans lire
+    /// `done`/`value` ni `IteratorClose` — ce n'est pas une
+    /// closure de helper).
+    Wrap,
+    /// `Iterator.concat(...)` — records restants ; le record
+    /// courant vit dans `source`/`next` de l'état.
+    Concat(std::collections::VecDeque<(Value, Value)>),
+    /// `chunks(n)` — lots consécutifs.
+    Chunks(usize),
+    /// `windows(n)` — fenêtres glissantes (`buf` = lookahead).
+    Windows {
+        /// Taille de fenêtre.
+        n: usize,
+        /// Valeurs en attente (fenêtre courante).
+        buf: std::collections::VecDeque<Value>,
+    },
+    /// Sentinelle de course — posée dans le tas pendant que
+    /// `it_helper_next` exécute une étape ; une ré-entrance la
+    /// lit → `TypeError` (« generator is already running »,
+    /// sémantique générateur spec).
+    Running,
+}
+
 /// Nom de kind d'une cellule — partagé par [`Heap::kind_histogram`]
 /// (§B-59 vivant) et la morgue `gc.sweep` (§B-111 morts) : même
 /// vocabulaire des deux côtés de la frontière vie/mort.
@@ -2298,6 +2398,7 @@ fn cell_kind_name(d: &CellData) -> &'static str {
             ObjKind::Map(_) => "Map",
             ObjKind::Set(_) => "Set",
             ObjKind::Iter { .. } => "Iter",
+            ObjKind::IterHelper(_) => "IterHelper",
             ObjKind::GenLive { .. } => "GenLive",
             ObjKind::Temp(_) => "Temp",
             ObjKind::WeakRef(_) => "WeakRef",

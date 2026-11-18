@@ -7513,19 +7513,27 @@ impl Engine {
                         let mut out = Vec::new();
                         loop {
                             self.tick()?;
-                            let Value::Obj(iid) = it else { break };
-                            let Some(nf) = self.get_prop(iid, "next") else {
-                                break;
+                            let Value::Obj(_) = it else {
+                                return Err(self.type_error("iterator is not an object"));
                             };
-                            if !self.is_callable(nf.clone()) {
-                                break;
-                            }
+                            // Spec `GetIterator`/`IteratorStep` +
+                            // `IteratorValue` : `next` lu par Get
+                            // (accesseurs honorés), résultat
+                            // non-objet → `TypeError`, getters
+                            // `done`/`value` propagés — le
+                            // `get_prop` data-only avalait un
+                            // `get done() { throw }` → drain
+                            // infini jusqu'au cap heap (JS-C603).
+                            let nf = match self.get_prop_value(it.clone(), "next")? {
+                                nf if self.is_callable(nf.clone()) => nf,
+                                _ => return Err(self.type_error("iterator next is not callable")),
+                            };
                             let r = self.call_value(nf, it.clone(), &[])?;
-                            let Value::Obj(rid) = r else { break };
-                            if self
-                                .get_prop(rid, "done")
-                                .is_some_and(|d| self.to_boolean(d))
-                            {
+                            let Value::Obj(rid) = r else {
+                                return Err(self.type_error("iterator result is not an object"));
+                            };
+                            let done = self.get_prop_value(Value::Obj(rid), "done")?;
+                            if self.to_boolean(done) {
                                 break;
                             }
                             // Le tick seul perd la course : le
@@ -7537,7 +7545,7 @@ impl Engine {
                                     (out.len() + 4096).saturating_mul(std::mem::size_of::<Value>()),
                                 )?;
                             }
-                            out.push(self.get_prop(rid, "value").unwrap_or(Value::Undefined));
+                            out.push(self.get_prop_value(Value::Obj(rid), "value")?);
                         }
                         return Ok(out);
                     }

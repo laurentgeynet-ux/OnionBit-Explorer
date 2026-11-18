@@ -202,37 +202,58 @@ pub(crate) fn iterator_tag_set(e: &mut Engine, this: Value, args: &[Value]) -> J
     Ok(Value::Undefined)
 }
 
-/// `Iterator.from(v)` — un itérateur passe tel quel (spec :
-/// `GetIteratorFlattenable`), un itérable passe par `@@iterator`.
-pub(crate) fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let v = arg(args, 0);
-    if let Value::Obj(id) = v {
-        if e.get_prop(id, "next").is_some_and(|n| e.is_callable(n)) {
-            return Ok(v);
+/// `it` hérite-t-il `%IteratorPrototype%` ? (spec
+/// `OrdinaryHasInstance(%Iterator%, it)` — marche proto.)
+fn it_is_iterator(e: &mut Engine, it: &Value) -> bool {
+    let mut cur = it.clone();
+    for _ in 0..16 {
+        let Value::Obj(cid) = cur else { return false };
+        if cid == e.protos.iterator {
+            return true;
         }
-        if let Some(m) = e.get_prop(id, crate::interp::SYM_ITERATOR) {
-            if e.is_callable(m.clone()) {
-                return e.call_value(m, v, &[]);
-            }
-        }
-        return Err(e.type_error("Iterator.from on non-iterable"));
+        cur = match e.heap.obj(cid).map(|o| o.proto.clone()) {
+            Some(p) => p,
+            None => return false,
+        };
     }
-    if let Value::Str(_) = v {
-        let items = e.iter_values(v)?;
-        return Ok(crate::collections::iter_obj(e, items, e.protos.iter_helper));
-    }
-    Err(e.type_error("Iterator.from on non-iterable"))
+    false
 }
 
-/// `Iterator.concat(...iterables)` (ES2025) — concatène les items
-/// de chaque itérable (eager : nos itérateurs sont des snapshots —
-/// déviation vs la laziness spec).
-pub(crate) fn iterator_concat(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let mut items = Vec::new();
-    for a in args {
-        items.extend(e.iter_values(a.clone())?);
+/// `Iterator.from(v)` — spec `IteratorFrom` : record
+/// `GetIteratorFlattenable` (`{next}` direct ou `@@iterator`),
+/// un receveur héritant déjà `%IteratorPrototype%` passe tel
+/// quel ; sinon wrap `%WrapForValidIteratorPrototype%` — les
+/// helpers `.map`/`take`/… deviennent accessibles sur un
+/// `{next: fn}` brut (avant : rendu nu → `map is not a
+/// function`).
+pub(crate) fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let v = arg(args, 0);
+    let (it, next) = crate::collections::it_record(e, v)?;
+    if it_is_iterator(e, &it) {
+        return Ok(it);
     }
-    Ok(crate::collections::iter_obj(e, items, e.protos.iter_helper))
+    Ok(crate::collections::it_wrap(e, it, next))
+}
+
+/// `Iterator.concat(...iterables)` (ES2025) — helper paresseux.
+/// Construction (spec `Iterator.concat`) : chaque arg doit être
+/// un objet et `GetMethod(item, @@iterator)` callable — la
+/// méthode est lue **une fois**, jamais appelée ici ; les
+/// records s'ouvrent paresseusement à la demande
+/// (`it_concat`/`IterOp::Concat`).
+pub(crate) fn iterator_concat(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mut recs = std::collections::VecDeque::with_capacity(args.len());
+    for a in args {
+        if !matches!(a, Value::Obj(_)) {
+            return Err(e.type_error("Iterator.concat expects iterable objects"));
+        }
+        let m = e.get_prop_value(a.clone(), crate::interp::SYM_ITERATOR)?;
+        if !e.is_callable(m.clone()) {
+            return Err(e.type_error("Iterator.concat expects iterable objects"));
+        }
+        recs.push_back((a.clone(), m));
+    }
+    Ok(crate::collections::it_concat(e, recs))
 }
 
 /// `SuppressedError(error, suppressed, message?)` — ES2026.

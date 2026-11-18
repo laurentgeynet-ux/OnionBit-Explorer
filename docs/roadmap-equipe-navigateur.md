@@ -14667,3 +14667,48 @@ chaque gain rapporté contre les **deux** archétypes.
   helpers visibles. Delta au filtre
   `EXPLORER_TEST262_ONLY=Iterator`.
 
+- [x] **JS-C603 — Iterator helpers paresseux + `IteratorClose`
+  — cluster #1 test262 soldé en mécanisme** (`heap.rs` +
+  `collections.rs` + `builtins/c17.rs` + `interp/{mod,exec}.rs`).
+  Diagnostic : les helpers drainaient tout le sous-jacent à la
+  construction via `get_prop` data-only — un
+  `get done() { throw }` jamais observé → boucle jusqu'au cap
+  heap (~178 fichiers `heap memory limit exceeded`, profil
+  §B-114) ; et la paresse spec observable manquée
+  (`assert.throws` entoure `helper.next()`, `take(n)` sur
+  source infinie). `ObjKind::IterHelper(Box<IterHelperState>)`
+  — record `(source, next)` `GetIteratorDirect`, `inner`
+  flatMap, `done`, `counter`, `op`
+  `Map`/`Filter`/`Take`/`Drop`/`FlatMap`/`Wrap`/`Chunks`/
+  `Windows`, tracé GC ; `Box` car l'inline (~120 o) gonflait
+  chaque cellule du tas (test GC
+  `gc_debt_arms_sweep_below_soft_limit` mourait sous cap
+  1 Mio). `it_step` = `IteratorStep`+`IteratorValue`
+  (non-objet → `TypeError`, getters propagés
+  `get_prop_value`) ; `it_close` = `IteratorClose` ;
+  `it_record` = `{next}` ou `@@iterator` ; état sorti du tas
+  pendant `call_value` (ré-entrance lit « épuisé »).
+  `Iterator.from` wrappe `%WrapForValidIteratorPrototype%` sur
+  `{next}` brut → helpers accessibles (cluster #4).
+  Validations : `IsCallable` à la construction (cluster #2),
+  `take/drop` négatif → `RangeError` (cluster #7), terminaux
+  par-étape + close early-exit. Même trou colmaté
+  `iter_values` + `for-of`. Close sémantique exacte : abrupt
+  du *step* propagé sans fermer, abrupt du *callback* →
+  `IfAbruptCloseIterator` ; helper complété → `return` non
+  forwardé, résultat `{value:undefined,done:true}` (arg non
+  propagé). Sentinelle `IterOp::Running` (`take_helper`
+  partagé `next`/`return`/`throw`) : ré-entrance pendant step
+  **ou** `it_close` → `TypeError` (`GeneratorResumeAbrupt`) ;
+  `it_close` = `GetMethod` (non-callable non-nullish →
+  `TypeError`). `Iterator.concat` paresseux : `GetMethod`
+  @@iterator lu une fois à la construction, records ouverts à
+  l'atteinte. Gate `tests/iter_lazy.rs` **25/25** + 3 sondes
+  oracle (golden **733**). Lib 54/54, dom 277/277.
+  **Mesuré** filtre `built-ins/Iterator`, corpus 45k release
+  via `EXPLORER_TEST262_DIR` (corpus externe — le local est
+  un sous-ensemble) : **542 → 1 056/1 366 passes-mode**
+  (+514, échecs 824 → 310). **Reste** : `zip`/`zipKeyed`
+  ×126 (sequencing, chantier propre), validations ×42,
+  SameValue ×40, arités ×28, `from` ×14, priorités ~34.
+

@@ -201,6 +201,12 @@ fn meta(src: &str) -> Meta {
 }
 
 fn corpus_root() -> PathBuf {
+    // `EXPLORER_TEST262_DIR` — racine externe (p. ex. l'extraction
+    // 45k partagée d'un autre workspace) ; repli sur l'extrait
+    // versionné du crate.
+    if let Some(d) = std::env::var_os("EXPLORER_TEST262_DIR") {
+        return PathBuf::from(d);
+    }
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/conformance/test262")
 }
 

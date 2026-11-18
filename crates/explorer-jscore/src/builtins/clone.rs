@@ -87,7 +87,7 @@ pub(crate) fn clone_deep(
         Some(ObjKind::Host(h)) => CloneShape::Hst(h.clone()),
         Some(ObjKind::Symbol { .. }) => CloneShape::Err("Symbol"),
         Some(ObjKind::Proxy { .. }) => CloneShape::Err("Proxy"),
-        Some(ObjKind::Iter { .. }) => CloneShape::Err("iterator"),
+        Some(ObjKind::Iter { .. } | ObjKind::IterHelper(_)) => CloneShape::Err("iterator"),
         Some(ObjKind::FetchBody { .. }) => CloneShape::Err("Response"),
         Some(ObjKind::Blob { data, ty }) => {
             let proto = e.heap.obj(id).map_or(Value::Null, |o| o.proto.clone());
