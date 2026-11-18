@@ -14553,3 +14553,24 @@ chaque gain rapporté contre les **deux** archétypes.
   c460 mis à jour (deux kills honnêtes admis). Lib
   54/54, gc 13/13, c460 7/7, dom 277/277 release,
   clippy propre.
+- [x] **JS-C598 — §B-164 : `String.prototype.startsWith`/`endsWith`
+  lisent le récepteur `Value::Str`** (pandémie ×8 sites —
+  chargeur chunks Turbopack/Next : `can't infer type of chunk
+  from URL` sur vercel/airtable/france.tv/arte/yahoo…). Source
+  V8 (issue next.js #73789) : `endsWithExtension` teste
+  `url.startsWith(ext, end-ext.length)` — la forme à position
+  retournait `false` pour tout `Value::Str` sans units :
+  JS-C579 a introduit le split `sid`/`s` où `s` n'est
+  matérialisé que pour les `this` non-Str, et le chemin
+  octets retombait sur `unwrap_or("")` → comparaison contre
+  la chaîne vide (`startsWith`/`endsWith` toujours `false`
+  hors needle vide). Fix `bigint.rs` : `id.as_str()` dans le
+  chemin octets des deux méthodes (commentaires §B-164).
+  Les sondes surrogate existantes passaient toutes par
+  `units_view` — le trou de couverture exact : 4 sondes
+  octets gravées (`str_startswith`, `str_startswith_pos`,
+  `str_endswith`, `str_turbopack_chunk` — forme verbatim
+  `endsWithExtension`). Sondes §B : `startsWith`/`endsWith`
+  cassent aussi des `test/language/statements` et le test262
+  `built-ins/String/prototype/{starts,ends}With` — delta
+  mesurable attendu au prochain run complet.

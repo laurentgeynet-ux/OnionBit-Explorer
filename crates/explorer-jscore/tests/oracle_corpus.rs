@@ -684,6 +684,14 @@ pub const PROBES: &[(&str, &str)] = &[
     ("str_concat_meth", "'a'.concat('b','c')+'|'+'a'.concat()"),
     ("str_charcode_oob", "'ab'.charCodeAt(-1)+'|'+String.fromCharCode()"),
     ("str_valueof_cmp", "new String('a')=='a'+'|'+typeof new String('a')"),
+    // §B-164 : chemin octets du récepteur `Value::Str` (sans
+    // units) — la régression JS-C579 rendait toute needle
+    // non vide fausse ; les sondes surrogate ci-dessus ne le
+    // couvraient pas (elles passent par `units_view`).
+    ("str_startswith", "'abcdef'.startsWith('abc')+'|'+'abcdef'.startsWith('z')"),
+    ("str_startswith_pos", "'abcdef'.startsWith('def',3)+'|'+'x.js'.startsWith('.js',1)"),
+    ("str_endswith", "'abcdef'.endsWith('def')+'|'+'abcdef'.endsWith('abc',3)"),
+    ("str_turbopack_chunk", "var u='/a/b/c.js';u.startsWith('.js',u.length-3)+'|'+u.startsWith('.css',u.length-4)"),
     // --- Array edges complément ---
     ("arr_isarray_sub", "Array.isArray([])+'|'+Array.isArray({length:0})"),
     ("arr_of_vs_new", "Array.of(3).length+'|'+new Array(3).length"),

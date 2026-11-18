@@ -1173,7 +1173,14 @@ pub(crate) fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) ->
         let start = start.min(hu.len());
         return Ok(Value::Bool(hu[start..].starts_with(&nu[..])));
     }
-    let s = s.as_deref().unwrap_or("");
+    // Récepteur `Value::Str` : lire la boîte (`s` n'est
+    // matérialisé que pour les `this` non-Str — §B-164 : la
+    // chute sur `""` rendait tout `startsWith` faux hors
+    // chemin units, régression JS-C579).
+    let s = match &sid {
+        Some(id) => id.as_str(),
+        None => s.as_deref().unwrap_or(""),
+    };
     let start = start.min(u16_len(s));
     let needle = needle.as_str();
     // Préfixe sur la tranche **octets** du `start`-ième unit —
@@ -1223,7 +1230,12 @@ pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> J
         };
         return Ok(Value::Bool(hu[..end].ends_with(&nu[..])));
     }
-    let s = s.as_deref().unwrap_or("");
+    // Récepteur `Value::Str` : lire la boîte — même correctif
+    // §B-164 que `startsWith` ci-dessus.
+    let s = match &sid {
+        Some(id) => id.as_str(),
+        None => s.as_deref().unwrap_or(""),
+    };
     let needle = needle.as_str();
     let end = match end_arg {
         Value::Undefined => u16_len(s),
