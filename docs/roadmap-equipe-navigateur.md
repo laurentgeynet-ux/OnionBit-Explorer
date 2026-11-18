@@ -14968,3 +14968,30 @@ chaque gain rapporté contre les **deux** archétypes.
   **Reste** : `await`/`yield` par contexte async/générateur,
   paramètres ∩ lex des corps différés (déviation V-5a),
   `with` runtime (chaîne de portée objet — cluster séparé).
+
+- [x] **JS-C612 — `GetPrototypeFromConstructor` complet :
+  intrinsèque *typé par le ctor* du realm de `newTarget` +
+  `Symbol` exclu des protos — `proto-from-ctor-realm` 86 →
+  128/134, filtre `realm` 153 → 263/356** (`interp/mod.rs` +
+  sondes oracle). **`realm_ctor_proto(f, r)`** résout
+  `global[f.name].prototype` dans le realm de `newTarget`
+  (heap partagé, lecture own data-only, pas de swap) —
+  couvre `Reflect.construct(TA, [], C)` avec `C.prototype`
+  non-objet : `%Int8Array.prototype%`, `%EvalError.prototype%`,
+  `%WeakRef.prototype%`… du BON realm. Ctors cachés sans prop
+  globale mappés sur les champs ctx swappés : `GeneratorFunction`
+  → `gen_fn_proto`, `AsyncFunction` → `async_fn_proto`,
+  `AsyncGeneratorFunction` → `async_gen_fn_proto`.
+  **`is_spec_object`** : `Value::Obj` moins `ObjKind::Symbol`
+  (les Symbols sont des cellules heap JS-C579 mais pas des
+  objets spec — `nt.prototype = Symbol()` devenait le
+  `[[Prototype]]` du construit ; appliqué aux trois lectures
+  de `nt.prototype` et au default du rewrite). Sondes
+  `c612_nt_{symbol,typed,hidden}` (golden **769**, inclut le
+  bless `catch_shadow` du commit C611 early-errors — nouveau
+  message spec intentionnel). Lib 54/54, dom 277/277,
+  t262_realm 9/9, c609 9/9, clippy/fmt/doc propres.
+  **Reste** : construction *interne* sans `construct_nt`
+  (`Array.from`/`ArraySpeciesCreate`/`Symbol.split` — 6 modes
+  `*-from-ctor-realm`), brand-check privés cross-realm,
+  `eval-body-proto-realm`, `$262.agent`/`ShadowRealm`.

@@ -3375,6 +3375,69 @@ impl Engine {
         None
     }
 
+    /// `%<Ctor>.prototype%` du realm `r` — l'intrinsèque
+    /// **typé** résolu via `global[CtorName].prototype` du
+    /// realm (le heap est partagé entre ctx — lecture own
+    /// data-only, aucun swap). Nom du ctor : `Native.name`
+    /// ou descente `Bound` (JS-C611).
+    pub(crate) fn realm_ctor_proto(&self, f: &Value, r: crate::context::CtxId) -> Option<ObjId> {
+        let Value::Obj(mut cur) = *f else { return None };
+        let name = loop {
+            let o = self.heap.obj(cur)?;
+            match &o.kind {
+                ObjKind::Fun(Fun::Native { name, .. } | Fun::BoundNative { name, .. }) => {
+                    break *name
+                }
+                ObjKind::Fun(Fun::Bound {
+                    target: Value::Obj(t),
+                    ..
+                }) => cur = *t,
+                _ => return None,
+            }
+        };
+        let g = if r == self.cur_ctx {
+            self.global
+        } else {
+            self.parked.get(&r)?.global
+        };
+        if let Some(Value::Obj(cid)) = self.heap.obj(g)?.get_own(name) {
+            if let Some(Value::Obj(pid)) = self.heap.obj(cid)?.get_own("prototype") {
+                return Some(pid);
+            }
+        }
+        // Ctors cachés — pas de prop globale (`%GeneratorFunction%`,
+        // `%AsyncFunction%`, `%AsyncGeneratorFunction%` vivent sur
+        // les champs ctx swappés) : mapping nom → intrinsèque.
+        let v = match name {
+            "GeneratorFunction" if r == self.cur_ctx => Some(self.gen_fn_proto.clone()),
+            "AsyncFunction" if r == self.cur_ctx => Some(self.async_fn_proto.clone()),
+            "AsyncGeneratorFunction" if r == self.cur_ctx => Some(self.async_gen_fn_proto.clone()),
+            "GeneratorFunction" => self.parked.get(&r).map(|c| c.gen_fn_proto.clone()),
+            "AsyncFunction" => self.parked.get(&r).map(|c| c.async_fn_proto.clone()),
+            "AsyncGeneratorFunction" => self.parked.get(&r).map(|c| c.async_gen_fn_proto.clone()),
+            _ => None,
+        };
+        match v {
+            Some(Value::Obj(p)) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// `Type(v) is Object` spec : `Value::Obj` moins la
+    /// cellule primitive `ObjKind::Symbol` (JS-C579 — les
+    /// Symbols sont des Obj heap mais pas des objets spec ;
+    /// `nt.prototype = Symbol()` ne doit PAS devenir le
+    /// `[[Prototype]]` d'un construit, JS-C611).
+    pub(crate) fn is_spec_object(&self, v: &Value) -> bool {
+        match v {
+            Value::Obj(id) => !matches!(
+                self.heap.obj(*id).map(|o| &o.kind),
+                Some(ObjKind::Symbol { .. })
+            ),
+            _ => false,
+        }
+    }
+
     /// `%Object.prototype%` du realm `r` — intrinsèque lu
     /// dans `parked` quand `r` n'est pas le ctx courant
     /// (spec `GetFunctionRealm(nt).[[Intrinsics]]`, JS-C610).
@@ -13012,11 +13075,11 @@ impl Engine {
             _ => fid,
         };
         let mut proto = match self.get_prop_value(Value::Obj(proto_src), "prototype")? {
-            p @ Value::Obj(_) => p,
+            p if self.is_spec_object(&p) => p,
             _ => Value::Undefined,
         };
         for _ in 0..8 {
-            if matches!(proto, Value::Obj(_)) {
+            if self.is_spec_object(&proto) {
                 break;
             }
             let next = match self.heap.obj(proto_src).map(|o| &o.kind) {
@@ -13028,20 +13091,23 @@ impl Engine {
             };
             proto_src = next;
             proto = match self.get_prop_value(Value::Obj(proto_src), "prototype")? {
-                p @ Value::Obj(_) => p,
+                p if self.is_spec_object(&p) => p,
                 _ => Value::Undefined,
             };
         }
-        let proto = if let p @ Value::Obj(_) = proto {
-            p
+        let proto = if self.is_spec_object(&proto) {
+            proto
         } else {
             // Spec `GetPrototypeFromConstructor` : le repli
-            // est l'intrinsèque du realm de `newTarget`, pas
-            // du ctx appelant (`Reflect.construct(f, [],
-            // otherCtor)` — JS-C610).
-            let p = self
-                .fn_realm(&nt)
-                .map_or(self.protos.object, |r| self.realm_object_proto(r));
+            // est l'intrinsèque **typé par le ctor** du realm
+            // de `newTarget` — `%Int8Array.prototype%`,
+            // `%WeakRef.prototype%`… — pas celui du ctx
+            // appelant (JS-C610/C611 — `Reflect.construct(f,
+            // [], ctorRealmSansPrototype)`).
+            let p = self.fn_realm(&nt).map_or(self.protos.object, |r| {
+                self.realm_ctor_proto(&f, r)
+                    .unwrap_or_else(|| self.realm_object_proto(r))
+            });
             Value::Obj(p)
         };
         let obj = Value::Obj(self.heap.alloc_obj(Object::ordinary(proto.clone())));
@@ -13071,7 +13137,7 @@ impl Engine {
             let f_default = self
                 .get_prop_value(f.clone(), "prototype")
                 .ok()
-                .filter(|p| matches!(p, Value::Obj(_)));
+                .filter(|p| self.is_spec_object(p));
             if let Some(default_proto) = f_default {
                 if default_proto != proto {
                     if let Some(ro) = self.heap.obj_mut(rid) {
