@@ -100,3 +100,13 @@ vol[0-9]*.log
 # donnée utilisateur, jamais commitée.
 Explorer-data/
 node_modules/
+
+# Extraction locale test262 (JS-C30) : le corpus complet
+# (45 579 fichiers @ pin 2e58f87d — voir MANIFEST.txt) se
+# ré-extrait par sparse-checkout depuis
+# `Explorer-data/conformance-src/test262`, comme WPT —
+# seul le sous-ensemble lexical (1 077 fichiers) reste
+# versionné pour le cliquet `cargo test` courant.
+crates/explorer-jscore/tests/conformance/test262/built-ins/
+crates/explorer-jscore/tests/conformance/test262/expressions/
+crates/explorer-jscore/tests/conformance/test262/statements/

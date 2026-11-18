@@ -2,17 +2,24 @@ Test262 — ECMAScript Test Suite
 ===============================
 
 Source      : https://github.com/tc39/test262
-Commit      : d53ebc8 (sparse-checkout, depth 1)
+Commit      : 2e58f87d8350ad51224617a041c6e041d52f8444
+              (sparse-checkout, depth 1 — ré-extraction JS-C30,
+              avant : d53ebc8)
 Licensing   : BSD — each file carries its own copyright header;
               see https://github.com/tc39/test262/blob/main/LICENSE
 Subsets     : test/language/{types,literals,comments,white-space,
-              line-terminators,identifiers,hashbang}
+              line-terminators,identifiers,statements,expressions}
+              + test/built-ins (complet)
 Harness     : harness/*.js copied to _harness/ (same license,
               same commit)
-Case count  : 1077 .js files — suite complète test262 ≈ 50 000
-              fichiers : cet extrait ≈ 2 %, catégories
-              LEXICALES uniquement (aucun builtins/, statements/
-              ou expressions/ — extension planifiée JS-C30).
+Case count  : 45 579 .js files — suite complète test262 ≈ 50 000
+              fichiers : cet extrait ≈ 90 %, couche lexicale +
+              statements/expressions + surface built-ins
+              (JS-C30 ; avant : 1077 fichiers lexicaux ≈ 2 %).
+              Reste hors extraction : language/arguments-object,
+              block, function-code, global-code, rest-params…
+              (petites categories, extensibles au besoin) et
+              staging/ + intl402/ (hors perimetre moteur).
 
 NEVER edit files by hand — re-extract with the same
 sparse-checkout command and bump the commit hash above.

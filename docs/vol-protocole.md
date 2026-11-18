@@ -45,6 +45,31 @@ pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
 #   rapport → vols\rapports\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md
 ```
 
+## 0b. Variante — chasse §B-114 à cap relevé (solo)
+
+Vol de diagnostic exceptionnel : laisser la tempête se
+dérouler pour que les réservoirs nommés (étape 311)
+désignent le fuyard — **pas** un réglage de la station
+(~16 Gio : cap 8 Gio + build parallèle = crash mesuré).
+
+- **Solo strict** : aucun autre vol, aucun agent lourd,
+  et **rien de lourd pendant que le daemon vit** — le
+  build se fait avant le spawn (séquence 0.2→0.3
+  inchangée), ensuite pas même un `cargo check`.
+- `vol_joblimit -LimitMB 8192` (au lieu de 5 120) ;
+  `EXPLORER_RSS_SHED_MB=6144` — la dégradation reste
+  armée mais laisse la marge.
+- Sondes : `EXPLORER_ALLOC_TRACE=1` + `mem_diag` étape
+  311 (`dom_b`/`jrnl_b`/`muts_b`/`intern`/`bfc`/`bfc_b`).
+- Cibles : flipkart (drain `applies`, alloc fatale
+  1 229 400 B verbatim ×4), theverge (variante
+  `net_done`).
+- Verdict cherché : **quel compteur nommé** atteint la
+  zone fatale — pas « ça monte ».
+- Le joblimit du rapport (8 192) documente lui-même
+  l'écart à la baseline corpus 5 120 — retour à
+  5 120 dès la cause fixée.
+
 ## 1. Séquence de vol
 
 ```powershell

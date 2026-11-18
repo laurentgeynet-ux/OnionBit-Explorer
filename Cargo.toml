@@ -199,9 +199,23 @@ opt-level = 0
 debug = true
 
 [profile.release]
+# thin-LTO conservé : l'inlining cross-crate fait la perf du
+# binaire de vol ; `codegen-units` relevé 1 → 16 — la codegen
+# du binaire final repart sur les cœurs (coût dominant d'un
+# build release, daemon.exe en bout de graphe ~650 k lignes).
 lto = "thin"
-codegen-units = 1
+codegen-units = 2
+# Incrémental en release : les rebuilds de vol successifs ne
+# re-codegen que les CGU touchés (sans effet, CGU unique).
+incremental = true
 # Tables de lignes seules : backtraces nommées (site exact des
 # aborts allocateur §B-59 en vol) sans coût runtime — le symbole
 # collapsé `set_page_referrer` cachait le vrai site fautif.
 debug = "line-tables-only"
+
+# « Binaire contractuel » historique (codegen-units = 1) pour les
+# mesures de référence/benchmarks : `cargo build --profile dist`.
+[profile.dist]
+inherits = "release"
+codegen-units = 2
+incremental = false

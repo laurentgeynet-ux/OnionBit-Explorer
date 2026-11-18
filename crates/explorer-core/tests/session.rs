@@ -2676,7 +2676,7 @@ async fn no_factory_means_scripts_ignored() {
 /// Étape 123 — allocation ~4 Mio tentée puis titre posé :
 /// « ok » si la borne laisse passer, « err:… » sinon.
 const PAGE_HEAP_PROBE: &str = "<!doctype html><html><body>\
-     <script>try{var s='x'.repeat(4000000);document.title='ok'}\
+     <script>try{var s='x'.repeat(16000000);document.title='ok'}\
      catch(e){document.title='err:'+e.message}</script>\
      </body></html>";
 
@@ -2688,14 +2688,15 @@ const PAGE_HEAP_PROBE: &str = "<!doctype html><html><body>\
 #[tokio::test]
 async fn js_heap_limit_reaches_context() {
     let (mut s, t) = test_session_with(SessionConfig {
-        // 2 Mio, pas 1 : le heap de démarrage jscore est passé à
-        // ~1 047 941 o post-J15 (champ `idx` OnceCell, mémoire
-        // honnête comptée) — à 1 Mio `over_mem` s'armait avant le
-        // `repeat` et le kill dur incapturable précédait le
-        // RangeError rattrapable du probe. À 2 Mio la plomberie
-        // `set_mem_limit` est vérifiée à l'identique (4 Mio > 2
-        // Mio → refus catchable, vivant ~1,6 Mio < borne).
-        js_mem_limit_mib: 2,
+        // 12 Mio, pas 2 : le **pic d'installation** du contexte
+        // (builtins + install_dom, surface post-JS-C557+) franchit
+        // désormais ~6-8 Mio — à 2/3/6 Mio le contexte meurt avant
+        // le script (titre None, kill incapturable en amont du
+        // `try`), à 8-10 Mio le régime de croisière + 4 Mio restait
+        // sous la borne (titre « ok »). Sonde portée à ~16 Mio :
+        // install ~8 < 12 < install + 16 → refus catchable vérifiant
+        // `set_mem_limit` à l'identique, marge honnête des deux côtés.
+        js_mem_limit_mib: 12,
         ..SessionConfig::default()
     });
     t.route("/", 200, PAGE_HEAP_PROBE);

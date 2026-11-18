@@ -8771,12 +8771,23 @@ par sonde le 22/10 : 0 PipelineError) ; ~~example.com —
 0 erreur, 1 sync miroir = injection svg réussie) ;
 github.com — bundle > plafonds (JS-C41 livré le cadre).
 
-- [ ] **JS-C30. Extension corpus test262** : extraire les
+- [x] **JS-C30. Extension corpus test262** : extraire les
   répertoires non couverts (`builtins/` complet,
   `language/statements|expressions`) → baseline mesurée, skips
   whitelistés, remontée par échecs groupés.
   *Déclencheur : aussi l'élargissement honnête du chiffre
   test262 publié — à faire quand le reporting l'exige.*
+  **Livré** : extraction `test262@2e58f87d` — **45 579 fichiers**
+  (≈ 90 % de la suite). Mesure run-3 post-JS-C591..595 :
+  **54 376/88 709 exécutées (61,30 %), 0 panic** (41 → 0).
+  Whitelist `UNSUPPORTED` +11 tags vérifiés absents + skip
+  `fixture` (`*_FIXTURE.js`) → baseline gravée
+  **53 860/87 398 (61,63 %), 980 skips**, cliquets double
+  assise `BASELINE_*`/`FULL_*` + gate `EXPLORER_TEST262_FULL`.
+  Remontée groupée → file mécanismes JS-C36+ (`then` async-iter
+  ~3 656, early-errors ~4 281, `SetFunctionName` ~1 836,
+  `$262` ~734, accessor-index ~719, `ARITIES` ~500,
+  `Iterator` abstrait ~342).
 - [ ] **JS-C31. `Temporal` complet** : `ZonedDateTime`
   (arbitrage fuseaux), `round`/`smallestUnit`, calendriers.
   *Déclencheur : site réel.*

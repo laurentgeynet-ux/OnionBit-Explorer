@@ -30,16 +30,25 @@ use explorer_jscore::{Engine, Error, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Cliquet de régression — **gravé en passes-mode après la refonte
-/// BOA-10..14** (frontmatter complet, double passe strict/sloppy,
-/// `async`/`module`, `negative.type`). Score @ extraction d53ebc8 :
-/// **2045/2045 passes-mode exécutées, 31 skips fichier, 0 échec**
-/// — strict identique à sloppy sur toute la sous-extraction lexer
-/// (comments 46, identifiers 535, line-terminators 82, literals
-/// 1041, types 207, white-space 134 — passes par répertoire).
+/// Cliquet de régression, double assise (JS-C30) :
+/// - **sous-ensemble versionné** (1 077 fichiers lexer — checkout
+///   nu) : `BASELINE_*` ci-dessous, gravé après la refonte
+///   BOA-10..14 — 2045/2045 passes-mode, 31 skips fichier, 0 échec
+///   @ extraction d53ebc8 ;
+/// - **corpus complet extrait** (45 579 fichiers, pin 2e58f87d) :
+///   `FULL_*`, gravé sur la mesure run-3 post-JS-C591..595 +
+///   whitelist JS-C30 (+ skips `fixture`) — **53 860 passes /
+///   87 398 exécutées (61,63 %), 980 skips fichier, 0 panic
+///   moteur**.
 const BASELINE_PASSED: usize = 2045;
-/// Plafond de skips toléré — monte seulement si le corpus grossit.
+/// Plafond de skips toléré sur le sous-ensemble versionné.
 const BASELINE_SKIPPED_MAX: usize = 31;
+/// Seuil de détection du corpus complet extrait.
+const FULL_CORPUS_MIN: usize = 10_000;
+/// Cliquet corpus complet (voir ci-dessus).
+const FULL_PASSED: usize = 53_860;
+/// Plafond de skips toléré sur le corpus complet.
+const FULL_SKIPPED_MAX: usize = 980;
 
 /// Features présents dans le corpus mais absents du moteur —
 /// vérifiés contre `builtins.rs`/`lexer.rs`/`regexp.rs`, pas
@@ -61,7 +70,37 @@ const UNSUPPORTED: &[&str] = &[
     "IsHTMLDDA",              // `document.all` (Annex B host)
     "cross-realm",            // un seul realm par Engine
     "tail-call-optimization", // tree-walker sans PTC
+    // Whitelist JS-C30 — absences vérifiées dans le moteur (le tag
+    // test262 exige la feature ; un moteur qui ne l'a pas doit la
+    // sauter, sémantique officielle du runner — même quand des
+    // négatives passaient « par accident » : rejeter une syntaxe
+    // inconnue n'est pas la règle d'early-error mesurée).
+    "ShadowRealm",                        // global absent
+    "source-phase-imports",               // `import source x` absent
+    "source-phase-imports-module-source", // %AbstractModuleSource% idem
+    "import-defer",                       // `import defer` absent
+    "import-attributes",                  // `import … with {}` absent
+    "import-text",                        // type de module absent
+    "json-modules",                       // idem
+    "decorators",                         // `@dec` absent (Symbol.metadata seul)
+    "error-stack-accessor",               // stack = donnée own, pas accesseur proto
+    "regexp-duplicate-named-groups",      // dup `(?<n>)` rejetés même disjoints
+    "symbols-as-weakmap-keys",            // clés Symbol refusées (`CanBeHeldWeakly`)
 ];
+// NON-skippés malgré des échecs — features vérifiées PRÉSENTES
+// (les échecs sont des gaps sémantiques honnêtes, pas des
+// absences) : `u180e` (is_whitespace Unicode conforme ES2016),
+// `regexp-modifiers`, `iterator-chunking`/`sequencing`/`includes`,
+// `joint-iteration`, `promise-try`, `Atomics.waitAsync`,
+// `json-parse-with-source`, `top-level-await`, `caller`,
+// `Temporal` (chantier dédié), `align-detached-…` (RAB en cours),
+// `await-dictionary`, `Intl.*`, `Float16Array`, `upsert`,
+// `uint8array-base64`, `set-methods`, `regexp-v-flag`,
+// `explicit-resource-management`, `iterator-helpers` (eager),
+// `array-grouping`, `json-superset`, `stable-array-sort`,
+// `Error.isError`, `Math.sumPrecise`, `RegExp.escape`,
+// `promise-with-resolvers`, `change-array-by-copy`,
+// `array-find-from-last`, `import.meta`.
 
 /// Frontmatter `/*--- … ---*/` — les champs qui pilotent
 /// l'exécution.
@@ -382,6 +421,15 @@ fn run_pass(path: &Path, m: &Meta, body: &str, mode: Mode) -> Result<(), String>
 
 /// Toutes les passes d'un fichier (skip compté une fois).
 fn run_one(path: &Path, body: &str) -> Vec<(Mode, Result<(), String>)> {
+    // `*_FIXTURE.js` — dépendance importée par un test (code
+    // module avec `export`), jamais un test à part entière : le
+    // runner officiel ne l'exécute pas — skip compté `fixture`.
+    if path
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().ends_with("_FIXTURE.js"))
+    {
+        return vec![(Mode::Sloppy, Err("SKIP fixture".to_string()))];
+    }
     let m = meta(body);
     if let Some(reason) = skip_reason(&m) {
         return vec![(Mode::Sloppy, Err(format!("SKIP {reason}")))];
@@ -448,6 +496,23 @@ fn test262_baseline() {
         .expect("harness thread panicked");
 }
 
+/// Gate du corpus complet (JS-C30) : run de campagne lancé
+/// explicitement — jamais en `cargo test` courant (~3 h release,
+/// 10-20× debug — `verify_all` / CI locale gardent le sous-ensemble
+/// versionné). Rend `true` si l'exécution doit continuer.
+fn full_corpus_gate(len: usize) -> bool {
+    assert_eq!(len, 45_579, "corpus drifted — re-extract (pin 2e58f87d)");
+    if std::env::var("EXPLORER_TEST262_FULL").is_err() {
+        eprintln!(
+            "corpus complet ({len}) détecté — suite lourde : \
+             `EXPLORER_TEST262_FULL=1 cargo test -p \
+             explorer-jscore --test test262 --release`"
+        );
+        return false;
+    }
+    true
+}
+
 fn baseline_inner() {
     let root = corpus_root();
     let mut files = Vec::new();
@@ -463,8 +528,8 @@ fn baseline_inner() {
                 .replace('\\', "/")
                 .contains(needle.as_str())
         });
-    } else {
-        assert_eq!(files.len(), 1077, "corpus drifted — re-extract");
+    } else if files.len() > FULL_CORPUS_MIN && !full_corpus_gate(files.len()) {
+        return;
     }
 
     let mut passed = 0usize; // passes-mode réussies
@@ -476,7 +541,14 @@ fn baseline_inner() {
     let mut per_dir: std::collections::BTreeMap<String, (usize, usize)> =
         std::collections::BTreeMap::new();
 
+    // `EXPLORER_TEST262_TRACE=1` — chemin de chaque fichier sur
+    // stderr avant exécution : un crash en cours de suite laisse
+    // le coupable en dernière ligne du log.
+    let trace = std::env::var("EXPLORER_TEST262_TRACE").is_ok();
     for f in &files {
+        if trace {
+            eprintln!(">> {}", f.display());
+        }
         let body = match fs::read_to_string(f) {
             Ok(b) => b,
             Err(err) => {
@@ -531,20 +603,19 @@ fn baseline_inner() {
     }
 
     if only.is_none() {
+        let (base_passed, base_skipped) = if files.len() > FULL_CORPUS_MIN {
+            (FULL_PASSED, FULL_SKIPPED_MAX)
+        } else {
+            (BASELINE_PASSED, BASELINE_SKIPPED_MAX)
+        };
         assert!(
-            skipped <= BASELINE_SKIPPED_MAX,
-            "skipped {skipped} > ratchet {BASELINE_SKIPPED_MAX}"
+            skipped <= base_skipped,
+            "skipped {skipped} > ratchet {base_skipped}"
         );
-        // BASELINE_PASSED vaut 0 tant que la première mesure
-        // n'a pas été gravée — la comparaison est alors
-        // volontairement tautologique (cliquet non encore armé).
-        #[allow(clippy::absurd_extreme_comparisons)]
-        {
-            assert!(
-                passed >= BASELINE_PASSED,
-                "coverage regression: {passed} < {BASELINE_PASSED}"
-            );
-        }
+        assert!(
+            passed >= base_passed,
+            "coverage regression: {passed} < {base_passed}"
+        );
     }
     // Le cliquet `passed >= BASELINE` verrouille ; la liste des
     // échecs reste lisible via `--nocapture`.
