@@ -2783,6 +2783,21 @@ impl Engine {
         let nm = self.str_val(name);
         let f = self.bound_native(name, illegal_ctor_named, vec![nm]);
         if let Value::Obj(id) = f {
+            // `bound_native` pose `name = "bound X"` (convention
+            // Function.prototype.bind) — un ctor DOM porte le
+            // nom de sa classe : `el.constructor.name ===
+            // 'HTMLInputElement'` (spec, surface fingerprint).
+            let n = self.str_val(name);
+            self.set_own_attrs(
+                id,
+                "name",
+                n,
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
             self.set_own_attrs(
                 id,
                 "length",
@@ -4922,6 +4937,27 @@ impl Engine {
             }
         }
         self.set_own(g, "Location", lf, true);
+        // `location` est « unforgeable » (WebIDL Window :
+        // accesseur `{get,set}` non configurable) — `location =
+        // u` navigue via `hooks.navigate` au lieu de remplacer
+        // l'objet par la valeur brute. Avant, la prop data
+        // writable laissait `window.location = x` écraser le
+        // `LocationHost` → `.href` → `undefined` →
+        // `new URL(rel, location.href)` « Invalid URL » sur
+        // chaque prefetch Next.js (§B-119, vol 884 vercel
+        // ×43 : un hit par lien de nav).
+        {
+            let get = self.bound_native("location", location_global_get, vec![loc.clone()]);
+            let set = self.bound_native("location", location_global_set, vec![loc]);
+            if let Some(o) = self.heap.obj_mut(g) {
+                o.set_accessor("location", get, set, true);
+                if let Some(i) = o.prop_pos("location") {
+                    if let Some((_, crate::heap::Prop::Acc { attrs, .. })) = o.props.get_mut(i) {
+                        attrs.configurable = false;
+                    }
+                }
+            }
+        }
         let hist = self.new_host_object(Rc::new(HistoryHost));
         // Interface `History` (§B-14 vol 366 chess ×81 —
         // rolldown-runtime `x instanceof History`/`History is
@@ -4955,7 +4991,6 @@ impl Engine {
             }
         }
         self.set_own(g, "History", hf, true);
-        self.set_own(g, "location", loc, true);
         self.set_own(g, "history", hist, true);
         // `window.navigation` — Navigation API (WHATWG).
         // `Navigation` est un `EventTarget` : cloudflare-insights
@@ -7281,7 +7316,8 @@ impl Engine {
         // met `location` à jour côté hooks ; l'embedder peut
         // écraser la prop ensuite).
         let origin = self
-            .get_prop(g, "location")
+            .get_prop_value(Value::Obj(g), "location")
+            .ok()
             .and_then(|l| match l {
                 Value::Obj(id) => self.get_prop(id, "origin"),
                 _ => None,
@@ -8654,7 +8690,11 @@ impl Host for DocumentHost {
             // `document.location` ≙ `window.location` — même
             // objet hôte (trigger réel : scripts lisant
             // `document.location.search`, census arstechnica).
-            "location" => Ok(e.get_prop(e.global, "location")),
+            // `document.location` — via `get_prop_value` :
+            // `location` global est un **accesseur**
+            // (unforgeable, §B-119) — `get_prop` data-only
+            // rendrait `None`.
+            "location" => Ok(e.get_prop_value(Value::Obj(e.global), "location").ok()),
             // `document.implementation` — unique par document
             // (spec) ; `createHTMLDocument` sert le DOM de
             // parsing détaché de jQuery.
@@ -19252,6 +19292,24 @@ impl Host for DomImplementationHost {
 
 struct LocationHost;
 
+/// Getter `window.location` — bound[0] = l'objet `Location`
+/// (accesseur unforgeable, §B-119).
+fn location_global_get(_e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    Ok(a.first().cloned().unwrap_or(Value::Undefined))
+}
+
+/// Setter `window.location = u` — navigation via `hooks.navigate`
+/// (spec : équivaut à `location.href = u`) — l'objet `Location`
+/// n'est jamais remplacé par la valeur assignée.
+fn location_global_set(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    let v = a.get(1).cloned().unwrap_or(Value::Undefined);
+    let u = e.to_js_string(v)?;
+    if let Some(nav) = &e.hooks.navigate {
+        nav(&u);
+    }
+    Ok(Value::Undefined)
+}
+
 /// `(protocol, host, hostname, port, pathname, search, hash)` of `u`.
 /// Userinfo d'une URL brute (`scheme://u:p@host/…`) —
 /// `which_user` : `true` → username, `false` → password.
@@ -19537,7 +19595,18 @@ impl Host for WorkerLocationHost {
 pub(crate) fn install_worker_location(e: &mut Engine) {
     let loc = e.new_host_object(Rc::new(WorkerLocationHost));
     let g = e.global;
-    e.set_own(g, "location", loc, true);
+    // Même statut unforgeable que le `location` fenêtre (§B-119)
+    // — accesseur getter-only : `self.location = x` est absorbé
+    // (pas de navigation en worker), l'objet survit toujours.
+    let get = e.bound_native("location", location_global_get, vec![loc]);
+    if let Some(o) = e.heap.obj_mut(g) {
+        o.set_accessor("location", get, Value::Undefined, true);
+        if let Some(i) = o.prop_pos("location") {
+            if let Some((_, crate::heap::Prop::Acc { attrs, .. })) = o.props.get_mut(i) {
+                attrs.configurable = false;
+            }
+        }
+    }
 }
 
 /// `history` — `back`/`forward`/`go(n)` through `hooks.history_go`,
@@ -22125,7 +22194,7 @@ pub(crate) fn install_worker_navigator(e: &mut Engine) {
             Value::Obj(p),
             crate::heap::PropAttrs::FIXED,
         );
-        if let Some(Value::Obj(lid)) = e.get_prop(g, "location") {
+        if let Ok(Value::Obj(lid)) = e.get_prop_value(Value::Obj(g), "location") {
             if let Some(o) = e.heap.obj_mut(lid) {
                 o.set_proto(Value::Obj(p));
             }

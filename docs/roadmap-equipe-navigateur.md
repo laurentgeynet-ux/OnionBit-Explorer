@@ -14574,3 +14574,29 @@ chaque gain rapporté contre les **deux** archétypes.
   cassent aussi des `test/language/statements` et le test262
   `built-ins/String/prototype/{starts,ends}With` — delta
   mesurable attendu au prochain run complet.
+- [x] **JS-C599 — §B-119 : `window.location` devient un accesseur
+  unforgeable — `location = "/nav"` navigue au lieu d'écraser
+  l'objet, les `Invalid URL` du prefetch Next.js soldés**
+  (`dom_host.rs`). Verbatim vol 884 vercel : ~40×
+  `Invalid URL: /contact/sales|/ai-sdk|…` dans
+  `createPrefetchURL` (`new URL(addBasePath(a),
+  window.location.href)` — `base=<absent>` : `.href` rendait
+  `undefined`). Diagnostic : `location` était posé en
+  **propriété data writable+configurable** sur le global — une
+  assignation `window.location = x` (navigation ou stub page)
+  remplaçait le `LocationHost` par le brut. Fix : accesseur
+  `bound_native` getter (retourne l'objet stable) + setter
+  (hook navigation), descripteur figé `configurable:false` —
+  `delete window.location` absorbé, identité
+  `location === window.location === document.location`.
+  Même traitement `WorkerLocation` (getter-only, pas de
+  navigation en worker). Lectures internes migrées sur
+  `get_prop_value` (getter-aware) : `document.location`,
+  `origin`, `location`/`origin` worker. **Bonus filet** :
+  `illegal_ctor_bound` posait `name="bound X"` (convention
+  `bind`) — `el.constructor.name` rend désormais le nom de
+  classe spec (`'HTMLInputElement'`…, surface fingerprint) ;
+  répare 2 tests dom rouges pré-existants. Verrou
+  `tests/b119_location.rs` (assignation, delete, identité,
+  descripteur, `new URL` résolu). Dom 277/277, lib 54/54,
+  ratchet vert, clippy propre.
