@@ -949,7 +949,12 @@ progresse en trois paliers structurants :
   (hors scope, pilotés par les pages réelles) : générateurs
   lazy/`await` sur pending, décorateurs, `Intl` multi-locales,
   `Temporal` complet, branchement `explorer-dom` générationnel
-  ↔ miroir JS.*
+  ↔ miroir JS.* *Cap d'équipe JS : la cible n'est pas une
+  édition figée — ECMA-262 **vivant** (brouillon tc39), mesuré
+  via test262 épinglé (`2e58f87d`, 45 579 fichiers, MANIFEST
+  versionné). Les proposals stage-3 font partie de la cible
+  quand le terrain les rencontre ; avancer la cible = re-
+  extraction + re-baseline (procédure JS-C30).*
 - [~] **Étape 44. Web APIs.** `fetch`/`XHR`, `localStorage`/
   `sessionStorage`, History API, `MutationObserver`, workers
   (bornés). *En cours — côté moteur livré : `location.*` et
