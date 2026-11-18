@@ -639,23 +639,36 @@ pub(crate) fn install(e: &mut Engine) {
     //   gp.constructor                         = gfp
     //   gp.[[Prototype]]                       = %IteratorPrototype%
     //   gp[@@toStringTag]                      = "Generator"
-    // Même forme pour `AsyncGeneratorFunction` ; `%AsyncGenerator%`
-    // hérite `%IteratorPrototype%` par approximation (déviation —
-    // pas d'`%AsyncIteratorPrototype%` distinct).
+    // `%AsyncIteratorPrototype%` (JS-C601 — solde la
+    // déviation « `%AsyncGenerator%` hérite `%IteratorPrototype%` »
+    // qui lui faisait hériter le `next` **synchrone**) : proto
+    // `Object.prototype`, seul membre `[Symbol.asyncIterator]`
+    // → `this` (spec §27.1.4). `%AsyncGenerator%` s'y chaîne ;
+    // `for await` sondant `@@asyncIterator` trouve l'identité.
+    let async_it_proto = {
+        let p = e
+            .heap
+            .alloc_obj(crate::heap::Object::ordinary(Value::Obj(e.protos.object)));
+        let sf = e.native_fn("[Symbol.asyncIterator]", crate::collections::iter_self);
+        e.set_own(p, crate::interp::SYM_ASYNC_ITERATOR, sf, false);
+        Value::Obj(p)
+    };
     let fn_proto = Value::Obj(e.protos.function);
     let it_proto = Value::Obj(e.protos.iterator);
     for (ctor_v, tag) in [
         (e.gen_ctor.clone(), "Generator"),
         (e.async_gen_ctor.clone(), "AsyncGenerator"),
     ] {
+        let gp_proto = if tag == "AsyncGenerator" {
+            async_it_proto.clone()
+        } else {
+            it_proto.clone()
+        };
         let gfp_v = Value::Obj(
             e.heap
                 .alloc_obj(crate::heap::Object::ordinary(fn_proto.clone())),
         );
-        let gp_v = Value::Obj(
-            e.heap
-                .alloc_obj(crate::heap::Object::ordinary(it_proto.clone())),
-        );
+        let gp_v = Value::Obj(e.heap.alloc_obj(crate::heap::Object::ordinary(gp_proto)));
         if let (Value::Obj(gfp), Value::Obj(gp)) = (gfp_v.clone(), gp_v.clone()) {
             // Chaîne « interface » spec (`%GeneratorFunction%.prototype`,
             // `%Generator%`) : tous les liens `constructor`/`prototype`
@@ -700,6 +713,14 @@ pub(crate) fn install(e: &mut Engine) {
             } else {
                 e.async_gen_fn_proto = gfp_v;
                 e.async_gen_proto = gp_v;
+                // JS-C601 — `next`/`return`/`throw` **propres**
+                // (spec `%AsyncGeneratorPrototype%`) : file
+                // `AsyncGeneratorEnqueue` → promesses FIFO ;
+                // avant, `%IteratorPrototype%` léguait les
+                // méthodes sync `{value,done}` nues.
+                e.add_method(gp, "next", crate::interp::lazy::agen_next);
+                e.add_method(gp, "return", crate::interp::lazy::agen_return);
+                e.add_method(gp, "throw", crate::interp::lazy::agen_throw);
             }
         }
     }

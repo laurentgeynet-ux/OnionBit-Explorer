@@ -597,6 +597,13 @@ fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
             let Ok(mut exec) = exec.try_borrow_mut() else {
                 return Err(e.type_error("generator is already running"));
             };
+            // JS-C601 — la méthode sync de `%IteratorPrototype%`
+            // appliquée à un `async function*` → TypeError spec
+            // (la voie normale passe par `%AsyncGenerator%.next`,
+            // la file `AsyncGeneratorEnqueue` à promesses).
+            if exec.is_agen() {
+                return Err(e.type_error("sync iterator method on async generator"));
+            }
             return exec.next(e, arg(a, 0));
         }
     }
@@ -621,8 +628,11 @@ fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     Ok(iter_result(e, item.unwrap_or(ret), done))
 }
 
-/// Iterator proto's `[Symbol.iterator]` returns `this`.
-fn iter_self(_e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+/// Iterator proto's `[Symbol.iterator]` returns `this` —
+/// sert aussi `[Symbol.asyncIterator]` de
+/// `%AsyncIteratorPrototype%` (JS-C601 : `this` nu dans les
+/// deux cas).
+pub(crate) fn iter_self(_e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(this)
 }
 
@@ -640,6 +650,9 @@ fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             let Ok(mut exec) = exec.try_borrow_mut() else {
                 return Err(e.type_error("generator is already running"));
             };
+            if exec.is_agen() {
+                return Err(e.type_error("sync iterator method on async generator"));
+            }
             return exec.ret_at(e, arg(args, 0));
         }
     }
@@ -662,6 +675,9 @@ fn iter_throw(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
                 let Ok(mut exec) = exec.try_borrow_mut() else {
                     return Err(e.type_error("generator is already running"));
                 };
+                if exec.is_agen() {
+                    return Err(e.type_error("sync iterator method on async generator"));
+                }
                 return exec.throw_at(e, arg(args, 0));
             }
         }

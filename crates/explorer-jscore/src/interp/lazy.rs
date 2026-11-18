@@ -1033,6 +1033,29 @@ pub(crate) struct GExec {
     /// L'objet `ObjKind::GenLive` porteur de cet exec — les
     /// réactions `await` s'y boundent (racine GC).
     gen_obj: Value,
+    /// File `AsyncGeneratorEnqueue` — `Some` pour un
+    /// `async function*` : `next`/`return`/`throw` rendent
+    /// des promesses servies FIFO (JS-C601 — le `{value,done}`
+    /// synchrone cassait `it.next().then` sur ~3 656 tests
+    /// test262).
+    agen: Option<AgenState>,
+}
+
+/// Espèce de requête `%AsyncGenerator%` en file.
+#[derive(Clone, Copy)]
+pub(crate) enum AgenKind {
+    Next,
+    Return,
+    Throw,
+}
+
+/// État `async function*` (spec §27.5 `AsyncGeneratorEnqueue`)
+/// — file FIFO + drapeau `executing` : la requête de tête
+/// reste en file pendant une suspension `await` et n'est
+/// dépilée que lorsque le drive produit son `{value,done}`.
+pub(crate) struct AgenState {
+    queue: std::collections::VecDeque<(AgenKind, Value, ObjId)>,
+    executing: bool,
 }
 
 /// `args[i]` ou `Undefined` — convention natives.
@@ -1076,7 +1099,31 @@ impl GExec {
             ret_unwind: false,
             outer: None,
             gen_obj: Value::Undefined,
+            agen: None,
         }
+    }
+
+    /// Marque l'exécuteur `async function*` — la file
+    /// `AsyncGeneratorEnqueue` pilote `next`/`return`/`throw`
+    /// (promesses FIFO au lieu du `{value,done}` synchrone).
+    pub(crate) fn mark_agen(&mut self) {
+        self.agen = Some(AgenState {
+            queue: std::collections::VecDeque::new(),
+            executing: false,
+        });
+    }
+
+    /// `true` pour un `async function*` (file
+    /// `AsyncGeneratorEnqueue` active — JS-C601).
+    pub(crate) fn is_agen(&self) -> bool {
+        self.agen.is_some()
+    }
+
+    /// `true` si le corps attend la settlement d'un `await`
+    /// — la pompe agen ne sert pas de nouvelle requête tant
+    /// qu'une suspension est en vol.
+    fn pending_await(&self) -> bool {
+        matches!(self.pending, Some(Pending::Await { .. }))
     }
 
     /// Attache la promesse de l'async fn (settlement au
@@ -2184,6 +2231,15 @@ impl GExec {
         if let Some(v) = &self.unwinding {
             pv(v, out);
         }
+        // File `AsyncGeneratorEnqueue` : promesses en attente
+        // + valeurs de complétion (`next(v)`/`return(v)`/
+        // `throw(v)` non servis).
+        if let Some(st) = &self.agen {
+            for (_, v, p) in &st.queue {
+                pv(v, out);
+                out.push(*p);
+            }
+        }
     }
 }
 
@@ -2302,8 +2358,195 @@ fn resume_common(e: &mut Engine, args: &[Value], ok: bool) -> JsResult<Value> {
         // l'emprunt occupé rend la reprise sans effet
         // (JS-C593).
         if let Ok(mut g) = exec.try_borrow_mut() {
-            let _ = g.resume_await(e, r);
+            // `async function*` : la reprise transite par la
+            // pompe `AsyncGeneratorEnqueue` — la requête de
+            // tête settle sa promesse quand le drive produit
+            // un `{value,done}` ou repart en suspension
+            // (JS-C601).
+            if g.agen.is_some() {
+                g.resume = Some(r);
+                drop(g);
+                agen_pump(e, &exec);
+            } else {
+                let _ = g.resume_await(e, r);
+            }
         }
     }
     Ok(Value::Undefined)
+}
+
+/// Le `this` d'une méthode `%AsyncGenerator%` porte-t-il un
+/// `GenLive` ? (La distinction sync/async se lit sous
+/// emprunt à l'appel — `is_agen`.)
+fn agen_exec(e: &Engine, this: &Value) -> Option<Rc<RefCell<GExec>>> {
+    if let Value::Obj(id) = this {
+        if let Some(o) = e.heap.obj(*id) {
+            if let ObjKind::GenLive { exec } = &o.kind {
+                return Some(exec.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Settlement immédiat d'une requête sur générateur
+/// `completed` (spec `AsyncGeneratorStart` → état
+/// `completed` : `next` → `{undefined,done:true}`,
+/// `return` → `{v,done:true}`, `throw` → reject).
+fn agen_settle_completed(e: &mut Engine, kind: AgenKind, v: Value, prom: ObjId) {
+    match kind {
+        AgenKind::Next => {
+            let ir = iter_result(e, Value::Undefined, true);
+            e.resolve_promise(prom, ir);
+        }
+        AgenKind::Return => {
+            let ir = iter_result(e, v, true);
+            e.resolve_promise(prom, ir);
+        }
+        AgenKind::Throw => e.reject_promise(prom, v),
+    }
+}
+
+/// `%AsyncGenerator%.next(v)` — enfile, pompe, rend la promesse.
+pub(crate) fn agen_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    agen_enqueue(e, this, AgenKind::Next, arg(a, 0))
+}
+
+/// `%AsyncGenerator%.return(v)` — file `AsyncGeneratorAwaitReturn`.
+pub(crate) fn agen_return(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    agen_enqueue(e, this, AgenKind::Return, arg(a, 0))
+}
+
+/// `%AsyncGenerator%.throw(e)`.
+pub(crate) fn agen_throw(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    agen_enqueue(e, this, AgenKind::Throw, arg(a, 0))
+}
+
+/// `AsyncGeneratorEnqueue` — pousse la requête, lance la
+/// pompe si le générateur n'exécute pas déjà.
+fn agen_enqueue(e: &mut Engine, this: Value, kind: AgenKind, v: Value) -> JsResult<Value> {
+    let Some(exec) = agen_exec(e, &this) else {
+        return Err(e.type_error("async generator method on incompatible receiver"));
+    };
+    let prom = e.new_promise();
+    {
+        // Ré-entrance : `it.next()` pendant que le corps
+        // tourne (appel depuis le générateur lui-même ou un
+        // drain en vol) — spec `GeneratorResume` → TypeError,
+        // pas de panic `BorrowMutError` (même garde JS-C593).
+        let Ok(mut g) = exec.try_borrow_mut() else {
+            return Err(e.type_error("async generator is already running"));
+        };
+        if !g.is_agen() {
+            return Err(e.type_error("async generator method on incompatible receiver"));
+        }
+        if g.done {
+            drop(g);
+            agen_settle_completed(e, kind, v, prom);
+            return Ok(Value::Obj(prom));
+        }
+        if let Some(st) = &mut g.agen {
+            st.queue.push_back((kind, v, prom));
+        }
+    }
+    agen_pump(e, &exec);
+    Ok(Value::Obj(prom))
+}
+
+/// Pompe `AsyncGeneratorEnqueue` — sert la tête de file tant
+/// que le générateur n'est ni `completed` ni suspendu en
+/// `await`. Point de convergence unique : `agen_enqueue`
+/// (nouvelle requête) et `resume_common` (settlement d'un
+/// `await` en vol) appellent tous deux ici — le second pose
+/// `resume` puis la pompe re-drive la requête de tête.
+pub(crate) fn agen_pump(e: &mut Engine, exec: &Rc<RefCell<GExec>>) {
+    enum Act {
+        Stop,
+        Drain(Vec<(AgenKind, Value, ObjId)>),
+        Run(AgenKind, Value, ObjId),
+    }
+    loop {
+        let act = {
+            let Ok(mut g) = exec.try_borrow_mut() else {
+                // Emprunt occupé = un drive est en vol (le
+                // corps s'appelle lui-même en ré-entrance) —
+                // la pompe courante finira le service.
+                return;
+            };
+            let done = g.done;
+            let pend = g.pending_await();
+            let Some(st) = &mut g.agen else { return };
+            if done {
+                st.executing = false;
+                Act::Drain(st.queue.drain(..).collect())
+            } else if pend {
+                // Suspension `await` en vol : la requête de
+                // tête attend sa settlement — la reprise
+                // (`resume_common`) relancera la pompe.
+                st.executing = true;
+                Act::Stop
+            } else {
+                match st.queue.front() {
+                    None => {
+                        st.executing = false;
+                        Act::Stop
+                    }
+                    Some((k, v, p)) => {
+                        st.executing = true;
+                        Act::Run(*k, v.clone(), *p)
+                    }
+                }
+            }
+        };
+        match act {
+            Act::Stop => return,
+            Act::Drain(rest) => {
+                for (k, v, p) in rest {
+                    agen_settle_completed(e, k, v, p);
+                }
+                return;
+            }
+            Act::Run(kind, v, prom) => {
+                let r = {
+                    let Ok(mut g) = exec.try_borrow_mut() else {
+                        return;
+                    };
+                    if g.resume.is_some() {
+                        // Reprise d'une suspension `await` —
+                        // la complétion livrée (`Ok`→liver,
+                        // `Err`→throw_into) appartient à la
+                        // requête de tête, pas à `kind`.
+                        g.drive(e)
+                    } else {
+                        match kind {
+                            AgenKind::Next => g.next(e, v),
+                            AgenKind::Return => g.ret_at(e, v),
+                            AgenKind::Throw => g.throw_at(e, v),
+                        }
+                    }
+                };
+                // Suspension `await` en pleine requête : la
+                // tête reste en file — settle à la reprise.
+                let suspended = exec.try_borrow().map_or(true, |g| g.pending_await());
+                if suspended {
+                    return;
+                }
+                {
+                    let Ok(mut g) = exec.try_borrow_mut() else {
+                        return;
+                    };
+                    if let Some(st) = &mut g.agen {
+                        let _ = st.queue.pop_front();
+                    }
+                }
+                // `{value,done}` → resolve ; complétion
+                // abrupte → reject (spec
+                // `AsyncGeneratorResolve`/`Reject`).
+                match r {
+                    Ok(ir) => e.resolve_promise(prom, ir),
+                    Err(Thrown(t)) => e.reject_promise(prom, t),
+                }
+            }
+        }
+    }
 }

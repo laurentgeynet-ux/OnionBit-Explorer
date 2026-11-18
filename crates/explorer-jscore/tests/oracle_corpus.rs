@@ -616,6 +616,16 @@ pub const PROBES: &[(&str, &str)] = &[
     ("forawait_arr", "async function f(){let s=0;for await(const x of [1,2,3]){s+=x}return s}f().then(v=>globalThis.__fa=v);globalThis.__fa"),
     ("asyncgen_yield", "async function*g(){yield 1;yield 2}typeof g()"),
     ("forawait_gen", "async function*g(){yield 1;yield 2}async function f(){let s=0;for await(const x of g()){s+=x}return s}f().then(v=>globalThis.__fg=v);globalThis.__fg"),
+    // JS-C601 — file `AsyncGeneratorEnqueue` : `next`/`return`/
+    // `throw` rendent des promesses FIFO (spec §27.5).
+    ("agen_next_prom", "async function*g(){yield 1}var it=g();(it.next()instanceof Promise)+'|'+typeof it.next().then"),
+    ("agen_fifo", "async function*g(){yield 1;yield 2}var it=g();var a=[];it.next().then(r=>a.push(r.value+','+r.done));it.next().then(r=>a.push(r.value+','+r.done));it.next().then(r=>{a.push(r.value+','+r.done);globalThis.__af=a.join('|')});globalThis.__af"),
+    ("agen_await_mid", "async function*g(){yield 1;let x=await Promise.resolve(9);yield x}var it=g();var a=[];it.next().then(r=>a.push(r.value));it.next().then(r=>{a.push(r.value);globalThis.__am=a.join('|')});globalThis.__am"),
+    ("agen_return_drain", "async function*g(){yield 1;yield 2}var it=g();var a=[];it.next().then(()=>{it.return('r').then(r=>a.push(r.value+','+r.done));it.next().then(r=>{a.push(r.value+','+r.done);globalThis.__ar=a.join('|')})});globalThis.__ar"),
+    ("agen_throw_catch", "async function*g(){try{yield 1}catch(e){yield 'c:'+e}}var it=g();it.next().then(()=>it.throw('b').then(r=>globalThis.__at=r.value+','+r.done));globalThis.__at"),
+    ("agen_throw_start", "async function*g(){try{yield 1}catch(e){yield 'c'}}var it=g();it.throw('b').then(()=>globalThis.__as='F',e=>globalThis.__as='R:'+e);globalThis.__as"),
+    ("agen_sym_asyncit", "async function*g(){yield 1}var it=g();it[Symbol.asyncIterator]()===it"),
+    ("agen_not_synciter", "async function*g(){yield 1}try{for(const x of g())x}catch(e){e.constructor.name}"),
     ("prom_order", "let r='';Promise.resolve().then(()=>r+='a');Promise.resolve().then(()=>r+='b');r"),
     ("prom_then_und", "Promise.resolve(1).then(undefined).then(v=>v)instanceof Promise"),
     // --- Temporal profond ---

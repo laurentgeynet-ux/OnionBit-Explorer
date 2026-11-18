@@ -14625,4 +14625,29 @@ chaque gain rapporté contre les **deux** archétypes.
   **Reste** : remonter les `CSSTransition` réelles (marque
   `data-explorer-transition` côté session) quand un site
   l'exigera — surface proto déjà posée.
+- [x] **JS-C601 — file `AsyncGeneratorEnqueue` :
+  `%AsyncGenerator%.next`/`return`/`throw` rendent des
+  promesses FIFO** (`interp/lazy.rs`, `builtins/mod.rs`,
+  `collections.rs` — premier chantier de la file mécanismes
+  JS-C30 : cluster `then` non-thenable ~3 656 fichiers
+  test262). Verbatim : `it.next()` sur `async function*`
+  héritait `iter_next` sync → `{value,done}` nu →
+  `then is not a function` ; suspension `await` mid-request
+  rendait `emit` **stale** immédiatement. `GExec.agen` :
+  file FIFO `(kind, completion, promise)` + `agen_pump` —
+  tête servie tant que ni `completed` ni suspendue ;
+  suspension `await` = requête restée en tête, settle à la
+  reprise (`resume_common` → pompe) ; drain spec en
+  `completed`. Surface : `%AsyncIteratorPrototype%` distinct
+  (`@@asyncIterator → this`, proto `Object.prototype`)
+  chaîné sous `%AsyncGenerator%` — déviation « hérite
+  `%IteratorPrototype%` » soldée ; méthodes propres +
+  gardes sync → `TypeError`. Ré-entrance `try_borrow_mut`
+  (un `borrow()` nu paniquait — JS-C593 maintenu) ; file
+  tracée GC. Gate `tests/agen_queue.rs` 12/12 + 8 sondes
+  oracle (golden 718). Lib 54/54, dom 277/277.
+  **Reste (phase C si corpus l'exige)** :
+  `AsyncGeneratorAwaitReturn` affiné, `yield*` déléguant à
+  itérateur async ; delta mesuré au prochain run
+  `EXPLORER_TEST262_FULL`.
 

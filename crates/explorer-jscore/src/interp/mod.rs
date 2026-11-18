@@ -12343,6 +12343,19 @@ impl Engine {
                 .clone()
                 .unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&body_rc));
             let it = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
+            // `async function*` (JS-C601) : la file
+            // `AsyncGeneratorEnqueue` pilote les méthodes —
+            // `next`/`return`/`throw` rendent des promesses
+            // FIFO au lieu du `{value,done}` synchrone.
+            if lit.is_async {
+                if let Value::Obj(iid) = it {
+                    if let Some(o) = self.heap.obj(iid) {
+                        if let ObjKind::GenLive { exec } = &o.kind {
+                            exec.borrow_mut().mark_agen();
+                        }
+                    }
+                }
+            }
             if let (Value::Obj(iid), Value::Obj(fid)) = (it.clone(), f.clone()) {
                 if let Some(proto) = self.get_prop(fid, "prototype") {
                     if let Some(o) = self.heap.obj_mut(iid) {
