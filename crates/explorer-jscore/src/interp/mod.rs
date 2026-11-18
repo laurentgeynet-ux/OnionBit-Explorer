@@ -7423,7 +7423,17 @@ impl Engine {
             Pat::Rest(p) => self.bind_pat(env, this, p, v, mode),
             Pat::Default(p, d) => {
                 let v = if matches!(v, Value::Undefined) {
-                    self.eval_expr(env, this.clone(), d)?
+                    let dv = self.eval_expr(env, this.clone(), d)?;
+                    // JS-C604 — `NamedEvaluation` : `{x = () => {}}`,
+                    // `[f = function(){}]` et `function g(p = () => {})`
+                    // nomment la fonction anonyme d'après le binding
+                    // (SingleNameBinding uniquement).
+                    if let Pat::Ident(n) = p.as_ref() {
+                        if Self::is_anon_fn_def(d) && !n.is_empty() {
+                            self.set_fn_name(&dv, n);
+                        }
+                    }
+                    dv
                 } else {
                     v
                 };
@@ -7493,6 +7503,93 @@ impl Engine {
             PropKey::Computed(e) => {
                 let v = self.eval_expr(env, this, e)?;
                 self.prop_key(v).map(Rc::from)
+            }
+        }
+    }
+
+    /// Attrs spec des props `name`/`length` de fonction
+    /// (`{w:false, e:false, c:true}`) — JS-C604.
+    const FN_META_ATTRS: crate::heap::PropAttrs = crate::heap::PropAttrs {
+        writable: false,
+        enumerable: false,
+        configurable: true,
+    };
+    /// JS-C604 — `SetFunctionName(F, name)` : installe la prop
+    /// own `name` avec les attrs spec `{w:false, e:false,
+    /// c:true}`. Appelée uniquement depuis les sites
+    /// `NamedEvaluation` — la fonction est garantie anonyme
+    /// par `is_anon_fn_def` (ou méthode/accesseur, dont le
+    /// nom spec vient de la clé), donc le nom est posé sans
+    /// condition.
+    pub(crate) fn set_fn_name(&mut self, v: &Value, name: &str) {
+        let Value::Obj(id) = v else { return };
+        if !matches!(self.heap.obj(*id).map(|o| &o.kind), Some(ObjKind::Fun(_))) {
+            return;
+        }
+        // Ne pose le nom que si la fonction n'a pas déjà une
+        // prop own `name` significative : une `static name(){}`
+        // de classe (méthode ou accesseur) prime sur le nom
+        // inféré (spec `HasOwnProperty` du binding) ; le `""`
+        // matérialisé par `make_function` reste écrasable.
+        let own = self.heap.obj(*id).and_then(|o| o.find("name"));
+        let taken = match own.as_ref().and_then(crate::heap::Prop::data_value) {
+            None if own.is_some() => true,
+            Some(val) => !matches!(&val, Value::Str(s) if s.is_empty()),
+            None => false,
+        };
+        if taken {
+            return;
+        }
+        let n = self.str_val(name);
+        self.set_own_attrs(*id, "name", n, Self::FN_META_ATTRS);
+    }
+
+    /// `IsAnonymousFunctionDefinition` — expression de
+    /// fonction/classe sans nom de liaison (arrows,
+    /// gen/async compris).
+    pub(crate) fn is_anon_fn_def(e: &Expr) -> bool {
+        match e {
+            Expr::Function(l) => l.name.is_none(),
+            Expr::Class(l) => l.name.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Évalue un `PropKey` **une seule fois** et rend
+    /// `(clé interne, nom d'affichage)` : la clé interne
+    /// sert à poser la propriété, le nom à
+    /// `SetFunctionName` — `Symbol` → `"[desc]"`,
+    /// `#priv` → `"#x"`, sinon la clé elle-même.
+    pub(crate) fn prop_key_and_name(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        k: &PropKey,
+    ) -> JsResult<(Rc<str>, String)> {
+        match k {
+            PropKey::Name(n) => {
+                // Sentinelle privée `\u{f131}privN.x` → `#x`.
+                let disp = n
+                    .strip_prefix(PRIV_PREFIX)
+                    .and_then(|r| r.split_once('.').map(|(_, nm)| format!("#{nm}")))
+                    .unwrap_or_else(|| n.to_string());
+                Ok((n.clone(), disp))
+            }
+            PropKey::Computed(e) => {
+                let kv = self.eval_expr(env, this, e)?;
+                let sym_desc = if let Value::Obj(id) = kv {
+                    match self.heap.obj(id).map(|o| &o.kind) {
+                        Some(ObjKind::Symbol { desc, .. }) => {
+                            Some(desc.clone().unwrap_or_default())
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                let key = self.prop_key(kv)?;
+                let disp = sym_desc.map_or_else(|| key.clone(), |d| format!("[{d}]"));
+                Ok((Rc::from(key.as_str()), disp))
             }
         }
     }
@@ -7912,17 +8009,20 @@ impl Engine {
                     self.call_value(fv, ctor.clone(), &[])?;
                 }
                 ClassMemberKind::Method => {
-                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
+                    let (key, disp) = self.prop_key_and_name(env, this.clone(), &m.key)?;
+                    self.set_fn_name(&fv, &disp);
                     self.set_own(target, &key, fv, false);
                 }
                 ClassMemberKind::Getter => {
-                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
+                    let (key, disp) = self.prop_key_and_name(env, this.clone(), &m.key)?;
+                    self.set_fn_name(&fv, &format!("get {disp}"));
                     if let Some(o) = self.heap.obj_mut(target) {
                         o.set_accessor(&key, fv, Value::Undefined, false);
                     }
                 }
                 ClassMemberKind::Setter => {
-                    let key = self.eval_prop_key(env, this.clone(), &m.key)?;
+                    let (key, disp) = self.prop_key_and_name(env, this.clone(), &m.key)?;
+                    self.set_fn_name(&fv, &format!("set {disp}"));
                     if let Some(o) = self.heap.obj_mut(target) {
                         o.set_accessor(&key, Value::Undefined, fv, false);
                     }
@@ -12595,6 +12695,20 @@ impl Engine {
                 configurable: false,
             },
         );
+        // JS-C604 — `FunctionInitialize` : `length`/`name`
+        // matérialisés en props own réelles
+        // `{w:false,e:false,c:true}` — `hasOwnProperty` et
+        // `Object.getOwnPropertyDescriptor` les voient ;
+        // `SetFunctionName` des sites `NamedEvaluation`
+        // redéfinit le `""` initial.
+        let arity = lit
+            .params
+            .iter()
+            .take_while(|p| !p.rest && !matches!(p.pat, Pat::Default(..)))
+            .count();
+        self.set_own_attrs(id, "length", Value::Num(arity as f64), Self::FN_META_ATTRS);
+        let fn_name = self.str_val(lit.name.as_deref().unwrap_or(""));
+        self.set_own_attrs(id, "name", fn_name, Self::FN_META_ATTRS);
         // Spec `AddRestrictedFunctionProperties` : `caller` et
         // `arguments` sont des accesseurs poison sur les fonctions
         // strictes, les générateurs et l'async (sloppy : absents —

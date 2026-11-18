@@ -507,6 +507,11 @@ impl Engine {
                 // fonction/classe nommée lie aussi son propre nom.
                 ExportDecl::Default(e) => {
                     let v = self.eval_expr(env, this, e)?;
+                    // JS-C604 — `export default function(){}` /
+                    // `class{}` anonymes → nom `"default"`.
+                    if Self::is_anon_fn_def(e) {
+                        self.set_fn_name(&v, "default");
+                    }
                     self.env_set(env, "default", v.clone())?;
                     let own = match &**e {
                         Expr::Function(lit) => lit.name.clone(),
@@ -540,7 +545,7 @@ impl Engine {
                             let v = self.eval_expr(env, this.clone(), init);
                             self.call_only_slot = None;
                             let v = v?;
-                            self.infer_name(&d.pat, v.clone());
+                            self.infer_name(&d.pat, init, v.clone());
                             self.bind_pat(env, this.clone(), &d.pat, v, BindMode::Var)?;
                         }
                         // `var a;` — declare without clobbering.
@@ -557,7 +562,7 @@ impl Engine {
                         let v = self.eval_expr(env, this.clone(), init);
                         self.call_only_slot = None;
                         let v = v?;
-                        self.infer_name(&d.pat, v.clone());
+                        self.infer_name(&d.pat, init, v.clone());
                         self.bind_pat(
                             env,
                             this.clone(),
@@ -628,10 +633,15 @@ impl Engine {
             // enregistré sur la frame du corps courant.
             Stmt::Using { decls, is_await } => {
                 for d in decls {
-                    let v = match &d.init {
-                        Some(i) => self.eval_expr(env, this.clone(), i)?,
-                        None => Value::Undefined,
+                    let (v, init_e) = match &d.init {
+                        Some(i) => (self.eval_expr(env, this.clone(), i)?, Some(i)),
+                        None => (Value::Undefined, None),
                     };
+                    // JS-C604 — `using x = () => {}` :
+                    // `NamedEvaluation` du binding.
+                    if let Some(i) = init_e {
+                        self.infer_name(&d.pat, i, v.clone());
+                    }
                     self.bind_pat(
                         env,
                         this.clone(),
@@ -744,6 +754,7 @@ impl Engine {
                             for d in decls {
                                 if let Some(i) = &d.init {
                                     let v = self.eval_expr(env, this.clone(), i)?;
+                                    self.infer_name(&d.pat, i, v.clone());
                                     self.bind_pat(env, this.clone(), &d.pat, v, BindMode::Var)?;
                                 }
                             }
@@ -756,6 +767,7 @@ impl Engine {
                                 Self::declare_pat_lex(&head, &d.pat, !constant);
                                 if let Some(i) = &d.init {
                                     let v = self.eval_expr(&head, this.clone(), i)?;
+                                    self.infer_name(&d.pat, i, v.clone());
                                     self.bind_pat(
                                         &head,
                                         this.clone(),
@@ -1392,26 +1404,34 @@ impl Engine {
     /// un identifiant reçoit son `name` (dw : `var C = class{}`
     /// → `C.name === "C"` ; sinon `customElements.define(C.name,…)`
     /// recevait `""` → `Illegal component name ""`).
-    fn infer_name(&mut self, pat: &Pat, v: Value) {
+    fn infer_name(&mut self, pat: &Pat, init: &Expr, v: Value) {
+        // JS-C604 — `NamedEvaluation` ne s'applique qu'à
+        // `IsAnonymousFunctionDefinition(initializer)` :
+        // `var f = (0, function(){})` (Seq) ou
+        // `var f = g()` ne nomment pas.
+        if !Self::is_anon_fn_def(init) {
+            return;
+        }
         let Pat::Ident(name) = pat else {
             return;
         };
         let Value::Obj(id) = v else {
             return;
         };
-        if !self.is_callable(v) {
+        if !self.is_callable(v.clone()) {
             return;
         }
-        // Déjà nommée (`function f(){}`, `class K{}`) — ne pas
-        // écraser ; l'inférence ne vaut que pour `""`/absent.
+        // Déjà nommée (`function f(){}`, `class K{}`, bound
+        // `"bound f"`) — ne pas écraser ; l'inférence ne vaut
+        // que pour `""`/absent.
         let cur = self
             .get_prop(id, "name")
             .as_ref()
             .and_then(Self::heap_string_of)
             .unwrap_or_default();
         if cur.is_empty() && !name.is_empty() {
-            let n = self.str_val(&**name);
-            self.set_own(id, "name", n, false);
+            // JS-C604 — attrs spec `{w:false,e:false,c:true}`.
+            self.set_fn_name(&v, name);
         }
     }
 }

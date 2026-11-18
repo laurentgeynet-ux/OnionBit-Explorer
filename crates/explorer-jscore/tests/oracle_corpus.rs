@@ -853,4 +853,11 @@ pub const PROBES: &[(&str, &str)] = &[
     ("iter_concat_lazy", "let o=0;let a={[Symbol.iterator](){o++;return{next(){return{value:1,done:false}},return(){o+=10;return{}}}}};let it=Iterator.concat(a);let b=it.next();it.return();o+'|'+b.value+'|'+it.next().done"),
     ("iter_running_guard", "let h;let s={next(){let r;try{r=h.next()}catch(e){r='E'}return{value:r||'ok',done:false}}};h=Iterator.from(s).map(x=>x);h.next().value"),
     ("iter_close_getmethod", "try{Iterator.from({next(){return{done:false}},return:5}).map(x=>x).return()}catch(e){e.constructor.name}"),
+    // --- JS-C604 : SetFunctionName / NamedEvaluation ---
+    ("c604_methods", "var o={m(){},get x(){return 1},set x(v){}};o.m.name+'|'+Object.getOwnPropertyDescriptor(o,'x').get.name+'|'+Object.getOwnPropertyDescriptor(o,'x').set.name"),
+    ("c604_class", "class K{m(){}static s(){}get g(){return 1}};K.prototype.m.name+'|'+K.s.name+'|'+Object.getOwnPropertyDescriptor(K.prototype,'g').get.name"),
+    ("c604_computed", "var s=Symbol('t');var o={[s]:function(){},['a'+'b']:()=>0};o[s].name+'|'+o.ab.name"),
+    ("c604_defaults", "function d(x=function(){}){return x.name}var{w=()=>0}={};d()+'|'+w.name"),
+    ("c604_member_assign", "var f;f=function(){};var t={};t.k=function(){};f.name+'|'+t.k.name"),
+    ("c604_attrs", "var f=()=>0;var d=Object.getOwnPropertyDescriptor(f,'name');f.name='x';f.name+'|'+d.writable+','+d.enumerable+','+d.configurable"),
 ];

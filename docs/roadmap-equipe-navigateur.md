@@ -14712,3 +14712,33 @@ chaque gain rapporté contre les **deux** archétypes.
   ×126 (sequencing, chantier propre), validations ×42,
   SameValue ×40, arités ×28, `from` ×14, priorités ~34.
 
+- [x] **JS-C604 — `SetFunctionName`/`NamedEvaluation` :
+  `name`/`length` en props own réelles + inférence spec —
+  cluster naming test262 +1 794 passes-mode (−53 % échecs)**
+  (`interp/{mod,eval,exec}.rs`). Avant : `name`/`length`
+  synthétisés à la lecture — pas de vraie prop own
+  (`hasOwnProperty` → `false`), `lit.name` vide pour
+  méthodes/accesseurs/membres classe/props objet/computed/
+  défauts ; `infer_name` nommait tout callable anonyme.
+  Mécanisme : `make_function` matérialise `name`/`length`
+  (`FunctionInitialize`, `{w:false,e:false,c:true}`) ;
+  `set_fn_name` pose le nom sauf prop own `name`
+  significative (`static name(){}` de classe prime — spec
+  `HasOwnProperty` du binding) ; `prop_key_and_name` évalue
+  la clé **une fois** → clé interne + affichage
+  (`Symbol → "[desc]"`, `#priv → "#x"`) ; `is_anon_fn_def`
+  gate `IsAnonymousFunctionDefinition` (`(0, f)`/`g()` ne
+  nomment pas, `(f)` si — bug d'over-naming corrigé au
+  passage). Sites : props objet + méthodes + accesseurs
+  (`get `/`set `), membres de classe, `Pat::Default`
+  (params + destructuring `SingleNameBinding`), assignations
+  identifiant (`x = f` — pas `o.k = f`), `using`, init
+  `for`, `export default` → `"default"`. Gate
+  `tests/fn_name.rs` 11/11 + 6 sondes oracle (golden
+  **739**). Lib 54/54, dom 277/277. **Mesuré** filtre
+  `name`, corpus 45k release (4 579 fichiers / 8 901
+  passes-mode) : **5 536 → 7 330** (+1 794, échecs
+  3 365 → 1 571). **Reste** : early-errors `var`/`let`
+  ×510, noms des natives ×~80 (métadonnées builtins,
+  chantier propre), priorités/Temporal divers.
+

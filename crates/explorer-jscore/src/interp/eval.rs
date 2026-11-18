@@ -273,7 +273,6 @@ impl Engine {
                 for p in props {
                     match p {
                         ObjProp::Prop(k, ve) => {
-                            let v = self.eval_expr(env, this.clone(), ve)?;
                             // Spec `PropertyDefinition` : `__proto__:`
                             // littéral (jamais `["__proto__"]` calculé)
                             // règle [[Prototype]] au lieu de créer une
@@ -281,13 +280,22 @@ impl Engine {
                             // nourrissait `for..in`/`each` d'un item
                             // null (§B-105, crash `isForType` chart.umd).
                             if matches!(k, PropKey::Name(n) if n.as_ref() == "__proto__") {
+                                let v = self.eval_expr(env, this.clone(), ve)?;
                                 if matches!(v, Value::Obj(_) | Value::Null) {
                                     if let Some(o) = self.heap.obj_mut(id) {
                                         o.set_proto(v);
                                     }
                                 }
                             } else {
-                                let ks = self.eval_prop_key(env, this.clone(), k)?;
+                                // JS-C604 — `NamedEvaluation` : la clé
+                                // s'évalue avant la valeur (spec
+                                // `PropertyDefinitionEvaluation`) et
+                                // nomme une fonction anonyme.
+                                let (ks, disp) = self.prop_key_and_name(env, this.clone(), k)?;
+                                let v = self.eval_expr(env, this.clone(), ve)?;
+                                if Self::is_anon_fn_def(ve) {
+                                    self.set_fn_name(&v, &disp);
+                                }
                                 self.set_own(id, &ks, v, true);
                             }
                         }
@@ -309,9 +317,15 @@ impl Engine {
                             }
                         }
                         ObjProp::Getter(k, f) | ObjProp::Setter(k, f) => {
-                            let ks = self.eval_prop_key(env, this.clone(), k)?;
+                            let (ks, disp) = self.prop_key_and_name(env, this.clone(), k)?;
                             let fv = self.make_function(f, env, this.clone());
-                            let (get, set) = if matches!(p, ObjProp::Getter(..)) {
+                            let getter = matches!(p, ObjProp::Getter(..));
+                            // JS-C604 — `SetFunctionName` avec préfixe.
+                            self.set_fn_name(
+                                &fv,
+                                &format!("{} {disp}", if getter { "get" } else { "set" }),
+                            );
+                            let (get, set) = if getter {
                                 (fv, Value::Undefined)
                             } else {
                                 (Value::Undefined, fv)
@@ -1074,12 +1088,26 @@ impl Engine {
                     // bord de `base`/`key`) s'évalue AVANT le RHS —
                     // `(..., install(), K).Wn = rhs()` sur du code
                     // réel (Google Closure) en dépend.
+                    // JS-C604 — `NamedEvaluation` : `x = () => {}`
+                    // nomme la fonction anonyme (référence identifiant
+                    // seulement — `o.k = f` reste sans nom, spec).
+                    let tgt_name = if let Expr::Ident(n) = lhs.as_ref() {
+                        Self::is_anon_fn_def(rhs).then(|| n.clone())
+                    } else {
+                        None
+                    };
                     if let Some(lv) = self.resolve_lvalue(env, this.clone(), lhs)? {
                         let v = self.eval_expr(env, this, rhs)?;
+                        if let Some(n) = &tgt_name {
+                            self.set_fn_name(&v, n);
+                        }
                         self.store_lvalue(env, lv, v.clone())?;
                         return Ok(v);
                     }
                     let v = self.eval_expr(env, this.clone(), rhs)?;
+                    if let Some(n) = &tgt_name {
+                        self.set_fn_name(&v, n);
+                    }
                     self.write_lvalue(env, this, lhs, v.clone())?;
                     return Ok(v);
                 }
