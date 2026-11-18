@@ -10891,16 +10891,33 @@ impl Engine {
                 return Ok(true);
             }
         }
+        // `ArraySetLength` : `length` passe `ToNumber` puis
+        // `ToUint32` — divergence → RangeError (2**32, négatif,
+        // fraction, NaN). Avant `obj_mut` : `to_number` peut
+        // exécuter un `valueOf` (susceptible même de geler
+        // l'array — l'intégrité est re-vérifiée à l'écriture).
+        let mut arr_new_len = None;
+        if key == "length" && matches!(self.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)))
+        {
+            // Spec : `ToUint32` (via `ToNumber`) PUIS `ToNumber` —
+            // deux appels observables (`valueOf` compte deux fois).
+            let u = to_uint32(self.to_number(v.clone())?);
+            let num = self.to_number(v.clone())?;
+            // Comparaison stricte voulue par la spec — `-0` reste
+            // `+0` (égalité numérique, pas `to_bits`).
+            #[allow(clippy::float_cmp)]
+            if u as f64 != num {
+                return Err(self.range_error("Invalid array length"));
+            }
+            arr_new_len = Some(u as usize);
+        }
         // Garde d'alloc AVANT le `&mut` heap : écrire `a[2^32-1]=x`
         // ou `a.length = 4e9` densifierait le Vec d'éléments (~64
         // Gio) — `alloc_guard` refuse avant l'allocateur (JS-C55).
         let grow = match self.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::Array(elems)) => {
                 let need = if key == "length" {
-                    match v {
-                        Value::Num(n) if n >= 0.0 => Some(to_uint32(n) as usize),
-                        _ => None,
-                    }
+                    arr_new_len
                 } else {
                     ai.map(|i| i + 1)
                 };
@@ -10943,10 +10960,7 @@ impl Engine {
                 if o.elem_integrity & 4 != 0 {
                     return Ok(false);
                 }
-                let n = match v {
-                    Value::Num(n) if n >= 0.0 => to_uint32(n) as usize,
-                    _ => elems.len(),
-                };
+                let n = arr_new_len.unwrap_or(elems.len());
                 // Réduction sous `seal`/`freeze` : la spec supprime
                 // les éléments un à un → élément non-configurable
                 // → `TypeError` abrupt (même en sloppy, `Set` jette).

@@ -14995,3 +14995,21 @@ chaque gain rapporté contre les **deux** archétypes.
   (`Array.from`/`ArraySpeciesCreate`/`Symbol.split` — 6 modes
   `*-from-ctor-realm`), brand-check privés cross-realm,
   `eval-body-proto-realm`, `$262.agent`/`ShadowRealm`.
+
+- [ ] **JS-C613 — arrays sparse** (`interp/{mod,ops}.rs` +
+  `heap.rs` + `tests/c613_sparse.rs`). **Tranche 1/2 livrée —
+  règles de validation** : `ArraySetLength` spec (`length` =
+  `ToNumber` puis `ToUint32`, divergence → `RangeError` — deux
+  appels observables, `valueOf` avant le check writable) ;
+  `array_index` borné à 2³²−2 (`"4294967295"` = prop nommée).
+  Filtre `built-ins/Array/length` : **32 → 48/62**.
+  **Tranche 2 — représentation** (contrat = les 5 `#[ignore]`
+  de la gate) : `ObjKind::Array` dense+sparse, `len` découplée
+  du `Vec` — `a.length=2³²−1`/`new Array(4294967295)` sans
+  alloc, indices hauts en `BTreeMap`, shrink/delete traversants,
+  énumération/join non-densifiants, GC/`cell_bytes` couvrant la
+  map. **Reste à trier dans la tranche 2** : 8 échecs
+  `defineProperty(arr,"length",…)` (chemin exotique
+  `[[DefineOwnProperty]]` — `writable`→TypeError, `get` jamais
+  lu, ordre RangeError/TypeError). Cible élargie : ~80 fichiers
+  corpus à constantes 2³² + les 6 `zip` résiduels.
