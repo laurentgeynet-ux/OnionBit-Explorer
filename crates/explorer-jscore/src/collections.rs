@@ -10,7 +10,7 @@
 //! (spec semantics: live iterators — ours freeze a snapshot, a
 //! documented deviation).
 
-use crate::heap::{IterHelperState, IterOp, JsResult, ObjKind, Object, Thrown};
+use crate::heap::{IterHelperState, IterOp, JsResult, ObjKind, Object, Thrown, ZipMode};
 use crate::interp::SYM_ITERATOR;
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -679,11 +679,35 @@ pub(crate) fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     if let Some(mut st) = st {
         if !st.done {
             st.done = true;
-            let src = st.source.clone();
-            let r = it_close(e, &src);
-            if let Some(o) = e.heap.obj_mut(id) {
-                o.kind = ObjKind::IterHelper(st);
-            }
+            // `zip`/`zipKeyed` — `GeneratorReturn` spec :
+            // suspendedStart (`counter`==0) → état
+            // « completed » reposé AVANT le `IteratorCloseAll`
+            // (un `next()`/`return()` réentrant lit
+            // `{done:true}`) ; suspendedYield → état
+            // « executing » pendant le close — la sentinelle
+            // `Running` reste → ré-entrance → `TypeError`.
+            let r = if let IterOp::Zip { iters, .. } = &st.op {
+                let recs = iters.clone();
+                if st.counter > 0 {
+                    let r = zip_close_all(e, &recs);
+                    if let Some(o) = e.heap.obj_mut(id) {
+                        o.kind = ObjKind::IterHelper(st);
+                    }
+                    r
+                } else {
+                    if let Some(o) = e.heap.obj_mut(id) {
+                        o.kind = ObjKind::IterHelper(st);
+                    }
+                    zip_close_all(e, &recs)
+                }
+            } else {
+                let src = st.source.clone();
+                let r = it_close(e, &src);
+                if let Some(o) = e.heap.obj_mut(id) {
+                    o.kind = ObjKind::IterHelper(st);
+                }
+                r
+            };
             r?;
         } else if let Some(o) = e.heap.obj_mut(id) {
             o.kind = ObjKind::IterHelper(st);
@@ -724,10 +748,30 @@ pub(crate) fn iter_throw(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<V
         if let Some(mut st) = st {
             if !st.done {
                 st.done = true;
-                let src = st.source.clone();
-                let _ = it_close(e, &src);
-            }
-            if let Some(o) = e.heap.obj_mut(id) {
+                // `zip`/`zipKeyed` — mêmes règles
+                // suspendedStart/suspendedYield que `return()` ;
+                // échec du close masqué par le jet.
+                if let IterOp::Zip { iters, .. } = &st.op {
+                    let recs = iters.clone();
+                    if st.counter > 0 {
+                        let _ = zip_close_all(e, &recs);
+                        if let Some(o) = e.heap.obj_mut(id) {
+                            o.kind = ObjKind::IterHelper(st);
+                        }
+                    } else {
+                        if let Some(o) = e.heap.obj_mut(id) {
+                            o.kind = ObjKind::IterHelper(st);
+                        }
+                        let _ = zip_close_all(e, &recs);
+                    }
+                } else {
+                    let src = st.source.clone();
+                    let _ = it_close(e, &src);
+                    if let Some(o) = e.heap.obj_mut(id) {
+                        o.kind = ObjKind::IterHelper(st);
+                    }
+                }
+            } else if let Some(o) = e.heap.obj_mut(id) {
                 o.kind = ObjKind::IterHelper(st);
             }
         }
@@ -995,6 +1039,20 @@ fn it_step(e: &mut Engine, src: &Value, next: &Value) -> JsResult<Option<Value>>
         return Ok(None);
     }
     Ok(Some(e.get_prop_value(Value::Obj(rid), "value")?))
+}
+
+/// `IteratorStep` (spec) — `next()` + lecture `done`
+/// **uniquement** : `value` n'est jamais lu (l'étape sèche du
+/// mode `strict` de `zip` exige cette forme — un getter
+/// `value` hostile ne doit pas être observé).
+fn it_done_step(e: &mut Engine, src: &Value, next: &Value) -> JsResult<bool> {
+    e.tick()?;
+    let r = e.call_value(next.clone(), src.clone(), &[])?;
+    let Value::Obj(rid) = r else {
+        return Err(e.type_error("iterator result is not an object"));
+    };
+    let d = e.get_prop_value(Value::Obj(rid), "done")?;
+    Ok(e.to_boolean(d))
 }
 
 /// `IteratorClose` (spec §7.4) — `GetMethod(src, "return")` :
@@ -1385,6 +1443,37 @@ fn it_helper_step(e: &mut Engine, st: &mut IterHelperState) -> JsResult<ItOut> {
                 ItOut::Val(out)
             }
         }
+        IterOp::Zip {
+            iters,
+            keys,
+            mode,
+            pads,
+        } => {
+            // `counter` = « démarré » : `return()` distingue
+            // suspendedStart (état completed → les rappels
+            // voient `{done:true}`) de suspendedYield (état
+            // executing → rappels → `TypeError`).
+            st.counter += 1;
+            match zip_step(e, iters, mode, pads)? {
+                None => ItOut::Done,
+                Some(vals) => {
+                    let v = match keys {
+                        // `zipKeyed` — objet **proto null**, props
+                        // `CreateDataProperty` dans l'ordre des clés.
+                        Some(ks) => {
+                            let o = e.heap.alloc_obj(Object::ordinary(Value::Null));
+                            for (k, x) in ks.iter().zip(vals) {
+                                e.set_own(o, k, x, true);
+                            }
+                            Value::Obj(o)
+                        }
+                        // `zip` — array packed frais par ligne.
+                        None => e.new_array(vals),
+                    };
+                    ItOut::Val(v)
+                }
+            }
+        }
         // `Wrap` est traité en amont (`it_helper_next`, appel
         // brut sans extraction) ; `Running` = sentinelle de
         // course — les deux sont interceptées avant ce point,
@@ -1661,78 +1750,415 @@ fn it_windows(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     )
 }
 
-/// `Iterator.zip(iterables, {mode?})` — proposal : itérateur
-/// d'arrays `[it1[i], it2[i], …]` ; mode `shortest` (défaut),
-/// `longest` (avec `padding`) ou `strict` (longueurs égales
-/// imposées → `RangeError`).
+/// `Iterator.zip(iterables, options?)` — joint-iteration
+/// (proposal) : options lues (`mode` puis `padding` — ordre
+/// observable), l'itérable externe itéré via `@@iterator`
+/// (`GetIterator` strict), chaque item validé par
+/// `GetIteratorFlattenable` ([`it_record`]) puis le *pas* est
+/// paresseux ([`IterOp::Zip`]). Abrupt à la construction →
+/// `IteratorCloseAll` des records déjà ouverts (ordre inverse).
 pub(crate) fn iterator_zip(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let iters = zip_iters(e, arg(args, 0))?;
-    let opts = arg(args, 1);
-    let mode = match &opts {
-        Value::Obj(id) => e.get_prop(*id, "mode").map_or_else(
-            || "shortest".to_string(),
-            |v| e.to_js_string(v).unwrap_or_default(),
-        ),
-        _ => "shortest".to_string(),
-    };
-    let max = iters.iter().map(Vec::len).max().unwrap_or(0);
-    let min = iters.iter().map(Vec::len).min().unwrap_or(0);
-    let len = match mode.as_str() {
-        "longest" => max,
-        "strict" => {
-            if max != min {
-                return Err(e.range_error("zip strict requires same-length iterators"));
-            }
-            max
-        }
-        "shortest" => min,
-        _ => return Err(e.type_error("unknown zip mode")),
-    };
-    let pad = match &opts {
-        Value::Obj(id) => e.get_prop(*id, "padding").unwrap_or(Value::Undefined),
-        _ => Value::Undefined,
-    };
-    let mut out = Vec::with_capacity(len);
-    for i in 0..len {
-        let row: Vec<Value> = iters
-            .iter()
-            .map(|it| it.get(i).cloned().unwrap_or_else(|| pad.clone()))
-            .collect();
-        out.push(e.new_array(row));
+    let iters_arg = arg(args, 0);
+    if !zip_is_object(e, &iters_arg) {
+        return Err(e.type_error("zip expects an iterable of iterables"));
     }
-    Ok(iter_obj(e, out, e.protos.iter_helper))
+    let (mode, padding) = zip_options(e, &arg(args, 1))?;
+    let (osrc, onext) = zip_get_iter(e, &iters_arg, "iterables")?;
+    let mut recs: Vec<(Value, Value, bool)> = Vec::new();
+    loop {
+        match it_step(e, &osrc, &onext) {
+            Ok(Some(item)) => match zip_flattenable(e, item) {
+                Ok((s, n)) => recs.push((s, n, false)),
+                Err(t) => {
+                    // Spec : « inputIter » + iters fermés.
+                    let _ = zip_close_all(e, &recs);
+                    let _ = it_close(e, &osrc);
+                    return Err(t);
+                }
+            },
+            Ok(None) => break,
+            Err(t) => {
+                let _ = zip_close_all(e, &recs);
+                return Err(t);
+            }
+        }
+    }
+    let pads = zip_pads(e, &recs, padding, None)?;
+    Ok(zip_helper(e, recs, None, mode, pads))
 }
 
-/// `Iterator.zipKeyed(obj, {mode?})` — proposal : chaque clé de
-/// `obj` est un itérable → itérateur d'objets `{k: it_k[i]}`.
+/// `Iterator.zipKeyed(obj, options?)` — clés propres
+/// **énumérables** (symbols inclus — `EnumerableOwnProperties`),
+/// chaque valeur validée `GetIteratorFlattenable` ; valeur
+/// `undefined` → clé omise (aucun record, aucune prop dans les
+/// objets résultats — objets à proto `null`).
 pub(crate) fn iterator_zip_keyed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let Value::Obj(id) = arg(args, 0) else {
+    let iterables = arg(args, 0);
+    let Value::Obj(id) = &iterables else {
         return Err(e.type_error("zipKeyed expects an object of iterables"));
     };
-    let keys = e.own_keys(id);
-    let mut iters = Vec::with_capacity(keys.len());
-    for k in &keys {
-        let v = e.get_prop(id, k).unwrap_or(Value::Undefined);
-        iters.push(e.iter_values(v)?);
+    let id = *id;
+    if !zip_is_object(e, &iterables) {
+        return Err(e.type_error("zipKeyed expects an object of iterables"));
     }
-    let len = iters.iter().map(Vec::len).min().unwrap_or(0);
-    let mut out = Vec::with_capacity(len);
-    for i in 0..len {
-        let obj = e.new_object();
-        for (k, it) in keys.iter().zip(iters.iter()) {
-            e.set_own(obj, k, it[i].clone(), true);
+    let (mode, padding) = zip_options(e, &arg(args, 1))?;
+    // `[[OwnPropertyKeys]]` collecté d'abord, puis **par clé** :
+    // `[[GetOwnProperty]]` (trap getOwnPropertyDescriptor — un
+    // abrupt ferme les records déjà ouverts), filtre
+    // `enumerable`, `[[Get]]` — ordre observable spec.
+    let keys = e.own_keys_trapped(id)?;
+    let mut recs: Vec<(Value, Value, bool)> = Vec::with_capacity(keys.len());
+    let mut kws: Vec<String> = Vec::with_capacity(keys.len());
+    for k in keys {
+        let enumerable = match e.get_own_prop(id, &k) {
+            Ok(Some(p)) => p.enumerable(),
+            Ok(None) => continue,
+            Err(t) => {
+                let _ = zip_close_all(e, &recs);
+                return Err(t);
+            }
+        };
+        if !enumerable {
+            continue;
         }
-        out.push(Value::Obj(obj));
+        match e.get_prop_value(Value::Obj(id), &k) {
+            Ok(Value::Undefined) => {}
+            Ok(v) => match zip_flattenable(e, v) {
+                Ok((s, n)) => {
+                    recs.push((s, n, false));
+                    kws.push(k);
+                }
+                Err(t) => {
+                    let _ = zip_close_all(e, &recs);
+                    return Err(t);
+                }
+            },
+            Err(t) => {
+                let _ = zip_close_all(e, &recs);
+                return Err(t);
+            }
+        }
     }
-    Ok(iter_obj(e, out, e.protos.iter_helper))
+    let pads = zip_pads(e, &recs, padding, Some(&kws))?;
+    Ok(zip_helper(e, recs, Some(kws), mode, pads))
 }
 
-/// Déplie l'itérable d'itérables en `Vec<Vec<Value>>`.
-fn zip_iters(e: &mut Engine, v: Value) -> JsResult<Vec<Vec<Value>>> {
-    let outer = e.iter_values(v)?;
-    let mut iters = Vec::with_capacity(outer.len());
-    for it in outer {
-        iters.push(e.iter_values(it)?);
+/// `GetOptionsObject` + `mode`/`padding` — options non-objet
+/// non-undefined → `TypeError` ; `mode` comparé **brut** (pas
+/// de `ToString` — `{toString()→'shortest'}` est invalide) ;
+/// `padding` lu **seulement** pour `longest` et doit être un
+/// objet (get observable — spec étape 7 avant l'itération de
+/// `iterables`).
+/// `Type(x) is Object` spec — `Obj` **sauf** la cellule
+/// primitive `ObjKind::Symbol` (`typeof` rend "symbol" — un
+/// Symbol passé à `iterables`/`options`/`padding` lève
+/// `TypeError`, il n'est pas un objet). Le dépliage proxy de
+/// `typeof_str` couvre aussi `Proxy(Symbol)`.
+fn zip_is_object(e: &Engine, v: &Value) -> bool {
+    match v {
+        // `typeof null === "object"` — check direct sur la
+        // cellule, pas `typeof_str` : la primitive `Symbol`
+        // (`ObjKind::Symbol`) n'est pas un objet spec.
+        Value::Obj(id) => !matches!(
+            e.heap.obj(*id).map(|o| &o.kind),
+            Some(ObjKind::Symbol { .. })
+        ),
+        _ => false,
     }
-    Ok(iters)
+}
+
+fn zip_options(e: &mut Engine, opts: &Value) -> JsResult<(ZipMode, Value)> {
+    match opts {
+        Value::Undefined => Ok((ZipMode::Shortest, Value::Undefined)),
+        v if zip_is_object(e, v) => {
+            let mv = e.get_prop_value(opts.clone(), "mode")?;
+            let mode = if matches!(mv, Value::Undefined) {
+                ZipMode::Shortest
+            } else if let Value::Str(s) = &mv {
+                match s.as_str() {
+                    "shortest" => ZipMode::Shortest,
+                    "longest" => ZipMode::Longest,
+                    "strict" => ZipMode::Strict,
+                    _ => return Err(e.type_error("invalid zip mode")),
+                }
+            } else {
+                return Err(e.type_error("invalid zip mode"));
+            };
+            let pad = if matches!(mode, ZipMode::Longest) {
+                let p = e.get_prop_value(opts.clone(), "padding")?;
+                if !matches!(p, Value::Undefined) && !zip_is_object(e, &p) {
+                    return Err(e.type_error("padding must be an object"));
+                }
+                p
+            } else {
+                Value::Undefined
+            };
+            Ok((mode, pad))
+        }
+        _ => Err(e.type_error("options must be an object")),
+    }
+}
+
+/// `GetIteratorFlattenable(obj, reject-primitives)` (spec
+/// joint-iteration) : objet exigé — primitives **rejetées**
+/// (chaînes comprises) ; `@@iterator` lu d'abord (`GetMethod` :
+/// nullish → l'objet lui-même, non-callable non-nullish →
+/// `TypeError`) ; `next` lu sur le résultat **sans** validation
+/// `IsCallable` — l'échec surface à l'appel
+/// (`GetIteratorDirect`).
+fn zip_flattenable(e: &mut Engine, v: Value) -> JsResult<(Value, Value)> {
+    if !zip_is_object(e, &v) {
+        return Err(e.type_error("value is not iterable"));
+    }
+    let m = e.get_prop_value(v.clone(), SYM_ITERATOR)?;
+    let it = if matches!(m, Value::Undefined | Value::Null) {
+        v.clone()
+    } else if e.is_callable(m.clone()) {
+        e.call_value(m, v.clone(), &[])?
+    } else {
+        return Err(e.type_error("Symbol.iterator is not callable"));
+    };
+    if !zip_is_object(e, &it) {
+        return Err(e.type_error("iterator is not an object"));
+    }
+    let nf = e.get_prop_value(it.clone(), "next")?;
+    Ok((it, nf))
+}
+
+/// `GetIterator(v)` — `@@iterator` **exigé** (un `{next}` nu
+/// sans `@@iterator` est rejeté — contrairement à
+/// `GetIteratorFlattenable`/[`it_record`]) ; résultat non-objet
+/// ou `next` non-callable → `TypeError`.
+fn zip_get_iter(e: &mut Engine, v: &Value, what: &str) -> JsResult<(Value, Value)> {
+    if !zip_is_object(e, v) {
+        return Err(e.type_error(format!("{what} is not iterable")));
+    }
+    let m = e.get_prop_value(v.clone(), SYM_ITERATOR)?;
+    if !e.is_callable(m.clone()) {
+        return Err(e.type_error(format!("{what} is not iterable")));
+    }
+    let it = e.call_value(m, v.clone(), &[])?;
+    if !zip_is_object(e, &it) {
+        return Err(e.type_error(format!("{what} iterator is not an object")));
+    }
+    let nf = e.get_prop_value(it.clone(), "next")?;
+    if e.is_callable(nf.clone()) {
+        Ok((it, nf))
+    } else {
+        Err(e.type_error(format!("{what} iterator next is not callable")))
+    }
+}
+
+/// Remplit `padding` (liste de `recs.len()` valeurs, complétée
+/// à `undefined`). `zip` : `GetIterator` sur `paddingOption`,
+/// `iterCount` tirages, `IteratorClose` s'il reste ouvert —
+/// un abrupt du *tirage* ne ferme **pas** `paddingIter` (spec :
+/// il n'entre jamais dans `iters`). `zipKeyed` : `Get` par
+/// clé (`paddingOption[key]` — un objet indexé, pas un
+/// itérateur). Abrupt → `IteratorCloseAll` des records ouverts.
+fn zip_pads(
+    e: &mut Engine,
+    recs: &[(Value, Value, bool)],
+    padding: Value,
+    keys: Option<&[String]>,
+) -> JsResult<Vec<Value>> {
+    let n = recs.len();
+    let mut pads = Vec::with_capacity(n);
+    if matches!(padding, Value::Undefined) {
+        pads.resize(n, Value::Undefined);
+        return Ok(pads);
+    }
+    // `zipKeyed` — une `Get` par clé de record.
+    if let Some(ks) = keys {
+        for k in ks {
+            match e.get_prop_value(padding.clone(), k) {
+                Ok(v) => pads.push(v),
+                Err(t) => {
+                    let _ = zip_close_all(e, recs);
+                    return Err(t);
+                }
+            }
+        }
+    } else {
+        let (ps, pn) = match zip_get_iter(e, &padding, "padding") {
+            Ok(r) => r,
+            Err(t) => {
+                let _ = zip_close_all(e, recs);
+                return Err(t);
+            }
+        };
+        let mut open = true;
+        for _ in 0..n {
+            match it_step(e, &ps, &pn) {
+                Ok(Some(v)) => pads.push(v),
+                Ok(None) => {
+                    open = false;
+                    break;
+                }
+                Err(t) => {
+                    let _ = zip_close_all(e, recs);
+                    return Err(t);
+                }
+            }
+        }
+        if open {
+            if let Err(t) = it_close(e, &ps) {
+                let _ = zip_close_all(e, recs);
+                return Err(t);
+            }
+        }
+    }
+    pads.resize(n, Value::Undefined);
+    Ok(pads)
+}
+
+/// `IteratorCloseAll` (spec) — records encore ouverts fermés en
+/// ordre **inverse** ; première erreur conservée.
+fn zip_close_all(e: &mut Engine, iters: &[(Value, Value, bool)]) -> JsResult<()> {
+    let mut first: Option<Thrown> = None;
+    for (s, _, d) in iters.iter().rev() {
+        if *d {
+            continue;
+        }
+        if let Err(t) = it_close(e, s) {
+            if first.is_none() {
+                first = Some(t);
+            }
+        }
+    }
+    match first {
+        Some(t) => Err(t),
+        None => Ok(()),
+    }
+}
+
+/// Le helper joint-iteration (`%IteratorHelperPrototype%` —
+/// `it_helper_next`/`iter_return`/`iter_throw` servent le
+/// protocole) ; vide → `done` posé d'office.
+fn zip_helper(
+    e: &mut Engine,
+    iters: Vec<(Value, Value, bool)>,
+    keys: Option<Vec<String>>,
+    mode: ZipMode,
+    pads: Vec<Value>,
+) -> Value {
+    let done = iters.is_empty();
+    let id = e
+        .heap
+        .alloc_obj(Object::ordinary(Value::Obj(e.protos.iter_helper)));
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::IterHelper(Box::new(IterHelperState {
+            done,
+            source: Value::Undefined,
+            next: Value::Undefined,
+            inner: None,
+            counter: 0,
+            op: IterOp::Zip {
+                iters,
+                keys,
+                mode,
+                pads,
+            },
+        }));
+    }
+    Value::Obj(id)
+}
+
+/// Un pas `Iterator.zip`/`zipKeyed` — `Some(vals)` = une ligne
+/// (fresh row), `None` = terminé. `openIters` = records dont le
+/// flag `done` est faux (spec `IteratorZip` : le record fautif
+/// ou fini **sort** d'openIters avant `IteratorCloseAll` — il
+/// n'est pas refermé). `shortest` : premier épuisé → les autres
+/// ouverts **sont** fermés (ordre inverse) puis fini.
+/// `longest` : fini → `padding[i]` jusqu'à ce que tous soient
+/// finis. `strict` : seul le record 0 peut finir — étape sèche
+/// `IteratorStep` (`done` seul lu) sur les autres ; un record
+/// qui produit encore ou jette → `IteratorCloseAll` + `TypeError`.
+fn zip_step(
+    e: &mut Engine,
+    iters: &mut [(Value, Value, bool)],
+    mode: &ZipMode,
+    pads: &[Value],
+) -> JsResult<Option<Vec<Value>>> {
+    let n = iters.len();
+    let mut vals = Vec::with_capacity(n);
+    let mut i = 0usize;
+    while i < n {
+        if iters[i].2 {
+            match mode {
+                ZipMode::Longest => {
+                    vals.push(pads.get(i).cloned().unwrap_or(Value::Undefined));
+                    i += 1;
+                    continue;
+                }
+                ZipMode::Shortest => {
+                    // Complétion normale — `IteratorCloseAll`
+                    // des records encore ouverts (spec), son
+                    // échec propage.
+                    zip_close_all(e, iters)?;
+                    return Ok(None);
+                }
+                ZipMode::Strict => {
+                    if i == 0 {
+                        let mut fail: Option<Thrown> = None;
+                        let mut live = false;
+                        for rec in iters.iter_mut().skip(1) {
+                            if rec.2 {
+                                continue;
+                            }
+                            match it_done_step(e, &rec.0, &rec.1) {
+                                Ok(true) => rec.2 = true,
+                                Ok(false) => {
+                                    // Il produit encore →
+                                    // TypeError ; il reste
+                                    // dans openIters (fermé).
+                                    live = true;
+                                    break;
+                                }
+                                Err(t) => {
+                                    // Le record fautif sort
+                                    // d'openIters puis close.
+                                    rec.2 = true;
+                                    fail = Some(t);
+                                    break;
+                                }
+                            }
+                        }
+                        if !live && fail.is_none() {
+                            return Ok(None);
+                        }
+                        let t = match fail {
+                            Some(t) => t,
+                            None => e.type_error("strict zip: iterators have different lengths"),
+                        };
+                        let _ = zip_close_all(e, iters);
+                        return Err(t);
+                    }
+                    // i ≠ 0 — épuisé → sort d'openIters,
+                    // `IteratorCloseAll` puis `TypeError`.
+                    iters[i].2 = true;
+                    let t = e.type_error("strict zip: iterators have different lengths");
+                    let _ = zip_close_all(e, iters);
+                    return Err(t);
+                }
+            }
+        }
+        match it_step(e, &iters[i].0, &iters[i].1) {
+            Ok(Some(v)) => {
+                vals.push(v);
+                i += 1;
+            }
+            Ok(None) => iters[i].2 = true,
+            Err(t) => {
+                iters[i].2 = true;
+                let _ = zip_close_all(e, iters);
+                return Err(t);
+            }
+        }
+    }
+    if iters.iter().all(|r| r.2) {
+        Ok(None)
+    } else {
+        Ok(Some(vals))
+    }
 }

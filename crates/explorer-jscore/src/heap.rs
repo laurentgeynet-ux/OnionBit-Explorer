@@ -491,6 +491,15 @@ impl Heap {
                             push_value(out, n);
                         }
                     }
+                    IterOp::Zip { iters, pads, .. } => {
+                        for (s, n, _) in iters {
+                            push_value(out, s);
+                            push_value(out, n);
+                        }
+                        for v in pads {
+                            push_value(out, v);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -908,6 +917,10 @@ fn cell_bytes(data: &CellData) -> usize {
                         }
                         IterOp::Concat(recs) => {
                             recs.capacity() * std::mem::size_of::<(Value, Value)>()
+                        }
+                        IterOp::Zip { iters, pads, .. } => {
+                            iters.capacity() * std::mem::size_of::<(Value, Value, bool)>()
+                                + pads.capacity() * std::mem::size_of::<Value>()
                         }
                         _ => 0,
                     },
@@ -2387,11 +2400,42 @@ pub enum IterOp {
         /// Valeurs en attente (fenêtre courante).
         buf: std::collections::VecDeque<Value>,
     },
+    /// `Iterator.zip`/`zipKeyed` (joint-iteration) — les records
+    /// `(source, next, done)` des sous-itérateurs sont ouverts à
+    /// la construction (spec — seul le *pas* est paresseux) ;
+    /// `pads` = valeurs de padding pré-tirées (mode `longest`),
+    /// indexées par position d'itérateur.
+    Zip {
+        /// Records `(source, next, done)` — `done` = épuisé.
+        iters: Vec<(Value, Value, bool)>,
+        /// Clés des objets rendus par `zipKeyed` (noms internes,
+        /// sentinelles pour les symbols) ; `None` = `zip`
+        /// (résultats tableaux).
+        keys: Option<Vec<String>>,
+        /// `shortest`/`longest`/`strict`.
+        mode: ZipMode,
+        /// Padding pré-tiré par position d'itérateur fini.
+        pads: Vec<Value>,
+    },
     /// Sentinelle de course — posée dans le tas pendant que
     /// `it_helper_next` exécute une étape ; une ré-entrance la
     /// lit → `TypeError` (« generator is already running »,
     /// sémantique générateur spec).
     Running,
+}
+
+/// Mode de jointure de `Iterator.zip`/`zipKeyed` (option
+/// `mode` — défaut `shortest`).
+pub enum ZipMode {
+    /// Premier itérateur épuisé termine (défaut).
+    Shortest,
+    /// Termine quand **tous** sont épuisés — les records finis
+    /// contribuent leur padding (`options.padding` itéré à la
+    /// construction, `undefined` au-delà).
+    Longest,
+    /// Longueurs identiques exigées — le record 0 épuisé alors
+    /// qu'un autre produit encore → `TypeError`.
+    Strict,
 }
 
 /// Nom de kind d'une cellule — partagé par [`Heap::kind_histogram`]

@@ -14837,3 +14837,32 @@ chaque gain rapporté contre les **deux** archétypes.
   `$262.agent` (1 321 usages — workers/`Atomics.waitAsync`),
   `ShadowRealm` propre (11 skips), `eval-realm-indirect`,
   `super` realm.
+
+- [x] **JS-C608 — `Iterator.zip`/`zipKeyed` joint-iteration
+  paresseux : `IterOp::Zip` + `IteratorCloseAll` spec —
+  filtre `built-ins/Iterator/zip*` : 40 → 154/164
+  passes-mode (+114, échecs −72 %)** (`collections.rs` +
+  `heap.rs` + `tests/iter_zip.rs`). Avant : drain eager en
+  `Vec<Vec<Value>>` (pas de paresse, `padding` indexé comme
+  valeur, `strict` → `RangeError` a priori, `zipKeyed` →
+  objets `Object.prototype`, zéro fermeture). Mécanisme :
+  records `(source, next, done)` ouverts à la construction
+  via `GetIteratorFlattenable` **reject-primitives**
+  (`zip_flattenable` — `@@iterator` lu d'abord, chaînes
+  primitives rejetées), pas tiré un à un ; `openIters` spec
+  (le record fautif/fini sort avant `IteratorCloseAll`,
+  ordre inverse) ; `shortest` → les ouverts restants SONT
+  fermés ; `strict` → étape sèche `it_done_step` (`done`
+  seul lu) sur 1..N, un record vivant → `TypeError` ;
+  `longest` → `padding` **itérateur** tiré N fois à la
+  construction (`zipKeyed` : `Get` par clé). `GeneratorReturn`
+  : suspendedStart → completed avant close, suspendedYield →
+  sentinelle (`counter` = drapeau démarré). `zipKeyed` :
+  `own_keys_trapped` + `get_own_prop` intercalés (traps
+  proxy), résultats proto-`null`. `Type(x) is Object` =
+  `Obj` non-`Symbol` (`zip_is_object` — `typeof null` piégé).
+  Gate `tests/iter_zip.rs` **10/10**. Lib 54/54, dom 277/277,
+  iter_lazy 25/25, c335 8/8, clippy/fmt propres. **Reste**
+  (gaps partagés, non-zip) : `basic-*` ×3 (`arr.length =
+  2³²−1` — array sparse length), `non-constructible` ×2
+  (natives toutes constructibles — cluster `[[Construct]]`).
