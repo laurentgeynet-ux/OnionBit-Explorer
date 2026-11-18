@@ -199,7 +199,12 @@ pub(crate) fn aggregate_error_ctor(e: &mut Engine, _t: Value, args: &[Value]) ->
         v => e.iter_values(v)?,
     };
     let list = e.new_array(errs);
-    let err = make_named_error(e, e.protos.aggregate_error, "AggregateError", &args[1..])?;
+    let err = make_named_error(
+        e,
+        e.protos.aggregate_error,
+        "AggregateError",
+        args.get(1..).unwrap_or(&[]),
+    )?;
     if let Value::Obj(eid) = err {
         e.set_own(eid, "errors", list, false);
     }
