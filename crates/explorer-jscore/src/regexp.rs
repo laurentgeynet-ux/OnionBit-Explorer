@@ -101,6 +101,31 @@ pub(crate) fn re_encode_split(units: &[u16]) -> String {
     out
 }
 
+/// **Source de pattern** pour un `JsStr` à units : chaque
+/// surrogate **isolé** est rendu en `\uXXXX` textuel (le
+/// traducteur le traite alors comme le littéral — atome
+/// sentinelle du bon domaine), les vrais chars (astrals
+/// compris) passent tels quels. `re_encode` ne convient pas
+/// ici : sa sentinelle `U+F0000` serait relue comme un atome
+/// astral réel — éclatée en paire `lead`/`trail` en non-`u`,
+/// ou ré-échappée — et ne matcherait plus les sentinelles du
+/// haystack (`new RegExp("\uD800")`, `str.search("\uD800")`).
+pub(crate) fn re_units_source(units: &[u16]) -> String {
+    let mut out = String::with_capacity(units.len() * 2);
+    for d in char::decode_utf16(units.iter().copied()) {
+        match d {
+            Ok(c) => out.push(c),
+            Err(e) => {
+                let _ = std::fmt::Write::write_fmt(
+                    &mut out,
+                    format_args!("\\u{:04x}", e.unpaired_surrogate()),
+                );
+            }
+        }
+    }
+    out
+}
+
 /// Inverse de `re_encode` — reconstitue les code units UTF-16
 /// exacts d'un texte du domaine sentinelle.
 pub(crate) fn re_decode(s: &str) -> Vec<u16> {

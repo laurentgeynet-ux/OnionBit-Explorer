@@ -1142,14 +1142,16 @@ pub(crate) fn install(e: &mut Engine) {
         e.protos.sloppy_fn_acc = sid;
     }
     // `Function.prototype.{caller,arguments}` = `%ThrowTypeError%`
-    // get/set, `{e:false, c:false}` spec — JS-C463 devient
+    // get/set, `{e:false, c:true}` — spec `AddRestrictedFunction-
+    // Properties` (la lecture `c:false` était une déviation :
+    // triangulation V8/JSC/QJS — audit C609). JS-C463 reste
     // spec-pur : les fns sloppy portent l'accesseur `null`
     // ci-dessus en propre, tout le reste jette.
     {
         let acc = crate::heap::PropAttrs {
             writable: false,
             enumerable: false,
-            configurable: false,
+            configurable: true,
         };
         if let Some(o) = e.heap.obj_mut(fp) {
             o.define_accessor("caller", tte.clone(), tte.clone(), acc);

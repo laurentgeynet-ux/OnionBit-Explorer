@@ -854,9 +854,11 @@ pub(crate) fn regexp_compile(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     } else {
         flags
     };
-    // Pattern à `units` (surrogate isolé) → domaine sentinelle.
+    // Pattern à `units` (surrogate isolé) → texte `\uXXXX`
+    // (`re_units_source` — la sentinelle `re_encode` serait
+    // relue comme atome astral réel par le traducteur).
     let src = if pat.has_units() {
-        crate::regexp::re_encode(&pat.units_view())
+        crate::regexp::re_units_source(&pat.units_view())
     } else {
         pat.as_str().to_string()
     };

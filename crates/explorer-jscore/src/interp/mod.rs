@@ -5581,7 +5581,11 @@ impl Engine {
         if !pattern.has_units() {
             return self.make_regexp(pattern.as_str(), flags);
         }
-        let src = crate::regexp::re_encode(&pattern.units_view());
+        // Pattern à `units` (surrogate isolé) → texte `\uXXXX`
+        // pour le traducteur (`re_units_source` — `re_encode`
+        // livrerait une sentinelle relue comme atome astral
+        // réel, cf. `str_surr_re_match`).
+        let src = crate::regexp::re_units_source(&pattern.units_view());
         self.make_regexp(&src, flags)
     }
 
@@ -6998,10 +7002,12 @@ impl Engine {
             }
             if la.lit.strict || !simple {
                 // Spec `CreateUnmappedArgumentsObject` (strict OU
-                // paramètres non-simples — JS-C609) : `callee` ET
-                // `caller` = accesseurs `{get,set: %ThrowTypeError%,
-                // e:false, c:false}` — même identité `protos.tte`
-                // que les poisons de fonctions.
+                // paramètres non-simples — JS-C609) : `callee` =
+                // accesseur `{get,set: %ThrowTypeError%, e:false,
+                // c:false}` — même identité `protos.tte` que les
+                // poisons de fonctions. `caller` n'existe plus sur
+                // les objets arguments depuis ES2017
+                // (triangulation V8/JSC/QJS — audit C609).
                 let tte = Value::Obj(self.protos.tte);
                 let attrs = crate::heap::PropAttrs {
                     writable: false,
@@ -7009,8 +7015,7 @@ impl Engine {
                     configurable: false,
                 };
                 if let Some(o) = self.heap.obj_mut(aid) {
-                    o.define_accessor("callee", tte.clone(), tte.clone(), attrs);
-                    o.define_accessor("caller", tte.clone(), tte, attrs);
+                    o.define_accessor("callee", tte.clone(), tte, attrs);
                 }
             } else {
                 self.set_own(aid, "callee", la.f.clone(), false);

@@ -430,6 +430,52 @@ pub(crate) fn src_vals(e: &mut Engine, src: Value) -> JsResult<Vec<Value>> {
     Ok(Vec::new())
 }
 
+/// `IsTypedArrayOutOfBounds` spec : buffer détaché, ou région
+/// déclarée de la vue au-delà de la longueur **courante** du
+/// buffer (RAB rétréci). Relu après les coercions utilisateur
+/// — spec `fill`/`copyWithin`/`slice` (étape de revalidation,
+/// `TypeError`).
+fn ta_oob(e: &Engine, this: &Value) -> bool {
+    let Value::Obj(id) = this else { return true };
+    let Some(ObjKind::TypedArray {
+        ta,
+        buffer,
+        offset,
+        len,
+        auto,
+    }) = e.heap.obj(*id).map(|o| &o.kind)
+    else {
+        return true;
+    };
+    let Value::Obj(bid) = buffer else { return true };
+    match e.heap.obj(*bid).map(|b| &b.kind) {
+        Some(ObjKind::ByteBuf(bytes)) => {
+            if *auto {
+                *offset > bytes.len()
+            } else {
+                len.saturating_mul(ta.size()) > bytes.len().saturating_sub(*offset)
+            }
+        }
+        _ => true,
+    }
+}
+
+/// `TypedArrayLength` vivant — relecture post-coercion (borne
+/// `set`, re-clamp `fill`) : 0 si la vue est hors-bornes.
+fn ta_relen(e: &Engine, this: &Value) -> usize {
+    let Value::Obj(id) = this else { return 0 };
+    match e.heap.obj(*id).map(|o| &o.kind) {
+        Some(ObjKind::TypedArray {
+            ta,
+            buffer,
+            offset,
+            len,
+            auto,
+        }) => crate::interp::ta_live_len(&e.heap, *ta, buffer, *offset, *len, *auto),
+        _ => 0,
+    }
+}
+
 /// `ToIndex` — entier ≥ 0 borné à `usize` (`RangeError` si négatif,
 /// comme les vrais moteurs sur les tailles d'offset).
 fn to_index(e: &mut Engine, v: Value) -> JsResult<usize> {
@@ -1393,17 +1439,21 @@ fn ta_of(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// du buffer. `TypeError` si `src` n'est pas un objet iterable /
 /// array-like (spec : `ToObject` sur la source).
 fn ta_set_m(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (ta, bid, voff, len) = ta_view(e, this)?;
-    if !matches!(arg(args, 0), Value::Obj(_)) {
-        return Err(e.type_error("set source is not an object"));
-    }
-    let vals = src_vals(e, arg(args, 0))?;
+    let (ta, bid, voff, _len) = ta_view(e, this.clone())?;
+    // Spec `set` : `ToIndex(offset)` **avant** la lecture de la
+    // source — sa coercion peut resize/détacher le buffer (la
+    // borne se fait ensuite sur la longueur vivante, pas celle
+    // d'entrée — triangulation V8/JSC/QJS).
     let off = if matches!(arg(args, 1), Value::Undefined) {
         0
     } else {
         to_index(e, arg(args, 1))?
     };
-    if off + vals.len() > len {
+    if !matches!(arg(args, 0), Value::Obj(_)) {
+        return Err(e.type_error("set source is not an object"));
+    }
+    let vals = src_vals(e, arg(args, 0))?;
+    if off.saturating_add(vals.len()) > ta_relen(e, &this) {
         return Err(e.range_error("source too large for target"));
     }
     // Conversion avant le `&mut` du buffer — `ToBigInt` peut lever
@@ -1456,6 +1506,16 @@ fn ta_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (ta, bid, voff, len) = ta_view(e, this.clone())?;
     let v = arg(args, 0);
     let (s, en) = rel_bounds(e, arg(args, 1), arg(args, 2), len)?;
+    // Spec `fill` : après les coercions des bornes (un `valueOf`
+    // peut détacher/rétrécir), `IsTypedArrayOutOfBounds` →
+    // `TypeError` ; sinon la longueur vivante re-clampe la
+    // plage d'écriture.
+    if ta_oob(e, &this) {
+        return Err(e.type_error("typed array is out of bounds"));
+    }
+    let live = ta_relen(e, &this);
+    let en = en.min(live);
+    let s = s.min(en);
     ta_write_back(e, ta, bid, voff, s, &vec![v; en - s])?;
     Ok(this)
 }
