@@ -13,6 +13,16 @@
 // UTF-16, tableaux, objets/descripteurs, prototypes, erreurs,
 // regexp, itérateurs, Map/Set, promesses (résolution synchrone
 // uniquement), TypedArrays, JSON, tri.
+//
+// PROCESS — toute sonde ajoutée est **arbitrée avant bless** :
+// `EXPLORER_BLESS=1 cargo test -p explorer-jscore --test
+// oracle_ratchet` puis `node scripts/oracle_audit.mjs
+// --worktree --grep '<prefixe>' <node scripts/v8_probe.js |
+// bun scripts/bun_probe.js | node scripts/qjs_probe.mjs>`
+// contre ≥ 2 moteurs. `oracle_coverage.mjs` recense la surface
+// installée jamais sondée. Les sondes marqueurs d'extensions
+// (`cov_ext_*`, déviations documentées) se justifient en
+// commentaire.
 
 /// `(nom, source)` — noms stables, préfixés par famille.
 pub const PROBES: &[(&str, &str)] = &[
