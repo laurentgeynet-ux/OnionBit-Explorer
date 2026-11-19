@@ -4609,3 +4609,42 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   Bornes restantes : `extends`/`speak-as` non portés,
   `counter()/counters()` nommés non résolus (canal
   `format_counter` sans registre — file NAV).
+
+- [x] **R-305 — Harnais WPT : comptabilité honnête, auto-skip
+  `flags`, `<link rel="stylesheet">`, comparaison viewport,
+  corpus élargi counter-styles/css-lists** (tests render,
+  demande opérateur — dogfooding externe de R-303).
+  **Comptabilité** : `total` ne compte que les cas
+  effectivement rejoués — les 36 auto-descriptifs « sans
+  ref » du manifeste sortent vraiment du score (avant :
+  dénominateur gonflé — « 76 % » affiché pour 115/115
+  rejoués) et les entrées non-HTML (`support/*.css` en
+  manifeste pour l'extraction) sont ignorées. **`flags`**
+  : `<meta name="flags">` parsée — `dom`/`interact`/
+  `animated`/`paged`/`http(s)`/`history`/`speech`/
+  `userstyle`/`namespace`/`nonhtml`/`asis`/`wait` →
+  auto-skip compté à part de `wpt_skip.txt`
+  (`margin-collapse-160` [paged] détecté). **`collect_css`
+  charge les feuilles liées** (`<link rel=stylesheet>`,
+  `href` résolu comme les refs — `support/test-common.css`
+  et `ref-common.css` du corpus counter-style). **Compar-
+  aison viewport** : `diff_stats` évalue la grille 800×600
+  comme la capture-écran du harnais réel — le contenu sous
+  la flottaison n'est plus compté « dur » et le pixel
+  absent vaut blanc (artefact frames plus hautes soldé :
+  css3-020 à 1374 px ne « divergeait » que par sa hauteur).
+  **Corpus** : +95 entrées (counter-style-at-rule ×30,
+  styles prédéfinis latins ×11, css-lists markers/
+  counters ×52) — `fetch_wpt.ps1` rejoué, aucune fixture
+  éditée. Mesure : **199/203 (98 %)**, cliquet
+  `WPT_BASELINE` 115→199. Les 4 échecs comptés sont des
+  trous moteur réels, catalogués : alignement/verticalité
+  du marqueur `outside` (`taller-than-content`,
+  `with-align-content`), styling `::marker` +
+  `display:list-item` sur pseudo-éléments
+  (`nested-marker-styling`), `list-style-image` et
+  marqueurs littéraux rtl/espaces (`string-007`).
+  `empty-string-symbol` entre en skip list — `mismatch`
+  indiscernable : aucun des deux fichiers n'ayant Ahem,
+  les glyphes sont invisibles des deux côtés (limite
+  harnais documentée, pas un trou moteur).

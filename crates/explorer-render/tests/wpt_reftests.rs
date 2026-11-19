@@ -36,9 +36,12 @@ const VIEW_W: f32 = 800.0;
 const VIEW_H: f32 = 600.0;
 
 /// Cliquet : score minimal attendu — mesuré 2026-02 à 17/40
-/// (42 %) sur la première extraction ; à monter à chaque
-/// progrès float/BFC/marges.
-const WPT_BASELINE: usize = 115;
+/// (42 %) sur la première extraction ; 199/203 (98 %) après
+/// la salve R-305 (counter-styles + css-lists). Les 4 échecs
+/// comptés sont des trous moteur documentés (marqueur outside
+/// alignement/image, `::marker` styling, strings rtl) —
+/// à monter à chaque progrès moteur.
+const WPT_BASELINE: usize = 199;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
@@ -46,35 +49,44 @@ const FUZZY_CHANNEL: u8 = 16;
 /// Nombre maximal de pixels « doux » tolérés (800×600).
 const FUZZY_MAX: usize = 512;
 
-/// `(durs, doux)` — pixels divergents par gravité. Dimensions
-/// divergentes : la zone hors recouvrement compte « dure » en
-/// entier (avant : sentinelle `usize::MAX` — `18446744…`
-/// illisible dans le triage des échecs, R-26).
+/// `(durs, doux)` — pixels divergents par gravité, évalués
+/// sur la grille du **viewport** 800×600 : c'est la
+/// sémantique capture-écran du harnais reftest réel — le
+/// contenu sous la ligne de flottaison (frame plus haute que
+/// `VIEW_H`) n'est jamais comparé, et un pixel absent dans
+/// une frame plus courte compte comme blanc (diff si l'autre
+/// a peint à cet endroit).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[allow(clippy::many_single_char_names)] // grille de pixels — x/y/w/h courts
 fn diff_stats(a: &Frame, b: &Frame) -> (usize, usize) {
-    let wmin = a.width.min(b.width) as usize;
-    let hmin = a.height.min(b.height) as usize;
-    let mut hard = (a.width as usize * a.height as usize).max(b.width as usize * b.height as usize)
-        - wmin * hmin;
-    let mut soft = 0;
-    for y in 0..hmin {
-        for x in 0..wmin {
-            let ia = (y * a.width as usize + x) * 4;
-            let ib = (y * b.width as usize + x) * 4;
-            match (a.pixels.get(ia..ia + 4), b.pixels.get(ib..ib + 4)) {
-                (Some(pa), Some(pb)) => {
-                    let delta = pa
-                        .iter()
-                        .zip(pb)
-                        .map(|(p, q)| p.abs_diff(*q))
-                        .max()
-                        .unwrap_or(0);
-                    if delta > FUZZY_CHANNEL {
-                        hard += 1;
-                    } else if delta > 0 {
-                        soft += 1;
-                    }
-                }
-                _ => hard += 1,
+    // VIEW_W/VIEW_H sont des entiers exacts en f32.
+    let w = VIEW_W as usize;
+    let h = VIEW_H as usize;
+    let px = |f: &Frame, x: usize, y: usize| -> [u8; 4] {
+        if x < f.width as usize && y < f.height as usize {
+            let i = (y * f.width as usize + x) * 4;
+            f.pixels
+                .get(i..i + 4)
+                .map_or([255; 4], |s| [s[0], s[1], s[2], s[3]])
+        } else {
+            [255; 4]
+        }
+    };
+    let (mut hard, mut soft) = (0usize, 0usize);
+    for y in 0..h {
+        for x in 0..w {
+            let pa = px(a, x, y);
+            let pb = px(b, x, y);
+            let delta = pa
+                .iter()
+                .zip(pb.iter())
+                .map(|(p, q)| p.abs_diff(*q))
+                .max()
+                .unwrap_or(0);
+            if delta > FUZZY_CHANNEL {
+                hard += 1;
+            } else if delta > 0 {
+                soft += 1;
             }
         }
     }
@@ -191,8 +203,12 @@ fn load_fixture(path: &Path) -> Option<String> {
     }
 }
 
-/// CSS des `<style>` de la page (ordre document).
-fn collect_css(dom: &Dom) -> String {
+/// CSS des `<style>` et `<link rel="stylesheet">` de la page
+/// (ordre document). Les feuilles liées sont lues depuis le
+/// corpus local, résolues relativement au fichier source
+/// (`support/…`) — le harnais réel les sert en HTTP ; ici
+/// tout est fichier.
+fn collect_css(dom: &Dom, file_dir: &Path) -> String {
     let mut css = String::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
@@ -201,12 +217,46 @@ fn collect_css(dom: &Dom) -> String {
                 css.push_str(&t);
                 css.push('\n');
             }
+        } else if dom.tag_name(n).is_ok_and(|t| t == "link") {
+            let rel = dom.attribute(n, "rel").ok().flatten().unwrap_or_default();
+            if rel
+                .split_whitespace()
+                .any(|t| t.eq_ignore_ascii_case("stylesheet"))
+            {
+                if let Some(href) = dom.attribute(n, "href").ok().flatten() {
+                    if let Ok(sheet) = std::fs::read_to_string(resolve_in(file_dir, &href)) {
+                        css.push_str(&sheet);
+                        css.push('\n');
+                    }
+                }
+            }
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());
         }
     }
     css
+}
+
+/// `<meta name="flags" content="…">` — drapeaux WPT du test,
+/// en minuscules (plusieurs tokens séparés par espaces).
+fn meta_flags(dom: &Dom) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "meta") {
+            let name = dom.attribute(n, "name").ok().flatten().unwrap_or_default();
+            if name.eq_ignore_ascii_case("flags") {
+                if let Some(content) = dom.attribute(n, "content").ok().flatten() {
+                    out.extend(content.split_whitespace().map(str::to_ascii_lowercase));
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
 }
 
 /// Premier `<link rel="match|mismatch">` — `(kind, href)`.
@@ -305,7 +355,7 @@ fn collect_backgrounds(dom: &Dom, styles: &explorer_css::StyleMap, file_dir: &Pa
 fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
     let dom = TreeBuilder::parse(strip_xml_prolog(src));
     let mut eng = StyleEngine::new();
-    eng.add_css(&collect_css(&dom), Origin::Author);
+    eng.add_css(&collect_css(&dom, file_dir), Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root = dom
         .children(dom.document())
@@ -352,20 +402,17 @@ fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
     rasterize(&list, &Ahem, 1.0)
 }
 
-/// `href` de la référence résolu relativement au test —
+/// `href` résolu relativement au dossier `dir` —
 /// gère `./x` et `../reference/x` (un seul niveau de `..`
 /// observé dans ce corpus) ; un href **absolu** `/css/…`
 /// (R-32 : margin-collapse-clear-001 → floats-clear) se
 /// résout depuis la racine du corpus.
-fn resolve(test_path: &Path, href: &str) -> PathBuf {
+fn resolve_in(dir: &Path, href: &str) -> PathBuf {
     if let Some(abs) = href.strip_prefix('/') {
         return data_dir().join(abs);
     }
     let href = href.strip_prefix("./").unwrap_or(href);
-    let mut dir = test_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default();
+    let mut dir = dir.to_path_buf();
     let mut rel = href;
     while let Some(rest) = rel.strip_prefix("../") {
         dir.pop();
@@ -373,6 +420,43 @@ fn resolve(test_path: &Path, href: &str) -> PathBuf {
     }
     dir.join(rel)
 }
+
+/// `href` de la référence résolu relativement au test.
+fn resolve(test_path: &Path, href: &str) -> PathBuf {
+    resolve_in(
+        &test_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default(),
+        href,
+    )
+}
+
+/// Flags `<meta name="flags">` que le harnais statique ne
+/// peut pas exécuter — skip automatique (compté à part de
+/// `wpt_skip.txt`, qui reste pour les divergences moteur ou
+/// les limites non déclarées par la fixture) :
+/// `dom`/`history`/`userstyle`/`speech` exigent JS ou un
+/// agent non-statique, `interact`/`animated`/`paged` un
+/// usage réel, `http`/`https` des en-têtes serveur,
+/// `namespace`/`nonhtml`/`asis` un parseur XML ou un mode
+/// de lecture brut que le harnais ne reproduit pas, `wait`
+/// une attente d'événement asynchrone.
+const UNRUNNABLE_FLAGS: &[&str] = &[
+    "animated",
+    "asis",
+    "dom",
+    "history",
+    "http",
+    "https",
+    "interact",
+    "namespace",
+    "nonhtml",
+    "paged",
+    "speech",
+    "userstyle",
+    "wait",
+];
 
 /// Cas de la skip list : `nom` → raison documentée.
 fn skip_list() -> HashSet<String> {
@@ -387,6 +471,72 @@ fn skip_list() -> HashSet<String> {
         .collect()
 }
 
+/// Issue d'un cas du manifeste — `NoRef` et `FlagSkip` ne
+/// comptent pas dans le score ; `Pass`/`Fail` oui.
+enum Verdict {
+    Pass,
+    Fail(String),
+    NoRef,
+    FlagSkip(String),
+}
+
+/// Joue un cas du manifeste : fixture → classification par
+/// `flags` → ref → rendu des deux côtés → comparaison
+/// viewport. Les PNG de diagnostic des échecs atterrissent
+/// sous `target/wpt_fail/` (debug visuel, jamais assertif).
+fn run_case(dir: &Path, rel: &str) -> Verdict {
+    let name = rel.to_string();
+    let test_path = dir.join(rel);
+    let Some(src) = load_fixture(&test_path) else {
+        return Verdict::Fail(format!("{name}: illisible"));
+    };
+    let test_dom = TreeBuilder::parse(&src);
+    if let Some(f) = meta_flags(&test_dom)
+        .iter()
+        .find(|f| UNRUNNABLE_FLAGS.contains(&f.as_str()))
+    {
+        return Verdict::FlagSkip(f.clone());
+    }
+    let Some((kind, href)) = ref_link(&test_dom) else {
+        return Verdict::NoRef;
+    };
+    let ref_path = resolve(&test_path, &href);
+    let Some(ref_src) = load_fixture(&ref_path) else {
+        return Verdict::Fail(format!("{name}: ref {href} absente"));
+    };
+    let test_dir = test_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let ref_dir = ref_path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let (Some(a), Some(b)) = (
+        render(&src, &test_dir, &name),
+        render(&ref_src, &ref_dir, &format!("{name}(ref)")),
+    ) else {
+        return Verdict::Fail(format!("{name}: rendu impossible"));
+    };
+    // Comparaison « fuzzy » à la manière des harnais reftest
+    // réels : l'antialiasing produit des deltas de canal
+    // faibles sur les arêtes — on exige ZÉRO pixel à écart
+    // > 16 et au plus `FUZZY_MAX` pixels légèrement
+    // différents (~0,1 % de la frame).
+    let (hard, soft) = diff_stats(&a, &b);
+    let identical = hard == 0 && soft <= FUZZY_MAX;
+    if identical == (kind == "match") {
+        return Verdict::Pass;
+    }
+    if let (Some(pa), Some(pb)) = (a.encode_png(), b.encode_png()) {
+        let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/wpt_fail");
+        let _ = std::fs::create_dir_all(&out);
+        let base = rel.rsplit('/').next().unwrap_or("t");
+        let _ = std::fs::write(out.join(format!("{base}.test.png")), pa);
+        let _ = std::fs::write(out.join(format!("{base}.ref.png")), pb);
+    }
+    Verdict::Fail(format!(
+        "{name}: {kind}, {hard} px durs + {soft} px doux divergents"
+    ))
+}
+
 #[test]
 fn wpt_reftests_pixel() {
     let dir = data_dir();
@@ -394,6 +544,7 @@ fn wpt_reftests_pixel() {
     let manifest = std::fs::read_to_string(dir.join("manifest.txt")).expect("manifest.txt");
     let mut total = 0usize;
     let mut skipped = 0usize;
+    let mut flag_skipped: Vec<String> = Vec::new();
     let mut passed = 0usize;
     let mut failures: Vec<String> = Vec::new();
     let mut no_ref: Vec<String> = Vec::new();
@@ -403,68 +554,45 @@ fn wpt_reftests_pixel() {
         if rel.is_empty() || rel.starts_with('#') {
             continue;
         }
-        let name = rel.to_string();
+        // Ressources support listées dans le manifeste
+        // (support/*.css…) pour que fetch_wpt.ps1 les
+        // télécharge — pas des tests.
+        if !matches!(
+            rel.rsplit('.').next(),
+            Some("html" | "htm" | "xht" | "xhtml" | "svg")
+        ) {
+            continue;
+        }
         if skip.contains(rel) {
             skipped += 1;
             continue;
         }
-        total += 1;
-        let test_path = dir.join(rel);
-        let Some(src) = load_fixture(&test_path) else {
-            failures.push(format!("{name}: illisible"));
-            continue;
-        };
-        let test_dom = TreeBuilder::parse(&src);
-        let Some((kind, href)) = ref_link(&test_dom) else {
-            no_ref.push(name);
-            continue;
-        };
-        let ref_path = resolve(&test_path, &href);
-        let Some(ref_src) = load_fixture(&ref_path) else {
-            failures.push(format!("{name}: ref {href} absente"));
-            continue;
-        };
-        let test_dir = test_path
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_default();
-        let ref_dir = ref_path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let (Some(a), Some(b)) = (
-            render(&src, &test_dir, &name),
-            render(&ref_src, &ref_dir, &format!("{name}(ref)")),
-        ) else {
-            failures.push(format!("{name}: rendu impossible"));
-            continue;
-        };
-        // Comparaison « fuzzy » à la manière des harnais
-        // reftest réels : l'antialiasing produit des deltas
-        // de canal faibles sur les arêtes — on exige ZÉRO
-        // pixel à écart > 16 et au plus `FUZZY_MAX` pixels
-        // légèrement différents (~0,1 % de la frame).
-        let (hard, soft) = diff_stats(&a, &b);
-        let identical =
-            a.width == b.width && a.height == b.height && hard == 0 && soft <= FUZZY_MAX;
-        if identical == (kind == "match") {
-            passed += 1;
-        } else {
-            failures.push(format!(
-                "{name}: {kind}, {hard} px durs + {soft} px doux divergents"
-            ));
-            // PNG de diagnostic sous `target/wpt_fail/` —
-            // debug visuel, jamais assertif.
-            if let (Some(pa), Some(pb)) = (a.encode_png(), b.encode_png()) {
-                let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/wpt_fail");
-                let _ = std::fs::create_dir_all(&out);
-                let base = rel.rsplit('/').next().unwrap_or("t");
-                let _ = std::fs::write(out.join(format!("{base}.test.png")), pa);
-                let _ = std::fs::write(out.join(format!("{base}.ref.png")), pb);
+        match run_case(&dir, rel) {
+            Verdict::Pass => {
+                total += 1;
+                passed += 1;
             }
+            Verdict::Fail(f) => {
+                total += 1;
+                failures.push(f);
+            }
+            Verdict::NoRef => no_ref.push(rel.to_string()),
+            Verdict::FlagSkip(f) => flag_skipped.push(format!("{rel} [{f}]")),
         }
     }
 
     let rate = passed * 100 / total.max(1);
-    eprintln!("\n=== WPT reftests (CSS2 floats + normal-flow) ===");
-    eprintln!("{passed}/{total} passent ({rate}%), {skipped} ignorés");
+    eprintln!("\n=== WPT reftests (manifeste ciblé) ===");
+    eprintln!(
+        "{passed}/{total} passent ({rate}%), {skipped} ignorés (skip list), {} auto-skip (flags)",
+        flag_skipped.len()
+    );
+    if !flag_skipped.is_empty() {
+        eprintln!("auto-skip flags :");
+        for f in &flag_skipped {
+            eprintln!("  - {f}");
+        }
+    }
     if !no_ref.is_empty() {
         eprintln!("sans ref (exclus du score) : {}", no_ref.len());
         for f in &no_ref {

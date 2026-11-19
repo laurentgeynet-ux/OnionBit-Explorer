@@ -3,10 +3,13 @@
 # Une ligne = un test ; les références `rel=match/mismatch`
 # sont résolues et téléchargées par le script.
 # Révision : web-platform-tests/wpt @ master 2026-02.
-# Couverture : 40 reftests extraits de DEUX dossiers
-# (css/CSS2/floats, css/CSS2/normal-flow) — la suite WPT en
-# compte des dizaines de milliers ; tout score rapporté ici
-# s'entend « sur cet extrait », jamais « % du WPT ».
+# Couverture : ~240 reftests extraits de CINQ dossiers
+# (css/CSS2/floats, css/CSS2/normal-flow,
+# css/CSS2/margin-padding-clear, css/css-flexbox,
+# css/css-grid, css/css-counter-styles, css/css-lists) —
+# la suite WPT en compte des dizaines de milliers ; tout
+# score rapporté ici s'entend « sur cet extrait », jamais
+# « % du WPT ».
 css/CSS2/floats/floats-placement-001.html
 css/CSS2/floats/floats-placement-002.html
 css/CSS2/floats/floats-placement-003.html
@@ -167,3 +170,100 @@ css/CSS2/margin-padding-clear/margin-collapse-clear-010.xht
 css/CSS2/margin-padding-clear/margin-collapse-clear-011.xht
 css/CSS2/margin-padding-clear/margin-collapse-min-height-001.xht
 css/CSS2/margin-padding-clear/margin-collapse-min-height-002.xht
+# Salve R-304 — css-counter-styles + css-lists : dogfooding
+# externe de R-303 (styles nommés par descripteur/système,
+# styles prédéfinis latins, marqueurs inside/outside,
+# counter()/counters()). Les entrées non-HTML (feuilles
+# support/*) sont listées pour que fetch_wpt.ps1 les
+# télécharge ; le harnais les ignore comme tests.
+css/css-counter-styles/counter-style-at-rule/support/test-common.css
+css/css-counter-styles/counter-style-at-rule/support/ref-common.css
+css/css-counter-styles/counter-style-at-rule/broken-symbols.html
+css/css-counter-styles/counter-style-at-rule/dependent-builtin.html
+css/css-counter-styles/counter-style-at-rule/descriptor-calc.html
+css/css-counter-styles/counter-style-at-rule/descriptor-fallback-invalid.html
+css/css-counter-styles/counter-style-at-rule/descriptor-fallback.html
+css/css-counter-styles/counter-style-at-rule/descriptor-negative-invalid.html
+css/css-counter-styles/counter-style-at-rule/descriptor-negative.html
+css/css-counter-styles/counter-style-at-rule/descriptor-pad-invalid.html
+css/css-counter-styles/counter-style-at-rule/descriptor-pad.html
+css/css-counter-styles/counter-style-at-rule/descriptor-prefix-invalid.html
+css/css-counter-styles/counter-style-at-rule/descriptor-prefix.html
+css/css-counter-styles/counter-style-at-rule/descriptor-range-invalid.html
+css/css-counter-styles/counter-style-at-rule/descriptor-range.html
+css/css-counter-styles/counter-style-at-rule/descriptor-suffix-invalid.html
+css/css-counter-styles/counter-style-at-rule/descriptor-suffix.html
+css/css-counter-styles/counter-style-at-rule/descriptor-symbols-invalid.html
+css/css-counter-styles/counter-style-at-rule/descriptor-symbols.html
+css/css-counter-styles/counter-style-at-rule/empty-string-symbol.html
+css/css-counter-styles/counter-style-at-rule/name-case-sensitivity.html
+css/css-counter-styles/counter-style-at-rule/redefine-attr-mapping.html
+css/css-counter-styles/counter-style-at-rule/redefine-builtin.html
+css/css-counter-styles/counter-style-at-rule/system-additive.html
+css/css-counter-styles/counter-style-at-rule/system-alphabetic.html
+css/css-counter-styles/counter-style-at-rule/system-cyclic.html
+css/css-counter-styles/counter-style-at-rule/system-extends-fixed.html
+css/css-counter-styles/counter-style-at-rule/system-extends-invalid.html
+css/css-counter-styles/counter-style-at-rule/system-extends.html
+css/css-counter-styles/counter-style-at-rule/system-fixed.html
+css/css-counter-styles/counter-style-at-rule/system-numeric.html
+css/css-counter-styles/counter-style-at-rule/system-symbolic.html
+css/css-counter-styles/counter-suffix.html
+css/css-counter-styles/lower-roman/css3-counter-styles-019.html
+css/css-counter-styles/lower-roman/css3-counter-styles-020.html
+css/css-counter-styles/lower-roman/css3-counter-styles-020a.html
+css/css-counter-styles/lower-roman/css3-counter-styles-020b.html
+css/css-counter-styles/lower-roman/css3-counter-styles-021.html
+css/css-counter-styles/lower-roman/css3-counter-styles-022.html
+css/css-counter-styles/upper-roman/css3-counter-styles-023.html
+css/css-counter-styles/upper-roman/css3-counter-styles-024.html
+css/css-counter-styles/upper-roman/css3-counter-styles-024a.html
+css/css-counter-styles/upper-roman/css3-counter-styles-025.html
+css/css-counter-styles/upper-roman/css3-counter-styles-026.html
+css/css-lists/content-property/marker-text-matches-armenian.html
+css/css-lists/content-property/marker-text-matches-circle.html
+css/css-lists/content-property/marker-text-matches-decimal-leading-zero.html
+css/css-lists/content-property/marker-text-matches-decimal.html
+css/css-lists/content-property/marker-text-matches-disc.html
+css/css-lists/content-property/marker-text-matches-georgian.html
+css/css-lists/content-property/marker-text-matches-lower-greek.html
+css/css-lists/content-property/marker-text-matches-lower-latin.html
+css/css-lists/content-property/marker-text-matches-lower-roman.html
+css/css-lists/content-property/marker-text-matches-square.html
+css/css-lists/content-property/marker-text-matches-upper-latin.html
+css/css-lists/content-property/marker-text-matches-upper-roman.html
+css/css-lists/counter-001.html
+css/css-lists/counter-002.html
+css/css-lists/counter-003.html
+css/css-lists/counter-004.html
+css/css-lists/counter-list-item-2.html
+css/css-lists/counter-list-item-3.html
+css/css-lists/counter-list-item.html
+css/css-lists/counter-order-display-contents.html
+css/css-lists/counters-001.html
+css/css-lists/counters-002.html
+css/css-lists/counters-003.html
+css/css-lists/counters-004.html
+css/css-lists/counters-005.html
+css/css-lists/counters-006.html
+css/css-lists/implicit-and-explicit-list-item-counters.html
+css/css-lists/list-marker-paint-order.html
+css/css-lists/list-style-position-001.html
+css/css-lists/list-style-type-string-001a.html
+css/css-lists/list-style-type-string-001b.html
+css/css-lists/list-style-type-string-002.html
+css/css-lists/list-style-type-string-003.html
+css/css-lists/list-style-type-string-004.html
+css/css-lists/list-style-type-string-005a.html
+css/css-lists/list-style-type-string-005b.html
+css/css-lists/list-style-type-string-006.html
+css/css-lists/list-style-type-string-007.html
+css/css-lists/marker-counter.html
+css/css-lists/marker-direction-does-not-move-box.html
+css/css-lists/nested-marker-styling.html
+css/css-lists/nested-marker.html
+css/css-lists/outside-marker-rtl.html
+css/css-lists/outside-marker-taller-than-content.html
+css/css-lists/outside-marker-with-align-content.html
+css/css-lists/outside-marker-with-hr-content.html
+css/css-lists/outside-marker-with-text-indent.html
