@@ -1024,4 +1024,15 @@ pub const PROBES: &[(&str, &str)] = &[
     ("cov_ext_sym_meta", "typeof Symbol.metadata"),
     ("cov_ext_totemporal", "typeof new Date().toTemporalInstant"),
     ("cov_ext_temporal", "typeof Temporal+'|'+(typeof Temporal==='undefined'?'absent':typeof Temporal.Duration)"),
+    // --- vague D : surface hôte — formes déterministes
+    // seulement (typeof/structure/jamais de valeur horloge,
+    // jamais de contenu aléatoire) ; arbitrable V8/JSC ---
+    ("cov_host_domexc", "var e=new DOMException('m','AbortError');e.name+'|'+e.message+'|'+(e instanceof DOMException)"),
+    ("cov_host_domexc_code", "new DOMException('x','HierarchyRequestError').code+'|'+DOMException.HIERARCHY_REQUEST_ERR"),
+    ("cov_host_crypto", "crypto.getRandomValues(new Uint8Array(4)).length+'|'+typeof crypto.randomUUID+'|'+typeof crypto.subtle"),
+    ("cov_host_perf", "typeof performance.now()+'|'+typeof performance.timeOrigin"),
+    // `queueMicrotask` : la cb n'est JAMAIS exécutée avant la
+    // complétion — `s.length === 0` est l'attendu partout.
+    ("cov_host_qmt", "var s=[];queueMicrotask(function(){s.push(1)});s.length"),
+    ("cov_host_console", "typeof console.log+'|'+typeof console.error"),
 ];
