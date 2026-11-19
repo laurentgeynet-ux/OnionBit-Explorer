@@ -22,16 +22,23 @@
   `-Apply`, les `fait`/`orphelin` sont retirés
   (`git worktree remove --force` — target/ local part avec) et
   `git worktree prune` solde les entrées administratives.
+  `-Vol <N>` borne l'action à UN worktree : chaque équipe
+  s'occupe de son propre worktree et de son propre daemon —
+  le balayage global n'est que pour l'opérateur qui possède
+  toutes les pistes.
 
   Les worktrees laissés vivants par crash de la station se
   reconnaissent au nom `-vol<N>-wt` — ce script est le ménage.
 .EXAMPLE
-  pwsh -File scripts/vol_clean.ps1            # inventaire
-  pwsh -File scripts/vol_clean.ps1 -Apply     # retire les clos
+  pwsh -File scripts/vol_clean.ps1 -Vol 916 -Apply   # son vol
+  pwsh -File scripts/vol_clean.ps1                   # inventaire
+  pwsh -File scripts/vol_clean.ps1 -Apply            # tous les clos
 #>
 param(
   # Repo dont on balaie les worktrees (défaut : repo du script).
   [string]$Repo = '',
+  # Borner à un vol précis (chaque équipe nettoie le sien).
+  [int]$Vol = 0,
   [switch]$Apply
 )
 $ErrorActionPreference = 'Stop'
@@ -54,6 +61,7 @@ foreach ($line in (git -C $repo worktree list --porcelain)) {
   $exists = Test-Path $path
   $rows += [pscustomobject]@{ worktree = $path; vol = $n; etat = $state; present = $exists }
 }
+if ($Vol -gt 0) { $rows = $rows | Where-Object { $_.vol -eq $Vol } }
 
 if (-not $rows) { Write-Output 'aucun worktree de vol (*-vol<N>-wt)'; exit 0 }
 $rows | Format-Table -AutoSize | Out-String | Write-Output

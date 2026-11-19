@@ -169,6 +169,6 @@ Write-Output ''
 Write-Output "=== vol $N clos ==="
 Write-Output "daemon=$outcome registre_gc=$removed claim=libéré (DONE)"
 if ($claim.worktree) {
-  Write-Output "worktree conservé : $($claim.worktree) — ménage fin de mission : scripts/vol_clean.ps1 -Apply"
+  Write-Output "worktree conservé : $($claim.worktree) — ménage fin de mission : scripts/vol_clean.ps1 -Vol $N -Apply"
 }
 Write-Output "vol suivant : pwsh -File scripts/vol_start.ps1 -Mission <TAG> -Cibles <liste>"

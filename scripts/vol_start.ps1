@@ -305,6 +305,6 @@ Write-Output ''
 Write-Output "=== vol $N prêt ==="
 Write-Output "agent=$agent mission=$Mission port=$Port daemon_pid=$dpid"
 Write-Output "binaire=$exePath sha_main=$sha"
-if ($wt) { Write-Output "worktree=$wt (fin de mission : scripts/vol_clean.ps1 -Apply)" }
+if ($wt) { Write-Output "worktree=$wt (fin de mission : scripts/vol_clean.ps1 -Vol $N -Apply)" }
 Write-Output "profil=vol:vol$N logs=$logdir"
 Write-Output "clôture : pwsh -File scripts/vol_close.ps1 -Vol $N"
