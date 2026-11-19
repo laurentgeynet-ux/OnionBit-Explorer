@@ -77,6 +77,25 @@ pub(crate) fn re_encode(units: &[u16]) -> String {
     out
 }
 
+/// **Domaine units éclatés** (regex non-`u`, JS-C622) : chaque
+/// code unit → 1 char — tout surrogate (pairé **ou** isolé)
+/// devient la sentinelle `U+F0000 + (u - 0xD800)`. Contrairement
+/// à [`re_encode`], les paires NE sont PAS jointes : positions =
+/// units 1:1 (`/\udca4/` matche dans `'𐒤'`, `.` = 1 unit,
+/// `lastIndex` identité — sémantique code-unit du mode non-`u`).
+pub(crate) fn re_encode_split(units: &[u16]) -> String {
+    let mut out = String::with_capacity(units.len());
+    for &u in units {
+        let v = if (0xD800..0xE000).contains(&u) {
+            0xF_0000 + u as u32 - 0xD800
+        } else {
+            u as u32
+        };
+        out.push(char::from_u32(v).unwrap_or('\u{FFFD}'));
+    }
+    out
+}
+
 /// Inverse de `re_encode` — reconstitue les code units UTF-16
 /// exacts d'un texte du domaine sentinelle.
 pub(crate) fn re_decode(s: &str) -> Vec<u16> {
@@ -119,6 +138,79 @@ fn lead_astral_frag(a_lo: u32, a_hi: u32) -> Option<String> {
     let base = 0x1_0000 + ((lo - 0xD800) << 10);
     let top = 0x1_0000 + ((hi - 0xD800) << 10) + 0x3FF;
     Some(format!("\\x{{{base:x}}}-\\x{{{top:x}}}"))
+}
+
+/// Carte char↔code-units UTF-16 pour les positions spec
+/// (JS-C622) : `index`/`lastIndex`/`position`/`indices` sont en
+/// **code units** côté JS alors que le moteur matche en chars du
+/// domaine `hay` — astral = 1 char = 2 units, sentinelle = 1
+/// unit, escaper `U+F0800` = 0 unit. `of` rend `None` quand le
+/// haystack est pure BMP (char == unit — fast-path).
+pub(crate) struct UnitMap {
+    /// `u2c[u]` = index char où démarre le code unit `u` ; un
+    /// unit médian de paire pointe la frontière char **suivante**
+    /// (on ne peut pas commencer un scan au milieu d'un char).
+    u2c: Vec<u32>,
+    /// `c2u[ci]` = code unit où démarre le char `ci` — `len` =
+    /// nb chars + 1 : la borne finale (fin de chaîne) est incluse.
+    c2u: Vec<u32>,
+}
+
+impl UnitMap {
+    /// Construit la carte pour `hay` (domaine char passé à
+    /// `exec` — encodé ou brut) ; `None` si aucun char
+    /// `≥ U+10000` (ni astral, ni sentinelle, ni escaper).
+    pub fn of(hay: &str) -> Option<UnitMap> {
+        if !hay.chars().any(|c| (c as u32) >= 0x1_0000) {
+            return None;
+        }
+        let mut u2c: Vec<u32> = Vec::new();
+        let mut c2u: Vec<u32> = Vec::new();
+        let mut u = 0usize;
+        let mut pending_esc: Option<usize> = None;
+        for (ci, c) in hay.chars().enumerate() {
+            let v = c as u32;
+            if v == 0xF_0800 {
+                // Escaper de `re_encode` — 0 unit propre ; ses
+                // units appartiennent au char suivant et l'atome
+                // est indivisible → `u2c` pointe l'escaper.
+                c2u.push(u as u32);
+                pending_esc = Some(ci);
+                continue;
+            }
+            let w = if (0xF_0000..0xF_0800).contains(&v) {
+                1 // sentinelle = surrogate isolé (1 unit)
+            } else {
+                c.len_utf16()
+            };
+            let start_ci = pending_esc.take().unwrap_or(ci);
+            c2u.push(u as u32);
+            u2c.resize(u + w, start_ci as u32);
+            for k in 1..w {
+                u2c[u + k] = (ci + 1) as u32;
+            }
+            u += w;
+        }
+        u2c.push(hay.chars().count() as u32);
+        c2u.push(u as u32);
+        Some(UnitMap { u2c, c2u })
+    }
+
+    /// Code unit → index char (clampé en borne haute).
+    pub fn u2c(&self, u: usize) -> usize {
+        self.u2c
+            .get(u)
+            .copied()
+            .unwrap_or_else(|| *self.u2c.last().unwrap_or(&0)) as usize
+    }
+
+    /// Index char → code unit (borne finale comprise).
+    pub fn c2u(&self, c: usize) -> usize {
+        self.c2u
+            .get(c)
+            .copied()
+            .unwrap_or(*self.c2u.last().unwrap_or(&0)) as usize
+    }
 }
 
 /// One `exec` result, in *char* units (the engine's strings are
@@ -265,6 +357,19 @@ impl JsRegExp {
         &self,
         hay: &'h crate::value::JsStr,
     ) -> (std::borrow::Cow<'h, str>, bool) {
+        if !(self.unicode || self.unicode_sets) {
+            // Non-`u` : domaine **units éclatés** (JS-C622) —
+            // positions = units 1:1, mid-paire matchable. Ne
+            // s'applique que si le sujet porte des surrogates
+            // (astral ou isolé) ; sinon passthrough.
+            if !hay.has_units() && !hay.as_str().chars().any(|c| (c as u32) >= 0x1_0000) {
+                return (std::borrow::Cow::Borrowed(hay.as_str()), false);
+            }
+            return (
+                std::borrow::Cow::Owned(re_encode_split(&hay.units_view())),
+                true,
+            );
+        }
         if self.has_sentinels || hay.has_units() {
             (std::borrow::Cow::Owned(re_encode(&hay.units_view())), true)
         } else {
@@ -550,9 +655,18 @@ fn translate_pattern(
                     // point astral, sauter les 12 chars de la paire.
                     if cp > 0xFFFF {
                         if let Some((_cp, pnext)) = surrogate_pair(&cs, i) {
-                            out.push_str(&format!("\\x{{{cp:x}}}"));
+                            if unicode {
+                                out.push_str(&format!("\\x{{{cp:x}}}"));
+                                class_prev = Some(atom);
+                            } else {
+                                // JS-C622 : atome astral non-`u` =
+                                // 2 membres sentinels (units).
+                                let a = cp - 0x1_0000;
+                                out.push_str(&sent_frag(0xD800 + (a >> 10)));
+                                out.push_str(&sent_frag(0xDC00 + (a & 0x3FF)));
+                                class_prev = Some(ClassAtom::Char(0xF_0400 + (a & 0x3FF)));
+                            }
                             class_emitted = true;
-                            class_prev = Some(atom);
                             class_prev_bound = class_dash;
                             class_dash = false;
                             i = pnext;
@@ -585,7 +699,7 @@ fn translate_pattern(
                         // tone) : surrogate haute + classe de
                         // basses = plage astrale.
                         if (0xd800..0xdc00).contains(&cp) {
-                            if let Some((frag, anext)) = astral_class(&cs, next, cp) {
+                            if let Some((frag, anext)) = astral_class(&cs, next, cp, unicode) {
                                 out.push_str(&frag);
                                 last_atom = true;
                                 i = anext;
@@ -620,14 +734,35 @@ fn translate_pattern(
                     // chars de la paire.
                     if cp > 0xFFFF {
                         if let Some((_cp, pnext)) = surrogate_pair(&cs, i) {
-                            out.push_str(&format!("\\x{{{cp:x}}}"));
+                            if unicode {
+                                out.push_str(&format!("\\x{{{cp:x}}}"));
+                            } else {
+                                // JS-C622 : domaine units éclatés —
+                                // la paire fusionnée vaut ses 2
+                                // sentinelles, groupées en un atome
+                                // (`/x*/` quantifie la paire).
+                                let a = cp - 0x1_0000;
+                                out.push_str("(?:");
+                                out.push_str(&sent_frag(0xD800 + (a >> 10)));
+                                out.push_str(&sent_frag(0xDC00 + (a & 0x3FF)));
+                                out.push(')');
+                            }
                             last_atom = true;
                             i = pnext;
                             continue;
                         }
                     }
                 }
-                emit_escape(&mut out, &frag, t.fold);
+                if frag.starts_with("\\x{f0") && frag.contains("}\\x{f0") {
+                    // JS-C622 : `\u{…}` astral non-`u` = paire de
+                    // sentinelles — groupée en un atome pour les
+                    // quantificateurs.
+                    out.push_str("(?:");
+                    out.push_str(&frag);
+                    out.push(')');
+                } else {
+                    emit_escape(&mut out, &frag, t.fold);
+                }
                 last_atom = true;
             }
             i = next;
@@ -712,6 +847,24 @@ fn translate_pattern(
                         };
                         let lo_c = if is_surrogate(lo) { 0xe000 } else { lo };
                         let hi_c = if is_surrogate(hi) { 0xd7ff } else { hi };
+                        if !unicode && hi > 0xFFFF && !is_surrogate(lo) {
+                            // JS-C622 : borne haute astrale non-`u`
+                            // = range units `lo..D7FF` + sentinelles
+                            // `D800..lead` + atome trail (domaine
+                            // units éclatés).
+                            let a = hi - 0x1_0000;
+                            out.push_str(&format!(
+                                "-\\x{{d7ff}}\\x{{f0000}}-\\x{{{:x}}}\\x{{{:x}}}",
+                                0xF_0000 + (a >> 10),
+                                0xF_0400 + (a & 0x3FF)
+                            ));
+                            class_emitted = true;
+                            class_prev = Some(ClassAtom::Char(0xF_0400 + (a & 0x3FF)));
+                            class_prev_bound = true;
+                            class_dash = false;
+                            i = hnext;
+                            continue;
+                        }
                         if lo_c <= hi_c {
                             // La borne basse n'a été émise que si
                             // non-surrogate — sinon on l'émet ici
@@ -924,7 +1077,17 @@ fn translate_pattern(
                 out.push('.');
             }
             _ => {
-                if in_class {
+                if in_class && !unicode && (c as u32) >= 0x1_0000 {
+                    // JS-C622 : atome astral non-`u` = 2 membres
+                    // sentinels (lead + trail — units éclatés).
+                    let a = c as u32 - 0x1_0000;
+                    out.push_str(&sent_frag(0xD800 + (a >> 10)));
+                    out.push_str(&sent_frag(0xDC00 + (a & 0x3FF)));
+                    class_emitted = true;
+                    class_prev = Some(ClassAtom::Char(0xF_0400 + (a & 0x3FF)));
+                    class_prev_bound = class_dash;
+                    class_dash = false;
+                } else if in_class {
                     // Littéral de classe via `class_char` :
                     // `[`/`&`/`~` ont une syntaxe en classe côté
                     // backend (set/intersection/diff) — le brut
@@ -944,6 +1107,17 @@ fn translate_pattern(
                     class_prev = Some(ClassAtom::Char(u32::from(c)));
                     class_prev_bound = class_dash;
                     class_dash = false;
+                } else if !unicode && (c as u32) >= 0x1_0000 {
+                    // JS-C622 : atome astral non-`u` = ses 2 code
+                    // units — paire de sentinelles groupée en un
+                    // atome (domaine units éclatés ; `/x*/`
+                    // quantifie la paire).
+                    let cp = c as u32 - 0x1_0000;
+                    out.push_str("(?:");
+                    out.push_str(&sent_frag(0xD800 + (cp >> 10)));
+                    out.push_str(&sent_frag(0xDC00 + (cp & 0x3FF)));
+                    out.push(')');
+                    last_atom = true;
                 } else {
                     push_folded(&mut out, c, t.fold);
                     last_atom = true;
@@ -1330,7 +1504,7 @@ fn is_surrogate(cp: u32) -> bool {
 /// Forme purement surrogate uniquement (un autre atome dans la
 /// classe, `^` ou un `\x` ferait retomber sur `(?!)` + classe
 /// normale — approximation documentée).
-fn astral_class(cs: &[char], i: usize, hi: u32) -> Option<(String, usize)> {
+fn astral_class(cs: &[char], i: usize, hi: u32, unicode: bool) -> Option<(String, usize)> {
     if cs.get(i) != Some(&'[') || cs.get(i + 1) == Some(&'^') {
         return None;
     }
@@ -1347,25 +1521,44 @@ fn astral_class(cs: &[char], i: usize, hi: u32) -> Option<(String, usize)> {
     let base = 0x1_0000 + ((hi - 0xd800) << 10);
     if cs.get(j) == Some(&']') {
         // `[\uDClo]` — un seul point astral.
-        return Some((format!("\\x{{{:x}}}", base + (lo - 0xdc00)), j + 1));
+        if unicode {
+            return Some((format!("\\x{{{:x}}}", base + (lo - 0xdc00)), j + 1));
+        }
+        // JS-C622 non-`u` : domaine units éclatés — sentinelle
+        // lead + sentinelle trail.
+        return Some((format!("{}{}", sent_frag(hi), sent_frag(lo)), j + 1));
     }
     // Classe multi-items de basses surrogates — atomes `\uDCxx`
     // et plages `\uDCxx-\uDCyy` fusionnés en ensemble astral
     // (`\uD800[\uDD00-\uDD02\uDF9F\uDFD0]`, bundle kevlar
     // YouTube). Tout autre atome → `None` (retombée `(?!)` +
     // classe normale).
-    let mut frag = String::from("[");
+    let mut frag = if unicode {
+        String::from("[")
+    } else {
+        // JS-C622 non-`u` : lead sentinelle devant la classe de
+        // sentinelles trail.
+        format!("{}[", sent_frag(hi))
+    };
     loop {
         if cs.get(j) == Some(&'-') {
             let hi2 = low(j + 1)?;
-            frag.push_str(&format!(
-                "\\x{{{:x}}}-\\x{{{:x}}}",
-                base + (lo - 0xdc00),
-                base + (hi2 - 0xdc00)
-            ));
+            let (a, b) = if unicode {
+                (base + (lo - 0xdc00), base + (hi2 - 0xdc00))
+            } else {
+                // JS-C622 non-`u` : membres = sentinelles trail.
+                (0xF_0000 + lo - 0xD800, 0xF_0000 + hi2 - 0xD800)
+            };
+            frag.push_str(&format!("\\x{{{a:x}}}-\\x{{{b:x}}}"));
             j += 7;
         } else {
-            frag.push_str(&format!("\\x{{{:x}}}", base + (lo - 0xdc00)));
+            // JS-C622 non-`u` : membre = sentinelle trail.
+            let a = if unicode {
+                base + (lo - 0xdc00)
+            } else {
+                0xF_0000 + lo - 0xD800
+            };
+            frag.push_str(&format!("\\x{{{a:x}}}"));
         }
         match cs.get(j) {
             Some(&']') => {
@@ -1567,6 +1760,19 @@ impl Trans {
             if cs.get(j) == Some(&'}') && digits > 0 {
                 if v > 0x10_FFFF {
                     return Err(format!("\\u{{…}} out of range in /{src}/"));
+                }
+                if !self.unicode && v > 0xFFFF {
+                    // JS-C622 : astral non-`u` = paire de
+                    // sentinelles (domaine units éclatés).
+                    let a = v as u32 - 0x1_0000;
+                    return Ok((
+                        format!(
+                            "{}{}",
+                            sent_frag(0xD800 + (a >> 10)),
+                            sent_frag(0xDC00 + (a & 0x3FF))
+                        ),
+                        j + 1,
+                    ));
                 }
                 return Ok((format!("\\x{{{v:x}}}"), j + 1));
             }
@@ -1879,11 +2085,23 @@ mod tests {
     /// En `u` `escape()` fusionnait déjà ; sloppy est aligné.
     #[test]
     fn surrogate_pair_atom_outside_class() {
-        assert_eq!(tr(r"\uD83D\uDCA5"), "\\x{1f4a5}");
-        assert_eq!(tr(r"\uD83C\uDFFB-\uD83C\uDFFF"), "\\x{1f3fb}-\\x{1f3ff}");
+        // JS-C622 : non-`u` = domaine units éclatés — la paire
+        // devient deux sentinelles groupées en un atome.
+        assert_eq!(tr(r"\uD83D\uDCA5"), "(?:\\x{f003d}\\x{f04a5})");
+        assert_eq!(
+            tr(r"\uD83C\uDFFB-\uD83C\uDFFF"),
+            "(?:\\x{f003c}\\x{f07fb})-(?:\\x{f003c}\\x{f07ff})"
+        );
         // Isolé (pas de paire) → sentinelle + astrals du lead.
         assert_eq!(tr(r"\uD83Dx"), "[\\x{f003d}\\x{1f400}-\\x{1f7ff}]x");
-        let probe = |src: &str, hay: &str| super::JsRegExp::compile(src, "").unwrap().exec(hay, 0);
+        // `exec` opère dans le domaine encodé — non-`u` = units
+        // éclatés (JS-C622) : le haystack astral y est converti
+        // comme `enc_hay` le fait à l'exécution.
+        let probe = |src: &str, hay: &str| {
+            let units: Vec<u16> = hay.encode_utf16().collect();
+            let enc = super::re_encode_split(&units);
+            super::JsRegExp::compile(src, "").unwrap().exec(&enc, 0)
+        };
         assert!(probe(r"\uD83D\uDCA5", "\u{1f4a5}").is_some());
         assert!(probe(r"\uD83C[\uDFFB-\uDFFF]", "\u{1f3fd}").is_some());
     }
@@ -1922,7 +2140,9 @@ mod tests {
         assert_eq!(tr(r"[\x00- ]"), "[\\x{0}-\\x{20}]");
         assert_eq!(tr(r"[\x20-\x30]"), "[\\x{20}-\\x{30}]");
         assert_eq!(tr(r"[\u2020-\u2030]"), "[\\x{2020}-\\x{2030}]");
-        assert_eq!(tr(r"[\u{1F600}-\u{1F64F}]"), "[\\x{1f600}-\\x{1f64f}]");
+        // JS-C622 : `[\u{1F600}-\u{1F64F}]` non-`u` = range units
+        // DE00–D83D désordonnée → SyntaxError (comportement V8).
+        assert!(super::JsRegExp::compile(r"[\u{1F600}-\u{1F64F}]", "").is_err());
         assert_eq!(tr(r"[\0-\x1f]"), "[\\x{0}-\\x{1f}]");
         assert_eq!(tr(r"[\cA-\cZ]"), "[\\x{1}-\\x{1a}]");
         assert_eq!(tr(r"[\101-\103]"), "[\\x{41}-\\x{43}]");
@@ -1975,7 +2195,8 @@ mod tests {
         assert!(!probe(r"[\x00- ]", "a"));
         assert!(probe(r"[\x20-\x30]", "%"));
         assert!(probe(r"[\u2020-\u2030]", "\u{2025}"));
-        assert!(probe(r"[\u{1F600}-\u{1F64F}]", "\u{1f610}"));
+        // Range astrale non-`u` = units désordonnées → rejetée.
+        assert!(super::JsRegExp::compile(r"[\u{1F600}-\u{1F64F}]", "").is_err());
         assert!(probe(r"[\0-\x1f]", "\x07"));
         assert!(probe(r"[\cA-\cZ]", "\x0b"));
         assert!(probe(r"[\101-\103]", "B"));
@@ -2010,9 +2231,12 @@ mod dbg_vol10 {
         let mini = super::translate_pattern("\\uD800[\\uDD00-\\uDD02]", false, false)
             .unwrap()
             .0;
-        assert_eq!(mini, "[\\x{10100}-\\x{10102}]");
+        // JS-C622 non-`u` : units éclatés — lead sentinelle +
+        // classe de sentinelles trail.
+        assert_eq!(mini, "\\x{f0000}[\\x{f0500}-\\x{f0502}]");
         let re = super::JsRegExp::compile(&pat, "").unwrap();
-        assert!(re.exec("\u{10101}", 0).is_some());
-        assert!(re.exec("\u{1039f}", 0).is_some());
+        let enc = |s: &str| super::re_encode_split(&s.encode_utf16().collect::<Vec<_>>());
+        assert!(re.exec(&enc("\u{10101}"), 0).is_some());
+        assert!(re.exec(&enc("\u{1039f}"), 0).is_some());
     }
 }

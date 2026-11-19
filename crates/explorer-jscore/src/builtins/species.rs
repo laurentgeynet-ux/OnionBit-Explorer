@@ -464,9 +464,23 @@ pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     if results.is_empty() {
         return Ok(Value::Str(s));
     }
-    // Domaine encodé quand `s` porte des `units` — pièces et
-    // captures ré-encodées, décodage unique en sortie.
-    let (hay_cow, dec): (std::borrow::Cow<'_, str>, bool) = if s.has_units() {
+    // Domaine encodé quand `s` porte des `units` **ou des
+    // astrals** — pièces et captures ré-encodées, décodage
+    // unique en sortie. JS-C622 : non-`u` = domaine units
+    // éclatés (positions `index`/`position` cohérentes avec
+    // `enc_hay` du matching — mid-paire découparable) ; `u` =
+    // domaine sentinelle joint.
+    let has_surrogate_units = s.has_units() || s.as_str().chars().any(|c| (c as u32) >= 0x1_0000);
+    let (hay_cow, dec): (std::borrow::Cow<'_, str>, bool) = if !unicode {
+        if has_surrogate_units {
+            (
+                std::borrow::Cow::Owned(crate::regexp::re_encode_split(&s.units_view())),
+                true,
+            )
+        } else {
+            (std::borrow::Cow::Borrowed(s.as_str()), false)
+        }
+    } else if s.has_units() {
         (
             std::borrow::Cow::Owned(crate::regexp::re_encode(&s.units_view())),
             true,
@@ -475,7 +489,13 @@ pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsR
         (std::borrow::Cow::Borrowed(s.as_str()), false)
     };
     let hay: Vec<char> = hay_cow.chars().collect();
+    // JS-C622 : `position`/`nextSourcePosition` sont en **code
+    // units** (spec) ; le découpage de `hay` travaille en chars
+    // — `map` convertit (`None` = identité, pure BMP).
+    let map = crate::regexp::UnitMap::of(&hay_cow);
+    let u2c = |u: usize| map.as_ref().map_or(u, |m| m.u2c(u));
     let size = hay.len();
+    let size_u = map.as_ref().map_or(size, |m| m.c2u(size));
     let mut acc = String::new();
     let mut next_pos = 0usize;
     for result in results {
@@ -487,9 +507,12 @@ pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsR
         // l'arithmétique de positions dans `hay`.
         let matched_js = e.to_js_jstr(m0)?;
         let matched = enc_js(&matched_js);
-        let match_len = matched.chars().count();
+        let match_len_u = matched_js.u16_len();
         let iv = e.get_prop_value(result.clone(), "index")?;
-        let pos = (e.to_number(iv)?.trunc().max(0.0) as usize).min(size);
+        // `pos` en units (arg `position` du replacer) ;
+        // `pos_c` en chars pour `hay`/`get_substitution`.
+        let pos = (e.to_number(iv)?.trunc().max(0.0) as usize).min(size_u);
+        let pos_c = u2c(pos);
         // Captures ToStringées (spec : `Get` puis `ToString`
         // pour chaque non-undefined — observable).
         let mut caps: Vec<Value> = Vec::with_capacity(n_caps);
@@ -525,21 +548,21 @@ pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsR
             } else {
                 e.box_primitive(named)
             };
-            get_substitution(e, &matched, &hay, pos, &caps, &named_obj, &rep_str)?
+            get_substitution(e, &matched, &hay, pos_c, &caps, &named_obj, &rep_str)?
         };
         if pos >= next_pos {
             // `position` reculant : la substitution est ignorée
             // (spec — exec custom malveillant).
-            let piece: String = hay[next_pos..pos].iter().collect();
+            let piece: String = hay[u2c(next_pos)..pos_c].iter().collect();
             acc.push_str(&piece);
             acc.push_str(&rep_out);
-            next_pos = pos + match_len;
+            next_pos = pos + match_len_u;
         }
-        if next_pos >= size {
+        if next_pos >= size_u {
             return Ok(re_str_val(e, &acc, dec));
         }
     }
-    let tail: String = hay[next_pos..size].iter().collect();
+    let tail: String = hay[u2c(next_pos)..size].iter().collect();
     acc.push_str(&tail);
     Ok(re_str_val(e, &acc, dec))
 }
@@ -643,7 +666,7 @@ pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     let flags = e.to_js_string(flags_v)?;
     // `unicodeMatching` — sert `AdvanceStringIndex` ; +1 char
     // est correct des deux côtés dans notre domaine char.
-    let _unicode = flags.contains('u') || flags.contains('v');
+    let unicode = flags.contains('u') || flags.contains('v');
     let new_flags = if flags.contains('y') {
         flags
     } else {
@@ -662,10 +685,21 @@ pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     if lim == 0 {
         return Ok(a);
     }
-    // Domaine encodé quand `s` porte des `units` (lone
-    // surrogates) — même convention qu'`enc_hay` : les pièces
-    // émises se décodent via `re_str_val(e, _, dec)`.
-    let (hay_cow, dec): (std::borrow::Cow<'_, str>, bool) = if s.has_units() {
+    // Domaine encodé quand `s` porte des `units` **ou des
+    // astrals** — même convention qu'`enc_hay` : JS-C622 non-`u`
+    // = units éclatés (mid-paire découparable), `u` = domaine
+    // sentinelle joint. Pièces décodées via `re_str_val`.
+    let has_surrogate_units = s.has_units() || s.as_str().chars().any(|c| (c as u32) >= 0x1_0000);
+    let (hay_cow, dec): (std::borrow::Cow<'_, str>, bool) = if !unicode {
+        if has_surrogate_units {
+            (
+                std::borrow::Cow::Owned(crate::regexp::re_encode_split(&s.units_view())),
+                true,
+            )
+        } else {
+            (std::borrow::Cow::Borrowed(s.as_str()), false)
+        }
+    } else if s.has_units() {
         (
             std::borrow::Cow::Owned(crate::regexp::re_encode(&s.units_view())),
             true,
@@ -674,8 +708,17 @@ pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
         (std::borrow::Cow::Borrowed(s.as_str()), false)
     };
     let hay: Vec<char> = hay_cow.chars().collect();
-    let s_arg = Value::Str(s);
     let size = hay.len();
+    // JS-C622 : `lastIndex` est en **code units** — les bornes
+    // de la boucle vivent en chars de `hay`, conversion aux
+    // écritures/lectures (`None` = identité, pure BMP).
+    let map = crate::regexp::UnitMap::of(&hay_cow);
+    let u2c = |u: usize| map.as_ref().map_or(u, |m| m.u2c(u));
+    let c2u = |c: usize| map.as_ref().map_or(c, |m| m.c2u(c));
+    let size_u = c2u(size);
+    // `s` n'est plus emprunté passé `UnitMap::of` — `hay_cow`
+    // est matérialisé dans `hay`/`map`.
+    let s_arg = Value::Str(s);
     let mut length_a = 0usize;
     // Chaîne vide : un match → `[]`, sinon `[s]`.
     if size == 0 {
@@ -690,12 +733,12 @@ pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     let mut last_match_end = 0usize;
     let mut search_index = 0usize;
     while search_index < size {
-        // `Set(splitter, "lastIndex", 𝔽(q), true)` — observable.
+        // `Set(splitter, "lastIndex", 𝔽(q), true)` — q en units.
         set_strict(
             e,
             splitter.clone(),
             "lastIndex",
-            Value::Num(search_index as f64),
+            Value::Num(c2u(search_index) as f64),
         )?;
         let mr = reg_exp_exec(e, splitter.clone(), s_arg.clone())?;
         if matches!(mr, Value::Null) {
@@ -707,9 +750,11 @@ pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
             continue;
         }
         // `matchEnd = ToLength(Get(splitter,"lastIndex"))` —
-        // relu *après* `exec`, borné à `size`.
+        // relu *après* `exec` (units), borné à `size_u`, rendu
+        // en chars pour le découpage.
         let end_v = e.get_prop_value(splitter.clone(), "lastIndex")?;
-        let match_end = (e.to_number(end_v)?.max(0.0) as usize).min(size);
+        let match_end_u = (e.to_number(end_v)?.max(0.0) as usize).min(size_u);
+        let match_end = u2c(match_end_u).min(size);
         if match_end == last_match_end {
             search_index += 1;
             continue;

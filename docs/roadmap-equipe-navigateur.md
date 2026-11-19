@@ -15281,6 +15281,31 @@ chaque gain rapporté contre les **deux** archétypes.
   c611/c613/c615/c617/iter_lazy/agen_queue/await_thenable/
   lazy_gen/t262_realm verts, hostile 12/12 release,
   lib 54/54, clippy/fmt/doc propres.
+- [x] **JS-C622 — positions RegExp/String en code units
+  UTF-16 (`index`/`lastIndex`/`indices`/`position`) + domaine
+  « units éclatés » pour les regex non-`u`** (`regexp.rs` +
+  `builtins/{string,species}.rs` + gate
+  `tests/c622_re_units.rs` **7/7**). **`UnitMap`** char↔unit
+  sur le haystack encodé : `match_result` expose
+  `index`/`indices` en units, `regexp_exec` lit/écrit
+  `lastIndex` en units, `@@replace`/`@@split` convertissent
+  positions et bornes aux frontières. **`re_encode_split`** :
+  second domaine pour les non-`u` — chaque code unit = un
+  char (tout surrogate → sentinelle `U+F0000+u−0xD800`),
+  positions = units 1:1, `.` = 1 unit, mid-paire matchable
+  (`/\udca4/` dans `'𐒤'`). Traduction pattern : littéral/
+  fusion astral → paire groupée `(?:…)` (quantificateurs sur
+  l'atome entier), astral en classe → 2 membres sentinels,
+  range astrale haute → `lo–D7FF` + sentinelles + trail,
+  `\u{…}` astral → paire, `astral_class` → lead sentinelle +
+  classe trail ; range désordonnée → `SyntaxError` (V8).
+  `@@replace`/`@@split` : haystack de découpage aligné sur le
+  domaine du matcher (split en non-`u`). Gates : c622 7/7,
+  c617 12/12, c618 17/17, c616 10/10, c619 8/8,
+  c613/c615 11/11, t262_realm 9/9, lib 54/54, clippy/fmt
+  propres. **Reste catalogué** : noms de groupes non-BMP,
+  `poisoned-stdlib`, capture reset quantifié,
+  `builtin-infer-unicode`.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

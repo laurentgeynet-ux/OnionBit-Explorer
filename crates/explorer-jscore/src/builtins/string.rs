@@ -718,7 +718,11 @@ pub(crate) fn match_result(
     re: &crate::regexp::JsRegExp,
     input: &JsStr,
     dec: bool,
+    map: Option<&crate::regexp::UnitMap>,
 ) -> Value {
+    // JS-C622 : les positions exposées (`index`, `indices`) sont
+    // en **code units** — `m` est en chars du domaine `hay`.
+    let pos = |c: usize| map.map_or(c, |mm| mm.c2u(c));
     let elems: Vec<Value> = m
         .groups
         .iter()
@@ -730,7 +734,7 @@ pub(crate) fn match_result(
     let Value::Obj(arr) = e.new_array(elems) else {
         return Value::Null;
     };
-    e.set_own(arr, "index", Value::Num(m.index as f64), false);
+    e.set_own(arr, "index", Value::Num(pos(m.index) as f64), false);
     e.set_own(arr, "input", Value::Str(input.clone()), false);
     let groups_v = if m.named.is_empty() {
         Value::Undefined
@@ -753,7 +757,9 @@ pub(crate) fn match_result(
             .group_indices
             .iter()
             .map(|r| match r {
-                Some((s, t)) => e.new_array(vec![Value::Num(*s as f64), Value::Num(*t as f64)]),
+                Some((s, t)) => {
+                    e.new_array(vec![Value::Num(pos(*s) as f64), Value::Num(pos(*t) as f64)])
+                }
                 None => Value::Undefined,
             })
             .collect();
@@ -764,7 +770,9 @@ pub(crate) fn match_result(
             let gobj = e.new_object();
             for (k, r) in &m.named_indices {
                 let v = match r {
-                    Some((s, t)) => e.new_array(vec![Value::Num(*s as f64), Value::Num(*t as f64)]),
+                    Some((s, t)) => {
+                        e.new_array(vec![Value::Num(pos(*s) as f64), Value::Num(pos(*t) as f64)])
+                    }
                     None => Value::Undefined,
                 };
                 e.set_own(gobj, k, v, true);
@@ -887,15 +895,21 @@ pub(crate) fn regexp_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     let use_last = re.global || re.sticky;
     let last = if use_last { li_len as usize } else { 0 };
     let (hay, dec) = re.enc_hay(&s);
+    // JS-C622 : `lastIndex`/`index` sont en **code units** ;
+    // le scan travaille en chars du domaine `hay` — carte de
+    // conversion (`None` = identité quand pure BMP).
+    let map = crate::regexp::UnitMap::of(&hay);
+    let last_c = map.as_ref().map_or(last, |m| m.u2c(last));
     // Spec `RegExpBuiltinExec` : l'écriture `lastIndex` est
     // `Set(..., Throw=true)` — un refus (non-writable) lève
     // `TypeError` (JS-C618 : silence sloppy = boucle infinie).
-    if let Some((m, new_last)) = re.exec_from(&hay, last) {
+    if let Some((m, new_last_c)) = re.exec_from(&hay, last_c) {
+        let new_last = map.as_ref().map_or(new_last_c, |mm| mm.c2u(new_last_c));
         if use_last && !e.set_prop(id, "lastIndex", Value::Num(new_last as f64))? {
             return Err(e.type_error("cannot assign to `lastIndex`"));
         }
         e.note_re(&hay, Some(&m));
-        Ok(match_result(e, &m, &re, &s, dec))
+        Ok(match_result(e, &m, &re, &s, dec, map.as_ref()))
     } else {
         if use_last && !e.set_prop(id, "lastIndex", Value::Num(0.0))? {
             return Err(e.type_error("cannot assign to `lastIndex`"));
