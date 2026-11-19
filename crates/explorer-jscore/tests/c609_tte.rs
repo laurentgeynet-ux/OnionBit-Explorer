@@ -8,10 +8,12 @@
 //!
 //! Verrous : identité partagée (get === set partout),
 //! `Function.prototype.{caller,arguments}` spec `{e:false,
-//! c:false}`, TTE figé (`{Extensible:false}`, `length`/`name`
+//! c:true}` (`AddRestrictedFunctionProperties`), TTE figé
+//! (`{Extensible:false}`, `length`/`name`
 //! `{c:false}`, own keys `["length","name"]`, proto =
 //! `Function.prototype`), sloppy `f.caller` → `null` (§B-125
-//! préservé), `arguments` non-mappé poisonné `callee`+`caller`,
+//! préservé), `arguments` non-mappé poisonné `callee` seul
+//! (`caller` retiré par ES2017 — note 5 §10.4.4),
 //! Forbidden Extensions (aucun own `caller`/`arguments` hors fn
 //! sloppy ordinaire — le TTE hérité jette), TTE distinct par
 //! realm.
@@ -32,7 +34,7 @@ const TTE: &str = "var TTE=Object.getOwnPropertyDescriptor(function(){'use stric
 
 /// Identité unique : même objet en get/set de
 /// `Function.prototype.{caller,arguments}`, des own props des
-/// fns strictes, de `callee`/`caller` des arguments stricts.
+/// fns strictes, de `callee` des arguments stricts.
 #[test]
 fn identite_unique() {
     assert_eq!(
@@ -55,12 +57,14 @@ fn identite_unique() {
         )),
         "Str(\"false|false|true\")"
     );
-    // `caller` de l'objet arguments non-mappé = même TTE.
+    // `caller` n'est PAS posé sur l'objet arguments non-mappé
+    // (ES2017 a retiré le poison — note 5 §10.4.4, audit
+    // V8/JSC/QuickJS unanime) ; `callee` reste le même TTE.
     assert_eq!(
         ev(&format!(
             "{TTE}var a=function(){{'use strict';return arguments}}();\
-            (TTE===Object.getOwnPropertyDescriptor(a,'caller').get)+'|'+\
-            (TTE===Object.getOwnPropertyDescriptor(a,'caller').set)"
+            (Object.getOwnPropertyDescriptor(a,'caller')===undefined)+'|'+\
+            (TTE===Object.getOwnPropertyDescriptor(a,'callee').get)"
         )),
         "Str(\"true|true\")"
     );
@@ -124,15 +128,16 @@ fn surface_tte() {
     );
 }
 
-/// `Function.prototype` : accesseurs TTE `{e:false, c:false}` —
-/// `delete` absorbé, lecture sur le proto lui-même jette.
+/// `Function.prototype` : accesseurs TTE `{e:false, c:true}`
+/// (`AddRestrictedFunctionProperties`) — `delete` réussit,
+/// lecture sur le proto lui-même jette.
 #[test]
 fn function_proto_spec() {
     assert_eq!(
         ev("var d=Object.getOwnPropertyDescriptor(Function.prototype,'caller');d.enumerable+'|'+d.configurable+'|'+typeof d.get"),
-        "Str(\"false|false|function\")"
+        "Str(\"false|true|function\")"
     );
-    assert_eq!(ev("delete Function.prototype.caller"), "Bool(false)");
+    assert_eq!(ev("delete Function.prototype.caller"), "Bool(true)");
     assert_eq!(
         ev("try{Function.prototype.caller}catch(e){e instanceof TypeError}"),
         "Bool(true)"

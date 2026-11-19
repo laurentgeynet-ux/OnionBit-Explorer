@@ -1142,11 +1142,11 @@ pub(crate) fn install(e: &mut Engine) {
         e.protos.sloppy_fn_acc = sid;
     }
     // `Function.prototype.{caller,arguments}` = `%ThrowTypeError%`
-    // get/set, `{e:false, c:true}` — spec `AddRestrictedFunction-
-    // Properties` (la lecture `c:false` était une déviation :
-    // triangulation V8/JSC/QJS — audit C609). JS-C463 reste
-    // spec-pur : les fns sloppy portent l'accesseur `null`
-    // ci-dessus en propre, tout le reste jette.
+    // get/set, `{e:false, c:true}` spec (`AddRestrictedFunctionProperties`
+    // — audit V8/JSC/QuickJS : `{c:false}` posé par erreur,
+    // `delete F.p.caller` doit réussir). JS-C463 reste spec-pur :
+    // les fns sloppy portent l'accesseur `null` ci-dessus en
+    // propre, tout le reste jette.
     {
         let acc = crate::heap::PropAttrs {
             writable: false,

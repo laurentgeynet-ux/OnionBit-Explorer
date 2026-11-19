@@ -104,3 +104,22 @@ fn search_and_match_units() {
     assert_eq!(eval(r#""𐒤ab".search(/b/)"#), "3");
     assert_eq!(eval(r#"var m="𐒤ab".match(/b/); m.index+":"+m[0]"#), "3:b");
 }
+
+/// Sonde `str_surr_re_match` — la sentinelle `U+F0000` d'un
+/// source `JsStr` (pattern string ou littéral) ne doit pas
+/// tomber dans le bras astral `≥ U+10000` qui la cassait en
+/// paire (`search('\uD800')` rendait -1 au lieu de 1).
+#[test]
+fn sentinel_pattern_matches_lone_surrogate() {
+    assert_eq!(eval(r"'x\uD800'.search('\uD800')"), "1");
+    assert_eq!(eval(r"new RegExp('\uD800').test('x\uD800')"), "true");
+    // Non-`u` : le surrogate du pattern matche aussi le
+    // demi-unit correspondant au milieu d'une paire réelle.
+    assert_eq!(eval(r"'a𐒤b'.search('\uD801')"), "1");
+    // L'astral réel reste une paire en un seul atome.
+    assert_eq!(eval(r"'x𐒤'.search('𐒤')"), "1");
+    assert_eq!(eval(r"new RegExp('𐒤').test('x𐒤')"), "true");
+    // `u` : domaine `re_encode` — sentinelle littérale
+    // pass-through, non régressée.
+    assert_eq!(eval(r"/\uD800/u.test('x\uD800')"), "true");
+}

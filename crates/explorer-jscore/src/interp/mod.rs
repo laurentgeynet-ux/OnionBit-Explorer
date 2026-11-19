@@ -7005,9 +7005,10 @@ impl Engine {
                 // paramètres non-simples — JS-C609) : `callee` =
                 // accesseur `{get,set: %ThrowTypeError%, e:false,
                 // c:false}` — même identité `protos.tte` que les
-                // poisons de fonctions. `caller` n'existe plus sur
-                // les objets arguments depuis ES2017
-                // (triangulation V8/JSC/QJS — audit C609).
+                // poisons de fonctions. `caller` n'est PAS posé :
+                // ES2017 a retiré l'accesseur poison des objets
+                // arguments ordinaires (note 5 §10.4.4 — audit
+                // oracle V8/JSC/QuickJS unanime).
                 let tte = Value::Obj(self.protos.tte);
                 let attrs = crate::heap::PropAttrs {
                     writable: false,
@@ -7015,7 +7016,7 @@ impl Engine {
                     configurable: false,
                 };
                 if let Some(o) = self.heap.obj_mut(aid) {
-                    o.define_accessor("callee", tte.clone(), tte, attrs);
+                    o.define_accessor("callee", tte.clone(), tte.clone(), attrs);
                 }
             } else {
                 self.set_own(aid, "callee", la.f.clone(), false);

@@ -1163,7 +1163,34 @@ fn translate_pattern(
                 }
             }
             _ => {
-                if in_class && !unicode && (c as u32) >= 0x1_0000 {
+                // Domaine sentinelle du source JsStr — à décoder
+                // avant le branchement astral (régression JS-C622
+                // : `new RegExp('\uD800')` voyait `U+F0000` partir
+                // en paire astrale → jamais de match). Non-`u`
+                // seulement : en `u`, `re_encode` laisse la paire
+                // escaper littérale matcher le haystack tel quel.
+                let (c, genuine) = if !unicode
+                    && c == '\u{F0800}'
+                    && matches!(cs.get(i + 1), Some(&n) if (0xF_0000..=0xF_0800).contains(&(n as u32)))
+                {
+                    i += 1;
+                    (cs[i], true)
+                } else {
+                    (c, false)
+                };
+                if !unicode && !genuine && (0xF_0000..0xF_0800).contains(&(c as u32)) {
+                    // Sentinelle surrogate — déjà dans le domaine
+                    // units : atome/membre = la sentinelle seule.
+                    out.push_str(&format!("\\x{{{:x}}}", c as u32));
+                    if in_class {
+                        class_emitted = true;
+                        class_prev = Some(ClassAtom::Char(c as u32));
+                        class_prev_bound = class_dash;
+                        class_dash = false;
+                    } else {
+                        last_atom = true;
+                    }
+                } else if in_class && !unicode && (c as u32) >= 0x1_0000 {
                     // JS-C622 : atome astral non-`u` = 2 membres
                     // sentinels (lead + trail — units éclatés).
                     let a = c as u32 - 0x1_0000;
