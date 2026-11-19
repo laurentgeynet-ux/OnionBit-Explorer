@@ -136,11 +136,15 @@ for ($cand = $max + 1; $cand -lt $max + 500 -and -not $claimStream; $cand++) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   try {
     # CreateNew = O_CREAT|O_EXCL : le premier écrivain possède N.
+    # FileShare.Read : les équipes concurrentes (Read-UsedPorts,
+    # « actif », l'opérateur) lisent le claim PENDANT le vol —
+    # avec FileShare.None le handle tenu ~build-long rendait le
+    # claim invisible aux pairs (course vols 908/909 nourrie).
     $claimStream = [System.IO.File]::Open(
       (Join-Path $dir 'CLAIMED.json'),
       [System.IO.FileMode]::CreateNew,
       [System.IO.FileAccess]::Write,
-      [System.IO.FileShare]::None)
+      [System.IO.FileShare]::Read)
     $N = $cand; $voldir = $dir
   } catch [System.IO.IOException] { } # déjà claimé — numéro suivant
 }
