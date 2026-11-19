@@ -15306,6 +15306,23 @@ chaque gain rapporté contre les **deux** archétypes.
   propres. **Reste catalogué** : noms de groupes non-BMP,
   `poisoned-stdlib`, capture reset quantifié,
   `builtin-infer-unicode`.
+- [x] **JS-C624 — reliquats RegExp/String : borne units dans
+  `regexp_exec` (boucle infinie `matchAll`/`(?:)`+`u` après
+  `lastIndex` hors-chaîne — OOM observée), `ToLength`
+  `2^53−1` sur les `lastIndex` relus pour
+  `AdvanceStringIndex`, groupes nommés non-ASCII/non-BMP**
+  (`builtins/{string,species}.rs` + `collections.rs` +
+  `regexp.rs` + gate `tests/c624_re_residual.rs` **4/4**).
+  `lastIndex > length` testé en units avant `u2c` (le clamp
+  char renvoyait un match vide final indéfiniment) ;
+  `ToLength` spec aux trois relectures `@@match`/`@@replace`/
+  `@@matchAll` ; `IdentifierName` non-ASCII → renommage
+  synthétique `__uN` traduit à `groups`/`indices.groups`/
+  `\k<orig>` (`(?<$𐒤>b)`). Gates : c624 4/4, c622 7/7,
+  lib 54/54, clippy/fmt propres. **Mesure** : sous-ensemble
+  RegExp+String **1 194 → 1 200/1 206** (+6). **Reste
+  catalogué** : `poisoned-stdlib`, capture reset quantifié
+  (limite fancy-regex), `match` `v`-flag ZWJ.
 - [x] **JS-C623 — `PromiseResolve`/`Await` spec-complet :
   reprise toujours par job + `constructor` lu par `Get` —
   sous-ensemble `for-await-of` soldé à 2 431/2 431**

@@ -1533,7 +1533,10 @@ fn it_helper_step(e: &mut Engine, st: &mut IterHelperState) -> JsResult<ItOut> {
                     // `lastIndex` relu (un exec custom peut
                     // l'avoir déplacé) — +2 units sous `unicode`.
                     let idx_v = e.get_prop_value(rx.clone(), "lastIndex")?;
-                    let idx = e.to_number(idx_v)?.max(0.0);
+                    let idx = e
+                        .to_number(idx_v)?
+                        .trunc()
+                        .clamp(0.0, 9_007_199_254_740_991.0);
                     let s_js = e.to_js_jstr(s.clone())?;
                     let next = crate::builtins::species::advance_str_index(&s_js, idx, *unicode);
                     crate::builtins::species::set_strict(

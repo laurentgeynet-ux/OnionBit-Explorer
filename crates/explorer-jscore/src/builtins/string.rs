@@ -900,10 +900,22 @@ pub(crate) fn regexp_exec(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     // conversion (`None` = identité quand pure BMP).
     let map = crate::regexp::UnitMap::of(&hay);
     let last_c = map.as_ref().map_or(last, |m| m.u2c(last));
+    // Spec `RegExpBuiltinExec` : `lastIndex > length` → null —
+    // la comparaison se fait en **units** (JS-C624 : `u2c`
+    // clampe au-delà de la fin → match vide à la fin en boucle
+    // infinie, `/(?:)/gu` + `matchAll` au cap heap).
+    let size_u = map
+        .as_ref()
+        .map_or(hay.chars().count(), |m| m.c2u(hay.chars().count()));
+    let found = if last > size_u {
+        None
+    } else {
+        re.exec_from(&hay, last_c)
+    };
     // Spec `RegExpBuiltinExec` : l'écriture `lastIndex` est
     // `Set(..., Throw=true)` — un refus (non-writable) lève
     // `TypeError` (JS-C618 : silence sloppy = boucle infinie).
-    if let Some((m, new_last_c)) = re.exec_from(&hay, last_c) {
+    if let Some((m, new_last_c)) = found {
         let new_last = map.as_ref().map_or(new_last_c, |mm| mm.c2u(new_last_c));
         if use_last && !e.set_prop(id, "lastIndex", Value::Num(new_last as f64))? {
             return Err(e.type_error("cannot assign to `lastIndex`"));

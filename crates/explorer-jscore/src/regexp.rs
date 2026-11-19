@@ -48,6 +48,11 @@ pub struct JsRegExp {
     /// nommés — JS-C269). Filtrés des résultats `exec` pour ne
     /// pas fuiter dans `match.groups`/`indices.groups`.
     synth: std::collections::BTreeSet<String>,
+    /// JS-C624 : noms de groupes renommés `synth → orig` —
+    /// fancy-regex n'accepte que `[A-Za-z0-9_]` pour `?P<…>` ;
+    /// les `IdentifierName` non-ASCII (`(?<$𐒤>)`) sont émis sous
+    /// `__uN` et traduits à l'affichage (`groups`/`named`/`k`).
+    renamed: std::collections::BTreeMap<String, String>,
 }
 
 /// **Domaine sentinelle regex** — même schéma que le lexer : un
@@ -280,7 +285,7 @@ impl JsRegExp {
         // `v` ≈ `u` côté moteur (unicodeSets non implémenté) —
         // même traduction unicode.
         let uni = unicode || unicode_sets;
-        let (translated, synth) = translate_pattern(source, uni, ignore_case && !uni)?;
+        let (translated, synth, renamed) = translate_pattern(source, uni, ignore_case && !uni)?;
         pat.push_str(&translated);
         // Domaine sentinelle : le pattern traduit porte des
         // chars `F0000..=F0800` (surrogates du source ou d'un
@@ -306,6 +311,7 @@ impl JsRegExp {
             has_indices,
             has_sentinels,
             synth,
+            renamed,
         })
     }
 
@@ -429,12 +435,18 @@ impl JsRegExp {
             .flatten()
             .filter(|n| !self.synth.contains(*n))
         {
+            // JS-C624 : le nom émis (`__uN`) redevient l'origine
+            // (`$𐒤`) à l'affichage.
+            let disp = self
+                .renamed
+                .get(name)
+                .map_or_else(|| name.to_string(), Clone::clone);
             named.push((
-                name.to_string(),
+                disp.clone(),
                 caps.name(name).map(|g| g.as_str().to_string()),
             ));
             named_indices.push((
-                name.to_string(),
+                disp,
                 caps.name(name)
                     .map(|g| (byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
             ));
@@ -485,6 +497,15 @@ pub(crate) fn escape_regexp_source(src: &str) -> String {
     out
 }
 
+/// Sortie de [`translate_pattern`] : pattern traduit, noms
+/// synthétiques `__eN` (anonymes), renommages `synth → orig`
+/// des `IdentifierName` non-ASCII (JS-C624).
+type TranslateOut = (
+    String,
+    std::collections::BTreeSet<String>,
+    std::collections::BTreeMap<String, String>,
+);
+
 /// JS source → `fancy-regex` pattern, with JS-side validation the
 /// backtracker doesn't do (it is *more* permissive than ECMA-262):
 ///
@@ -513,11 +534,10 @@ pub(crate) fn escape_regexp_source(src: &str) -> String {
 ///   (canonicalisation guard: `upper(v) == upper(c)`), because the
 ///   backend's `i` is full Unicode folding — `/\u{212a}/i` must
 ///   not match 'k' (KELVIN has no JS-canonical case partner).
-fn translate_pattern(
-    src: &str,
-    unicode: bool,
-    fold: bool,
-) -> Result<(String, std::collections::BTreeSet<String>), String> {
+///
+/// Renvoie `(pattern traduit, noms synthétiques `__eN` anonymes,
+/// renommages `synth → orig` des noms non-ASCII JS-C624)`.
+fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<TranslateOut, String> {
     let cs: Vec<char> = src.chars().collect();
     let (all_names, n_groups, has_decimal) = prescan(&cs);
     // JS-C269 : `fancy_regex` refuse `\N` dès qu'un groupe nommé
@@ -536,6 +556,8 @@ fn translate_pattern(
         emitted: Vec::new(),
         need_synth,
         synth: std::collections::BTreeSet::new(),
+        renamed: std::collections::BTreeMap::new(),
+        orig_to_synth: std::collections::BTreeMap::new(),
         groups_open: 0,
         open_stack: Vec::new(),
         look_pos: Vec::new(),
@@ -1129,7 +1151,7 @@ fn translate_pattern(
     if in_class {
         return Err(format!("unterminated class in /{src}/"));
     }
-    Ok((out, t.synth))
+    Ok((out, t.synth, t.renamed))
 }
 
 /// État partagé du traducteur : flags, tables de groupes.
@@ -1155,6 +1177,13 @@ struct Trans {
     /// Noms synthétiques `__eN` émis — filtrés de `groups`/`named`
     /// à l'exec.
     synth: std::collections::BTreeSet<String>,
+    /// JS-C624 : noms **renommés** `synth → orig` — fancy-regex
+    /// n'accepte que `[A-Za-z0-9_]` pour `?P<…>` ; les
+    /// `IdentifierName` non-ASCII (`(?<$𐒤>)`) sont émis sous un
+    /// nom synthétique `__uN` et traduits à l'affichage.
+    renamed: std::collections::BTreeMap<String, String>,
+    /// Inverse de `renamed` — émission `\k<orig>` → `\k<synth>`.
+    orig_to_synth: std::collections::BTreeMap<String, String>,
     /// Groupes capturants ouverts jusqu'ici (numérotation des `(`).
     groups_open: usize,
     /// Pile des groupes ouverts — `Some(n)` capturant, `None`
@@ -1671,9 +1700,27 @@ fn translate_group(
             t.groups_open += 1;
             t.open_stack.push(Some(t.groups_open));
             t.look_pos.push(None);
-            t.emitted.push(name.clone());
+            // JS-C624 : fancy-regex n'accepte que `[A-Za-z0-9_]`
+            // dans `?P<…>` — un IdentifierName plus large (`$`,
+            // non-ASCII, non-BMP) est émis sous un nom synthétique
+            // `__uN` (dédoublé) et traduit à l'affichage.
+            let emit_name = if name_needs_rename(&name) {
+                let mut nm = format!("__u{}", t.renamed.len());
+                while t.all_names.contains(&nm)
+                    || t.synth.contains(&nm)
+                    || t.renamed.contains_key(&nm)
+                {
+                    nm.push('_');
+                }
+                t.renamed.insert(nm.clone(), name.clone());
+                t.orig_to_synth.insert(name, nm.clone());
+                nm
+            } else {
+                name
+            };
+            t.emitted.push(emit_name.clone());
             out.push_str("(?P<");
-            out.push_str(&name);
+            out.push_str(&emit_name);
             out.push('>');
             Ok(j + 1)
         }
@@ -1719,6 +1766,13 @@ fn translate_group(
             Ok(j + 1)
         }
     }
+}
+
+/// JS-C624 : fancy-regex n'accepte que `[A-Za-z0-9_]` dans les
+/// noms `?P<…>` — tout `IdentifierName` plus large (`$`, lettres
+/// non-ASCII, non-BMP) part en renommage synthétique `__uN`.
+fn name_needs_rename(name: &str) -> bool {
+    name.chars().any(|c| !c.is_ascii_alphanumeric() && c != '_')
 }
 
 /// `name` est un `IdentifierName` (tables UAX #31 de
@@ -1826,7 +1880,12 @@ impl Trans {
                 }
                 if cs.get(j) == Some(&'>') && valid_group_name(&name) {
                     if self.names.contains(&name) {
-                        return Ok((format!("\\k<{name}>"), j + 1));
+                        // JS-C624 : groupe renommé → `\k<synth>`.
+                        let nm = self
+                            .orig_to_synth
+                            .get(&name)
+                            .map_or(name.as_str(), String::as_str);
+                        return Ok((format!("\\k<{nm}>"), j + 1));
                     }
                     if self.all_names.contains(&name) {
                         // Référence avant déclaration : le groupe ne

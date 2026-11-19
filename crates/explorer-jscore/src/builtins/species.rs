@@ -349,7 +349,10 @@ pub(crate) fn re_sym_match(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
             // `AdvanceStringIndex` sur `lastIndex` relu (spec
             // `ToLength`) — +2 units sous `unicode` sur paire.
             let idx_v = e.get_prop_value(this.clone(), "lastIndex")?;
-            let idx = e.to_number(idx_v)?.max(0.0);
+            let idx = e
+                .to_number(idx_v)?
+                .trunc()
+                .clamp(0.0, 9_007_199_254_740_991.0);
             let next = advance_str_index(&s, idx, unicode);
             set_strict(e, this.clone(), "lastIndex", Value::Num(next))?;
         }
@@ -456,7 +459,10 @@ pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsR
         }
         if empty {
             let idx_v = e.get_prop_value(this.clone(), "lastIndex")?;
-            let idx = e.to_number(idx_v)?.max(0.0);
+            let idx = e
+                .to_number(idx_v)?
+                .trunc()
+                .clamp(0.0, 9_007_199_254_740_991.0);
             let next = advance_str_index(&s, idx, unicode);
             set_strict(e, this.clone(), "lastIndex", Value::Num(next))?;
         }
