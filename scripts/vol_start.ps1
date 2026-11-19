@@ -182,7 +182,7 @@ function Write-Claim([hashtable]$Extra) {
   $claimStream.Write($b, 0, $b.Length)
   $claimStream.Flush()
 }
-function Abort-Vol([string]$Why) {
+function Stop-VolClaim([string]$Why) {
   Write-Claim @{ state = 'aborted'; error = $Why }
   $claimStream.Close()
   Write-Error $Why; exit 1
@@ -198,7 +198,7 @@ Write-Claim @{ state = 'claimed' }
 $buildRepo = $refRepo; $wt = ''; $exeOverride = ''
 if (-not $explicitRepo) {
   if ($NoBuild) {
-    Abort-Vol '-NoBuild sans -Repo : le worktree frais n''a pas de binaire — passer -Repo <arbre buildé>'
+    Stop-VolClaim '-NoBuild sans -Repo : le worktree frais n''a pas de binaire — passer -Repo <arbre buildé>'
   }
   # Réutilisation : le claim d'un vol précédent prouve
   # (sha_main + exe + worktree) que CE sha est déjà buildé —
@@ -223,7 +223,7 @@ if (-not $explicitRepo) {
     $leaf = Split-Path -Leaf $refRepo
     $wt = Join-Path (Split-Path -Parent $refRepo) "$leaf-vol$N-wt"
     git -C $refRepo worktree add --detach $wt $sha 2>&1 | ForEach-Object { Write-Output $_ }
-    if ($LASTEXITCODE -ne 0) { Abort-Vol "worktree éphémère $wt impossible" }
+    if ($LASTEXITCODE -ne 0) { Stop-VolClaim "worktree éphémère $wt impossible" }
     $buildRepo = $wt
     Write-Output "worktree éphémère : $wt @ $sha"
   }
@@ -233,7 +233,7 @@ if (-not $NoBuild -and -not $exeOverride) {
   Write-Output "build : cargo build --release -p explorer-daemon ($buildRepo)"
   Push-Location $buildRepo
   try { cargo build --release -p explorer-daemon } finally { Pop-Location }
-  if ($LASTEXITCODE -ne 0) { Abort-Vol 'build échoué' }
+  if ($LASTEXITCODE -ne 0) { Stop-VolClaim 'build échoué' }
 }
 
 # --- 4/5. port + spawn ---
@@ -296,7 +296,7 @@ for ($try = 1; $try -le 4 -and -not $spawned; $try++) {
         if (Test-PortFree $p $used) { $cand = $p }
       }
     }
-    if ($cand -eq 0) { Abort-Vol 'aucun port libre 9385-9599' }
+    if ($cand -eq 0) { Stop-VolClaim 'aucun port libre 9385-9599' }
     $Port = $cand
   }
   Write-Claim @{ state = 'spawning'; port = $Port }
@@ -322,10 +322,10 @@ for ($try = 1; $try -le 4 -and -not $spawned; $try++) {
     $proc = Get-Process -Id $dpid -ErrorAction SilentlyContinue
     if ($proc.ProcessName -eq 'explorer-daemon') { taskkill /PID $dpid /F | Out-Null }
   }
-  if ($forcedPort) { Abort-Vol "port forcé $Port perdu au bind" }
+  if ($forcedPort) { Stop-VolClaim "port forcé $Port perdu au bind" }
   $Port = 0
 }
-if (-not $spawned) { Abort-Vol "aucun bind gagné après les essais — voir $logdir" }
+if (-not $spawned) { Stop-VolClaim "aucun bind gagné après les essais — voir $logdir" }
 
 # --- 6. Job Object mémoire (gardien détaché, meurt avec la session) ---
 $null = Start-Process pwsh -WindowStyle Hidden -PassThru -ArgumentList @(
