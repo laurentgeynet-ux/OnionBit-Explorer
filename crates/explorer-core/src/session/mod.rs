@@ -2193,7 +2193,7 @@ impl Session {
                 };
                 StyleNode {
                     node: e.node.index(),
-                    parent: e.parent.map(|p| p.index()),
+                    parent: e.parent.map(explorer_dom::NodeId::index),
                     tag,
                     id: attr("id"),
                     cls: attr("class")

@@ -4742,6 +4742,22 @@ async fn layout(src: &str, size: Option<&str>) -> ExitCode {
         .and_then(|s| s.split('x').next())
         .and_then(|s| s.parse::<f32>().ok())
         .unwrap_or(800.0);
+    let height = size
+        .and_then(|s| s.split('x').nth(1))
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(600.0);
+    // Fontes réelles (même source que `save`/`shot`) : sans
+    // elles la mesure texte tombait sur les métriques de
+    // repli et divergeait du vrai pipeline — verdana/arial/
+    // times rendaient à l'identique, faussant le diagnostic
+    // des écarts de wrapping terrain.
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let ctx = explorer_layout::BlockCtx {
+        fonts: Some(&fonts),
+        viewport_w: width,
+        viewport_h: height,
+        ..explorer_layout::BlockCtx::default()
+    };
     match read_source(src).await {
         Ok(bytes) => {
             let (html, enc) = explorer_html::encoding::decode_sniffed(&bytes);
@@ -4767,7 +4783,7 @@ async fn layout(src: &str, size: Option<&str>) -> ExitCode {
                 return ExitCode::FAILURE;
             };
             if let Some(mut bx) = explorer_layout::build_box_tree(&dom, root_el, &styles) {
-                explorer_layout::layout_tree(&mut bx, width, &explorer_layout::BlockCtx::default());
+                explorer_layout::layout_tree(&mut bx, width, &ctx);
                 print!("{}", bx.dump(&dom));
                 ExitCode::SUCCESS
             } else {

@@ -4326,3 +4326,21 @@ miss attribuables). `css.values` 1144/1767 → 1146/1758
 (65,2 %), `bcd_na.json` re-sauvé, baseline cliquet
 re-sauvée. `color-scheme` laissé mesuré (pas de ctx
 contrôle posable).
+
+## 2026-11-19 — Retouches NAV de gate (clippy) par PIPELINE
+
+- **`explorer-cli`** : la sous-commande `layout` n'injectait
+  aucune `FontSource` (`BlockCtx::default()`) — ses mesures
+  texte divergeaient du vrai pipeline `save`/`shot`
+  (verdana/arial/times rendaient à l'identique) et faussaient
+  le diagnostic des écarts de wrapping terrain. Câblage de
+  `DirFontSource` (même source que `shot`) + viewport `LxH`
+  depuis l'arg `size`. Vérifié : mêmes mesures que `save`
+  au px près.
+- **`explorer-core`** (session/mod.rs:2196, ligne de
+  l'Étape 315) : `map(|p| p.index())` →
+  `map(explorer_dom::NodeId::index)` — clippy
+  `redundant-closure-for-method-calls` cassait le gate
+  workspace. Retouche mécanique d'une ligne, aucune
+  sémantique changée ; également `tests/geometry.rs`
+  (fn déplacé avant statements — même commit).
