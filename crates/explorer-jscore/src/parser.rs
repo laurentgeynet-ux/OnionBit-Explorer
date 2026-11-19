@@ -2051,9 +2051,17 @@ impl Parser {
         Ok(PropKey::Name(name))
     }
 
+    /// `of` contextuel en position mot-clé — un ident
+    /// **échappé** (`o\u0066`) ne matche pas : les mots-clés
+    /// contextuels ne peuvent pas contenir d'échappe quand ils
+    /// servent de terminal de grammaire (JS-C621).
+    fn peek_of(&self) -> bool {
+        matches!(self.peek(), Tok::Ident(s) if &**s == "of") && !self.toks[self.pos].escaped
+    }
+
     /// `of` — contextual keyword, stays an identifier elsewhere.
     fn eat_of(&mut self) -> bool {
-        if matches!(self.peek(), Tok::Ident(s) if &**s == "of") {
+        if self.peek_of() {
             self.next();
             true
         } else {
@@ -2102,10 +2110,212 @@ impl Parser {
         Err(self.err("expected `in` or `of`"))
     }
 
+    /// JS-C621 — early errors strict sur une cible
+    /// `for-in`/`for-of`/`for await` : `eval`/`arguments`/`yield`
+    /// en **position cible** (`[arguments]`, `{x: eval}`) →
+    /// `SyntaxError` ; les positions valeur (défauts
+    /// `x = arguments`, clés calculées, bases `arguments.x`)
+    /// restent légales — seul `yield` y est interdit
+    /// (`check_strict_yield`).
+    fn check_strict_target(&self, e: &Expr) -> Result<()> {
+        if !self.strict {
+            return Ok(());
+        }
+        match e {
+            Expr::Ident(n) => self.check_strict_binding(n),
+            Expr::Spread(inner) => self.check_strict_target(inner),
+            Expr::Assign(l, AssignOp::Set, d) => {
+                self.check_strict_target(l)?;
+                self.check_strict_yield(d)
+            }
+            Expr::Member(b, _) => self.check_strict_yield(b),
+            Expr::Index(b, k) => {
+                self.check_strict_yield(b)?;
+                self.check_strict_yield(k)
+            }
+            Expr::Array(elems) => {
+                for el in elems.iter().flatten() {
+                    self.check_strict_target(el)?;
+                }
+                Ok(())
+            }
+            Expr::Object(props) => {
+                for p in props {
+                    match p {
+                        ObjProp::Prop(k, ve) => {
+                            if let PropKey::Computed(ke) = k {
+                                self.check_strict_yield(ke)?;
+                            }
+                            self.check_strict_target(ve)?;
+                        }
+                        ObjProp::Spread(se) => self.check_strict_target(se)?,
+                        ObjProp::Getter(..) | ObjProp::Setter(..) => {}
+                    }
+                }
+                Ok(())
+            }
+            _ => self.check_strict_yield(e),
+        }
+    }
+
+    /// Position **valeur** d'une cible (défaut de motif, clé
+    /// calculée, base membre) : en strict, `yield` y est
+    /// interdit comme identifiant — descente récursive.
+    fn check_strict_yield(&self, e: &Expr) -> Result<()> {
+        if !self.strict {
+            return Ok(());
+        }
+        stacker::maybe_grow(STACK_RED_ZONE, STACK_GROW, || {
+            self.check_strict_yield_inner(e)
+        })
+    }
+
+    fn check_strict_yield_inner(&self, e: &Expr) -> Result<()> {
+        match e {
+            Expr::Ident(n) if &**n == "yield" => {
+                Err(self.err("`yield` is reserved in strict mode"))
+            }
+            Expr::Unary(_, e)
+            | Expr::Spread(e)
+            | Expr::Await(e)
+            | Expr::ImportCall(e)
+            | Expr::SuperIndex(e) => self.check_strict_yield(e),
+            Expr::Binary(_, l, r) | Expr::Index(l, r) | Expr::Assign(l, _, r) => {
+                self.check_strict_yield(l)?;
+                self.check_strict_yield(r)
+            }
+            Expr::Cond(c, t, e) => {
+                self.check_strict_yield(c)?;
+                self.check_strict_yield(t)?;
+                self.check_strict_yield(e)
+            }
+            Expr::Member(b, _) => self.check_strict_yield(b),
+            Expr::Array(items) => {
+                for el in items.iter().flatten() {
+                    self.check_strict_yield(el)?;
+                }
+                Ok(())
+            }
+            Expr::Object(props) => {
+                for p in props {
+                    match p {
+                        ObjProp::Prop(k, ve) => {
+                            if let PropKey::Computed(ke) = k {
+                                self.check_strict_yield(ke)?;
+                            }
+                            self.check_strict_yield(ve)?;
+                        }
+                        ObjProp::Spread(se) => self.check_strict_yield(se)?,
+                        ObjProp::Getter(..) | ObjProp::Setter(..) => {}
+                    }
+                }
+                Ok(())
+            }
+            Expr::Call(f, args, _) | Expr::New(f, args, _) => {
+                self.check_strict_yield(f)?;
+                for a in args {
+                    self.check_strict_yield(a)?;
+                }
+                Ok(())
+            }
+            Expr::Seq(items) => {
+                for i in items {
+                    self.check_strict_yield(i)?;
+                }
+                Ok(())
+            }
+            Expr::Template { exprs, .. } => {
+                for x in exprs {
+                    self.check_strict_yield(x)?;
+                }
+                Ok(())
+            }
+            Expr::TaggedTemplate { tag, exprs, .. } => {
+                self.check_strict_yield(tag)?;
+                for x in exprs {
+                    self.check_strict_yield(x)?;
+                }
+                Ok(())
+            }
+            Expr::Chain { head, steps } => {
+                self.check_strict_yield(head)?;
+                for s in steps {
+                    match s {
+                        crate::ast::ChainStep::Index(e) | crate::ast::ChainStep::OptIndex(e) => {
+                            self.check_strict_yield(e)?;
+                        }
+                        crate::ast::ChainStep::Call(args)
+                        | crate::ast::ChainStep::OptCall(args) => {
+                            for a in args {
+                                self.check_strict_yield(a)?;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(())
+            }
+            Expr::Yield { arg, .. } => {
+                if let Some(a) = arg {
+                    self.check_strict_yield(a)?;
+                }
+                Ok(())
+            }
+            Expr::SuperCall(args) => {
+                for a in args {
+                    self.check_strict_yield(a)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// Early errors strict sur un `Pat` de cible `for` : idents
+    /// liés (`check_strict_binding`) + exprs embarquées
+    /// (`Lvalue`, défauts, clés calculées).
+    fn check_strict_pat(&self, p: &Pat) -> Result<()> {
+        match p {
+            Pat::Ident(n) => self.check_strict_binding(n),
+            Pat::Lvalue(e) => self.check_strict_target(e),
+            Pat::Rest(p) => self.check_strict_pat(p),
+            Pat::Default(p, d) => {
+                self.check_strict_pat(p)?;
+                self.check_strict_yield(d)
+            }
+            Pat::Array(items) => {
+                for el in items.iter().flatten() {
+                    self.check_strict_pat(el)?;
+                }
+                Ok(())
+            }
+            Pat::Object { props, rest } => {
+                for (k, sp) in props {
+                    if let PropKey::Computed(ke) = k {
+                        self.check_strict_yield(ke)?;
+                    }
+                    self.check_strict_pat(sp)?;
+                }
+                if let Some(r) = rest {
+                    self.check_strict_pat(r)?;
+                }
+                Ok(())
+            }
+        }
+    }
+
     /// Tête lexicale `for (let|const|using p …)` : `let` banni
     /// comme nom lié, `using` exige un identifiant simple, et le
     /// scope tête+corps interdit les redeclarations.
     fn check_for_target(&self, target: &ForTarget, body: &Stmt) -> Result<()> {
+        // JS-C621 — early errors strict : `yield`/`eval`/
+        // `arguments` dans les motifs et exprs de la cible.
+        match target {
+            ForTarget::Var(p)
+            | ForTarget::Lexical { pat: p, .. }
+            | ForTarget::Using { pat: p, .. } => self.check_strict_pat(p)?,
+            ForTarget::Expr(e) => self.check_strict_target(e)?,
+        }
         let pat = match target {
             ForTarget::Lexical { pat, .. } => pat,
             ForTarget::Using { pat, .. } => {
@@ -2164,7 +2374,7 @@ impl Parser {
             } else {
                 None
             };
-            let is_of = matches!(self.peek(), Tok::Ident(s) if &**s == "of");
+            let is_of = self.peek_of();
             let is_in = self.peek() == &Tok::Kw(Kw::In);
             if is_of || is_in {
                 if var_init.is_some() && is_of {
@@ -2213,14 +2423,16 @@ impl Parser {
         if is_using {
             self.next(); // `using`
             let pat = self.pattern_decl()?;
-            if !matches!(self.peek(), Tok::Ident(s) if &**s == "of") {
+            if !self.peek_of() {
                 return Err(self.err("`using` declarations require a `for-of` loop"));
             }
             return self.for_in_of(ForTarget::Using { pat, is_await }, None, is_await);
         }
         let init = self.expr(true)?;
-        if matches!(self.peek(), Tok::Ident(s) if &**s == "of") || self.peek() == &Tok::Kw(Kw::In) {
-            if !is_lvalue(&init) && !matches!(init, Expr::Array(_) | Expr::Object(_)) {
+        if self.peek_of() || self.peek() == &Tok::Kw(Kw::In) {
+            if !(is_lvalue(&init)
+                || (matches!(init, Expr::Array(_) | Expr::Object(_)) && for_target_pat_ok(&init)))
+            {
                 return Err(self.err("invalid for-in/of target"));
             }
             return self.for_in_of(ForTarget::Expr(init), None, is_await);
@@ -3958,6 +4170,28 @@ fn is_lvalue(e: &Expr) -> bool {
             | Expr::SuperMember(_)
             | Expr::SuperIndex(_)
     )
+}
+
+/// JS-C621 — `true` si `e` est une cible de destructuration
+/// valide pour `for-in`/`for-of`/`for await` (miroir de
+/// `expr_to_pat`, sans allouer) : `[(x, y)]`, `[a + b]` ou
+/// `{x: f()}` sont des early errors — avant, tout littéral
+/// `[…]`/`{…}` était accepté comme cible.
+fn for_target_pat_ok(e: &Expr) -> bool {
+    match e {
+        Expr::Ident(_) | Expr::Member(..) | Expr::Index(..) => true,
+        Expr::Spread(inner) => for_target_pat_ok(inner),
+        Expr::Assign(l, AssignOp::Set, _) => for_target_pat_ok(l),
+        Expr::Array(elems) => elems
+            .iter()
+            .all(|el| el.as_ref().is_none_or(for_target_pat_ok)),
+        Expr::Object(props) => props.iter().all(|p| match p {
+            ObjProp::Prop(_, ve) => for_target_pat_ok(ve),
+            ObjProp::Spread(se) => for_target_pat_ok(se),
+            ObjProp::Getter(..) | ObjProp::Setter(..) => false,
+        }),
+        _ => false,
+    }
 }
 
 /// Source spelling of a keyword — used for reserved-word member

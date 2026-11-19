@@ -292,6 +292,40 @@ fn expr_to_pat_inner(e: &Expr) -> Option<Pat> {
     }
 }
 
+/// `Pat` → `Expr` — inverse de [`expr_to_pat`] : cible
+/// d'assignation destructurante (`[a, b]`, `{x}`, `o.p`) —
+/// JS-C621, `DstrAwait` relie les défauts suspendus via un
+/// `Assign` en stmts-frame.
+pub(crate) fn pat_to_expr(p: &Pat) -> Option<Expr> {
+    match p {
+        Pat::Ident(n) => Some(Expr::Ident(n.clone())),
+        Pat::Lvalue(e) => Some(e.clone()),
+        Pat::Rest(p) => pat_to_expr(p).map(|e| Expr::Spread(Box::new(e))),
+        Pat::Default(p, d) => pat_to_expr(p)
+            .map(|e| Expr::Assign(Box::new(e), AssignOp::Set, Box::new((**d).clone()))),
+        Pat::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for el in items {
+                match el {
+                    Some(p) => out.push(Some(pat_to_expr(p)?)),
+                    None => out.push(None),
+                }
+            }
+            Some(Expr::Array(out))
+        }
+        Pat::Object { props, rest } => {
+            let mut props = props
+                .iter()
+                .map(|(k, sp)| pat_to_expr(sp).map(|e| ObjProp::Prop(k.clone(), e)))
+                .collect::<Option<Vec<_>>>()?;
+            if let Some(r) = rest {
+                props.push(ObjProp::Spread(pat_to_expr(r)?));
+            }
+            Some(Expr::Object(props))
+        }
+    }
+}
+
 /// `obj[Symbol.iterator]()` partagé des host objects créés par
 /// `Engine::new_iterable_host` (JS-C76) : relit
 /// `Host::iter_items` à chaque appel (collection vivante) et rend

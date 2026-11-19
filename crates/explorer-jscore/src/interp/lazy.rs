@@ -478,6 +478,39 @@ fn lift_ftarget(t: &mut ForTarget, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
     }
 }
 
+/// JS-C621 — la cible `for await` est un motif `[…]` dont
+/// les suspends vivent **tous** dans l'initialisateur `d`
+/// d'un `Pat::Default` de premier niveau (avec `inner` sans
+/// suspend) : `DstrAwait` peut les suspendre nativement —
+/// le défaut suspendu est lié via une stmts-frame pendant
+/// que l'itérateur du motif reste ouvert (ordre
+/// `next()` → default observable, `rtrn-close-*`). Tout
+/// autre suspend (sous-motif, `Lvalue`, clé, `rest`, non-
+/// tableau) retombe sur l'injection en tête.
+fn ftarget_dstr_native(t: &ForTarget) -> bool {
+    match t {
+        ForTarget::Var(Pat::Array(items))
+        | ForTarget::Lexical {
+            pat: Pat::Array(items),
+            ..
+        }
+        | ForTarget::Using {
+            pat: Pat::Array(items),
+            ..
+        } => items.iter().all(|el| match el {
+            None => true,
+            Some(Pat::Default(inner, _)) => !has_suspend_pat(inner),
+            Some(p) => !has_suspend_pat(p),
+        }),
+        ForTarget::Expr(Expr::Array(items)) => items.iter().all(|el| match el {
+            None => true,
+            Some(Expr::Assign(l, AssignOp::Set, _)) => !has_suspend(l),
+            Some(e) => !has_suspend(e),
+        }),
+        _ => false,
+    }
+}
+
 /// JS-C620 — cible `for-of`/`for-in` porteuse de suspends :
 /// les expressions du motif (défauts `x = yield`, clés
 /// calculées `o[yield]`, restes `...a[yield]`) doivent
@@ -487,14 +520,27 @@ fn lift_ftarget(t: &mut ForTarget, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
 /// tête de corps — ses `__gM = yield`/`await` hissés s'y
 /// suspendent à chaque tour. Sans suspend : `lift_ftarget`
 /// inchangé.
+///
+/// JS-C621 — exception `for await` + cible `[…]` dont les
+/// suspends sont tous dans des défauts : `DstrAwait` lie
+/// ces défauts via une stmts-frame poussée par élément —
+/// le `yield`/`await` suspend **avec l'itérateur du motif
+/// encore ouvert** (ordre `next()` → default observable par
+/// `rtrn-close-*`), mieux que l'injection en tête.
 fn lower_for_target_per_iter(
     t: &mut ForTarget,
     body: &mut Stmt,
     pre: &mut Vec<Stmt>,
     cx: &mut LowerCx,
+    is_await: bool,
 ) {
     if !ftarget_has_suspend(t) {
         lift_ftarget(t, pre, cx);
+        return;
+    }
+    if is_await && ftarget_dstr_native(t) {
+        // `DstrAwait` natif — défauts suspendus livrés par
+        // élément (stmts-frame) ; le motif reste intact.
         return;
     }
     let mut head = Vec::new();
@@ -687,10 +733,13 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
             }
         }
         Stmt::ForOf {
-            target, iter, body, ..
+            target,
+            iter,
+            body,
+            is_await,
         } => {
             lift(iter, &mut pre, cx);
-            lower_for_target_per_iter(target, body, &mut pre, cx);
+            lower_for_target_per_iter(target, body, &mut pre, cx, *is_await);
         }
         Stmt::ForIn {
             target,
@@ -703,7 +752,7 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
             if let Some(v) = var_init {
                 lift(v, &mut pre, cx);
             }
-            lower_for_target_per_iter(target, body, &mut pre, cx);
+            lower_for_target_per_iter(target, body, &mut pre, cx, false);
         }
         Stmt::Switch { disc, cases } => {
             lift(disc, &mut pre, cx);
@@ -2078,6 +2127,21 @@ impl GExec {
                             // `undefined` (`...rest` ← accumulé).
                             while idx < elems.len() {
                                 if let Some(p) = &elems[idx] {
+                                    // Défaut suspendu → stmts-frame
+                                    // (JS-C621 — cf. livraison).
+                                    if let Pat::Default(inner, d) = p {
+                                        if has_suspend(d) {
+                                            idx += 1;
+                                            wb!();
+                                            if self
+                                                .push_dstr_default_bind(&env, inner, d, mode)
+                                                .is_some()
+                                            {
+                                                return Ok(());
+                                            }
+                                            idx -= 1;
+                                        }
+                                    }
                                     let r = if let Pat::Rest(inner) = p {
                                         let arr = e.new_array(std::mem::take(&mut rest));
                                         e.bind_pat(&env, self.this.clone(), inner, arr, mode)
@@ -2193,6 +2257,21 @@ impl GExec {
                     if is_rest {
                         rest.push(val);
                     } else if let Some(Some(p)) = elems.get(idx) {
+                        // JS-C621 — défaut suspendu sur `undefined`
+                        // (`[x = yield]`) : bind via stmts-frame —
+                        // `it` reste ouvert pendant la suspension
+                        // (un `.return()` abrupt le clos, spec
+                        // `AsyncIteratorClose`).
+                        if let Pat::Default(inner, d) = p {
+                            if matches!(val, Value::Undefined) && has_suspend(d) {
+                                idx += 1;
+                                wb!();
+                                if self.push_dstr_default_bind(&env, inner, d, mode).is_some() {
+                                    return Ok(());
+                                }
+                                idx -= 1;
+                            }
+                        }
                         wb!();
                         if let Err(Thrown(v)) = e.bind_pat(&env, self.this.clone(), p, val, mode) {
                             return self.throw_into(e, v);
@@ -2343,6 +2422,49 @@ impl GExec {
     /// liaison (JS-C620) : la destructuration suit le
     /// protocole itérateur **async** — frame `DstrAwait`,
     /// pas le `bind_pat` sync.
+    /// JS-C621 — bind d'un `Default(inner, d)` suspendu dans
+    /// `DstrAwait` : `lift(d)` produit les `var __gN = <node>`
+    /// suspendables, puis un stmt lie `inner` au résultat —
+    /// le tout poussé en frame `Seq` pendant que `it` reste
+    /// ouvert dans `DstrAwait` (un `.return()` abrupt le
+    /// clos, spec `AsyncIteratorClose`). `None` = repli sur
+    /// `bind_pat` synchrone.
+    fn push_dstr_default_bind(
+        &mut self,
+        env: &EnvRef,
+        inner: &Pat,
+        d: &Expr,
+        mode: BindMode,
+    ) -> Option<()> {
+        let mut d = d.clone();
+        let mut stmts = Vec::new();
+        lift(&mut d, &mut stmts, &mut LowerCx { n: 1_000_000_000 });
+        let bind = match mode {
+            BindMode::Assign => crate::interp::ops::pat_to_expr(inner)
+                .map(|le| Stmt::Expr(Expr::Assign(Box::new(le), AssignOp::Set, Box::new(d)))),
+            BindMode::Lex { mutable } => Some(Stmt::Lexical {
+                constant: !mutable,
+                decls: vec![VarDecl {
+                    pat: inner.clone(),
+                    init: Some(d),
+                }],
+            }),
+            BindMode::Var => Some(Stmt::Var(vec![VarDecl {
+                pat: inner.clone(),
+                init: Some(d),
+            }])),
+        }?;
+        stmts.push(bind);
+        self.stack.push(GFrame {
+            list: Rc::new(stmts),
+            pc: 0,
+            env: env.clone(),
+            labels: Vec::new(),
+            kind: FKind::Seq,
+        });
+        Some(())
+    }
+
     fn forawait_dstr(t: &ForTarget) -> Option<(Rc<Vec<Option<Pat>>>, BindMode)> {
         match t {
             ForTarget::Var(Pat::Array(items))

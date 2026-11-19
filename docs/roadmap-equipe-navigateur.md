@@ -15247,6 +15247,40 @@ chaque gain rapporté contre les **deux** archétypes.
   c616 10/10, c611/c613/c615/c617/c335/c456/iter_lazy/
   agen_queue/await_thenable/lazy_gen/t262_realm verts,
   hostile 12/12 release, lib 54/54, clippy/fmt/doc propres.
+- [x] **JS-C621 — soudure du cluster `for-await-of` : early
+  errors de cibles + `of` échappé + défauts suspendus sous
+  itérateur ouvert — mesure `for-await-of` 2 410 →
+  2 423/2 431 (+13, 8 échecs, tous `PromiseResolve`)**
+  (`parser.rs`, `lexer.rs`, `interp/{lazy,ops}.rs` + gate
+  `tests/c621_target.rs` **6/6**). **Défaut suspendu sous
+  itérateur ouvert** : `[x = yield]` dans une cible
+  `for await` est désormais lié par une stmts-frame poussée
+  par `DstrAwait` (`lift` au runtime, `var`/`let`/`assign`
+  selon mode) — le `yield`/`await` suspend **avec `it`
+  encore ouvert** : ordre `next()` → default observable, et
+  un `.return()` abrupt pendant la suspension clos le motif
+  (`AsyncIteratorClose` awaited → `return() → null` →
+  `TypeError` rejetée, `rtrn-close-null`). Éligibilité
+  `ftarget_dstr_native` : suspends uniquement dans des
+  défauts de premier niveau — sous-motifs/`Lvalue`/clés
+  restent sur l'injection en tête C620. **Early errors de
+  cibles** (`for_target_pat_ok`, miroir `expr_to_pat`) :
+  `[(x,y)]`, `[a + b]`, `{x: f()}` → `SyntaxError` ; idents
+  réservés strict `eval`/`arguments`/`yield` en position
+  cible (`check_strict_target` récursif sur `Expr`, valeurs
+  épargnées — `target-simple-strict`, `*-invalid` ×7).
+  **`of` échappé** : le lexer porte désormais un flag
+  `escaped` sur `Token` (ident produit via `\uXXXX`),
+  `eat_of`/`peek_of` l'exigent non échappé → `o\u0066`
+  rejeté (`escaped-of`, `for-of` et `for await`). **Reste
+  catalogué (8 échecs)** : `PromiseResolve`/ordonnancement
+  — `x.constructor` lu par `Get` + ticks d'await
+  (`ticks-*` ×3 fichiers + `continuation-abrupt-completion`
+  ×1) — blast radius microtasks global, étape dédiée.
+  Gates : c621 6/6, c620 11/11, c619 8/8, c616 10/10,
+  c611/c613/c615/c617/iter_lazy/agen_queue/await_thenable/
+  lazy_gen/t262_realm verts, hostile 12/12 release,
+  lib 54/54, clippy/fmt/doc propres.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

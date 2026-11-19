@@ -280,6 +280,11 @@ pub struct Token {
     /// tolerated in sloppy mode, `SyntaxError` in strict mode
     /// (checked by the parser, which owns the directive prologue).
     pub legacy_octal: bool,
+    /// Identifier contained a `\uXXXX`/`\u{…}` escape — legal as
+    /// an identifier, but contextual keywords (`of`, `async`,
+    /// `let`, `get`…) can't be used as grammar terminals when
+    /// escaped (JS-C621 — `for (x o\u0066 y)` must fail).
+    pub escaped: bool,
 }
 
 /// Lex `src` into a token vector terminated by a `Tok::Eof` token.
@@ -298,6 +303,7 @@ fn lex_in(src: &str, tpl_nest: u32, encoded: bool) -> Result<Vec<Token>> {
         line: 1,
         col: 1,
         legacy_octal: false,
+        escaped: false,
         tpl_nest,
         expect_operand: true,
         clause_parens: Vec::new(),
@@ -323,6 +329,9 @@ pub(crate) fn lex_encoded(src: &str) -> Result<Vec<Token>> {
 /// que l'hostile (JS-C41).
 const MAX_TPL_NEST: u32 = 512;
 
+// Bools éparses par rôle (token courant, machine regex,
+// source encodée) — fusion artificielle contre-productive.
+#[allow(clippy::struct_excessive_bools)]
 struct Lexer<'a> {
     /// Source — itérée directement en `&str` (V-6d) : `peek` se
     /// décode à la volée sur `src[byte_pos..]`, les tranches de
@@ -341,6 +350,8 @@ struct Lexer<'a> {
     col: usize,
     /// Set while producing the current token (see `Token::legacy_octal`).
     legacy_octal: bool,
+    /// Set while producing the current token (see `Token::escaped`).
+    escaped: bool,
     /// Emboîtement courant des substitutions de template (JS-C41).
     tpl_nest: u32,
     /// `/` en position division ? `true` = le prochain `/` ouvre
@@ -476,6 +487,7 @@ impl Lexer<'_> {
         let (line, col) = (self.line, self.col);
         let off = self.pos;
         self.legacy_octal = false;
+        self.escaped = false;
         let tok = match self.peek() {
             None => Tok::Eof,
             Some(c) if is_ident_start(c) => self.ident()?,
@@ -523,6 +535,7 @@ impl Lexer<'_> {
             off,
             end: self.pos,
             legacy_octal: self.legacy_octal,
+            escaped: self.escaped,
         })
     }
 
@@ -742,6 +755,7 @@ impl Lexer<'_> {
                         return Err(self.err("unexpected `\\`"));
                     }
                     escaped = true;
+                    self.escaped = true;
                     let c = self.unicode_escape()?;
                     let ok = if s.is_empty() {
                         is_ident_start(c)
