@@ -952,9 +952,18 @@ pub(crate) fn array_is_array(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     }
 }
 
-/// `Array.from(iterable|arrayLike)` — iterator protocol, then a
-/// `length`-indexed fallback; strings iterate by char.
-pub(crate) fn array_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+/// `Array.from(iterable|arrayLike)` (spec, JS-C615) :
+/// `IsConstructor(this)` → `A = Construct(this)` — proto du
+/// résultat résolu par `GetPrototypeFromConstructor` (realm de
+/// `newTarget`), sinon `ArrayCreate`. Remplissage par
+/// `CreateDataPropertyOrThrow` + `Set("length")`.
+///
+/// Chemin itérateur : `GetMethod(src, @@iterator)` — absent
+/// (nullish) → array-like, non-callable → `TypeError` (le repli
+/// « iter échoué → array-like » d'avant est levé ; `GetMethod`
+/// distingue). Boucle `IteratorStep`+`IteratorValue` avec
+/// `mapfn` intercalé à la spec et `IteratorClose` sur abrupt.
+pub(crate) fn array_from(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let src = arg(args, 0);
     let mapfn = arg(args, 1);
     let has_map = !matches!(mapfn, Value::Undefined);
@@ -962,39 +971,94 @@ pub(crate) fn array_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         return Err(e.type_error("Array.from mapfn is not callable"));
     }
     let t = arg(args, 2);
-    let mut items = if let Ok(v) = e.iter_values(src.clone()) {
-        v
-    } else {
-        // Spec : pas de @@iterator → array-like `length`-driven.
-        // `iter_values` jette aussi sur itérateur défaillant —
-        // distinction impossible ici (deviation : le repli
-        // array-like est tenté dans les deux cas).
-        {
-            let n = match e.get_prop_value(src.clone(), "length") {
-                Ok(l) => {
-                    let n = e.to_number(l)?;
-                    if n.is_finite() && n > 0.0 {
-                        n.min(4_294_967_295.0) as usize
-                    } else {
-                        0
-                    }
-                }
-                Err(_) => 0,
-            };
-            let mut out = Vec::with_capacity(n.min(1_000_000));
-            for i in 0..n {
-                e.tick()?;
-                out.push(e.get_prop_value(src.clone(), &i.to_string())?);
-            }
-            out
+    let map_or = |e: &mut Engine, v: Value, k: usize| -> JsResult<Value> {
+        if has_map {
+            e.call_value(mapfn.clone(), t.clone(), &[v, Value::Num(k as f64)])
+        } else {
+            Ok(v)
         }
     };
-    if has_map {
-        for (i, v) in items.iter_mut().enumerate() {
-            *v = e.call_value(mapfn.clone(), t.clone(), &[v.clone(), Value::Num(i as f64)])?;
+    let define_at = |e: &mut Engine, a: &Value, k: usize, v: Value| -> JsResult<()> {
+        if let Value::Obj(aid) = a {
+            if !e.create_data_prop_spec_on(*aid, &k.to_string(), v)? {
+                return Err(e.type_error("Array.from: element is not creatable"));
+            }
         }
+        Ok(())
+    };
+    // `GetMethod(items, @@iterator)`.
+    let m = e.get_prop_value(src.clone(), crate::interp::SYM_ITERATOR)?;
+    if e.is_callable(m.clone()) {
+        // Ordre spec : `A = Construct(C)` AVANT `GetIterator`
+        // (`ReturnIfAbrupt(A)` — l'erreur du ctor prime celle
+        // de la méthode, `iter-cstm-ctor-err`).
+        let a = if e.is_constructor(this.clone()) {
+            e.construct(this.clone(), &[])?
+        } else {
+            e.new_array(Vec::new())
+        };
+        // `GetIteratorFromMethod` : résultat non-objet → TypeError.
+        let it = e.call_value(m, src.clone(), &[])?;
+        if !matches!(it, Value::Obj(_)) {
+            return Err(e.type_error("iterator result is not an object"));
+        }
+        let next = e.get_prop_value(it.clone(), "next")?;
+        if !e.is_callable(next.clone()) {
+            return Err(e.type_error("iterator next is not callable"));
+        }
+        let mut k: usize = 0;
+        loop {
+            // `IfAbruptCloseIterator` : toute abrupt dans la
+            // boucle (step, mapfn, define) ferme l'itérateur.
+            let step: JsResult<Option<()>> = (|| {
+                let Some(v) = crate::collections::it_step(e, &it, &next)? else {
+                    return Ok(None);
+                };
+                let mv = map_or(e, v, k)?;
+                define_at(e, &a, k, mv)?;
+                Ok(Some(()))
+            })();
+            match step {
+                Ok(Some(())) => k += 1,
+                Ok(None) => break,
+                Err(t) => {
+                    let _ = crate::collections::it_close(e, &it);
+                    return Err(t);
+                }
+            }
+            if k as u64 >= 9_007_199_254_740_991 {
+                let _ = crate::collections::it_close(e, &it);
+                return Err(e.type_error("Array.from: too many elements"));
+            }
+        }
+        e.set_prop_value(a.clone(), "length", Value::Num(k as f64))?;
+        return Ok(a);
     }
-    Ok(e.new_array(items))
+    if !matches!(m, Value::Undefined | Value::Null) {
+        return Err(e.type_error("@@iterator is not callable"));
+    }
+    // Chemin array-like : `len = LengthOfArrayLike`, puis
+    // `Construct(C, «len»)` si ctor.
+    let l = e.get_prop_value(src.clone(), "length")?;
+    let ln = e.to_number(l)?;
+    let n = if ln.is_finite() && ln > 0.0 {
+        ln.min(4_294_967_295.0) as usize
+    } else {
+        0
+    };
+    let a = if e.is_constructor(this.clone()) {
+        e.construct(this.clone(), &[Value::Num(n as f64)])?
+    } else {
+        e.new_array(Vec::new())
+    };
+    for i in 0..n {
+        e.tick()?;
+        let v = e.get_prop_value(src.clone(), &i.to_string())?;
+        let mv = map_or(e, v, i)?;
+        define_at(e, &a, i, mv)?;
+    }
+    e.set_prop_value(a.clone(), "length", Value::Num(n as f64))?;
+    Ok(a)
 }
 
 pub(crate) fn array_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {

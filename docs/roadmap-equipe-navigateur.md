@@ -15040,3 +15040,40 @@ chaque gain rapporté contre les **deux** archétypes.
   `statements|expressions/class` zéro échec signé C614
   (résidus pré-existants : `*-escaped` lexer, labels
   `arguments`). Gate **8/8**, lib 54/54, c611/c613 verts.
+
+- [x] **JS-C615 — constructions internes `OrdinaryCreateFrom
+  Constructor` hors `construct_nt` : `Array.from`/`of` spec,
+  `ArraySpeciesCreate` cross-realm, `splice` routé, proto
+  `eval-body` gen/agen par `fn_realm`, `CreateDataProperty
+  OrThrow` corrigé — filtre `realm` 265 → 273/356, sous-
+  ensemble `built-ins/Array/{from,of,prototype·splice,map,
+  filter,slice,concat}` 1 140 → 1 208/1 472 (+68, 742
+  fichiers)** (`interp/mod.rs`, `builtins/{bigint,extras,
+  species,object}.rs`, `collections.rs` + gate
+  `tests/c615_ctor_realm.rs` **11/11**). **`Array.from`** :
+  `GetMethod @@iterator` (non-callable → `TypeError`, repli
+  array-like d'avant levé), `Construct(this)` **avant**
+  `GetIterator` (ordre spec — l'erreur du ctor prime), proto
+  par `GetPrototypeFromConstructor` (realm de `newTarget`),
+  `CreateDataPropertyOrThrow` intercalé, `IteratorClose` sur
+  abrupt. **`ArraySpeciesCreate`** : lectures `constructor`/
+  `@@species` observables ; démotion spec — `C` = `%Array%`
+  d'un autre realm (`realm_global_own`, sans swap) →
+  `undefined`, `@@species` jamais lu. **`splice`/`of`** :
+  résultat via `species_array`/`Construct` + `CreateData
+  PropertyOrThrow`. **`eval-body`** : `f.prototype` non-objet
+  → `%GeneratorPrototype%`/`%AsyncGeneratorPrototype%` du
+  realm de la fonction (`realm_gen_proto`/`fn_realm`).
+  **`create_data_prop_spec_on`** : descripteur complet
+  `{V,W,E,C}` sur own existante — configurable redéfinie,
+  non-configurable refuse (spec `CreateDataProperty`, vs le
+  merge `{value}` du chemin `Reflect.set`). **Adjacents
+  soldés** : `[[DefineOwnProperty]]` index `≥ len` no-op et
+  écriture élément via `[[Set]]` (setters proto déclenchés à
+  tort) — `lang` `c17`/`c20` verts. **Reste** :
+  `Symbol.split` complet (JS-C616 — 32/88), symboles
+  well-known cross-realm (~26 modes), Proxy `defineProperty`/
+  `construct` (~20), brand-check privés (~15), `$262.agent`,
+  `ShadowRealm` ; structurels : attrs/accesseurs par élément
+  d'array et itérateur snapshot-vs-live (territoire C613
+  tranche 2).

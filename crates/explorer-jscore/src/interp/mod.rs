@@ -3451,6 +3451,47 @@ impl Engine {
         }
     }
 
+    /// Prop own `name` du *global* du realm `r` — lecture
+    /// data-only sans swap (heap partagé, même motif que
+    /// `realm_ctor_proto`). Sert les comparaisons
+    /// d'intrinsèques (`SameValue(C, realmC.%Array%)` de
+    /// `ArraySpeciesCreate`, JS-C615).
+    pub(crate) fn realm_global_own(&self, r: crate::context::CtxId, name: &str) -> Option<Value> {
+        let g = if r == self.cur_ctx {
+            self.global
+        } else {
+            self.parked.get(&r)?.global
+        };
+        self.heap.obj(g)?.get_own(name)
+    }
+
+    /// `%GeneratorPrototype%` / `%AsyncGeneratorPrototype%` du
+    /// realm `r` — champs ctx swappés (comme les ctors cachés
+    /// de `realm_ctor_proto`). Repli `protos.iterator` quand
+    /// l'intrinsèque n'est pas encore installé (ordre
+    /// `builtins::install`) ou `r` inconnu — même défaut que
+    /// `gen_lazy_obj` (JS-C615).
+    pub(crate) fn realm_gen_proto(&self, r: Option<crate::context::CtxId>, asy: bool) -> Value {
+        let v = match r {
+            Some(r) if r != self.cur_ctx => self.parked.get(&r).map(|c| {
+                if asy {
+                    c.async_gen_proto.clone()
+                } else {
+                    c.gen_proto.clone()
+                }
+            }),
+            _ => Some(if asy {
+                self.async_gen_proto.clone()
+            } else {
+                self.gen_proto.clone()
+            }),
+        };
+        match v {
+            Some(v @ Value::Obj(_)) => v,
+            _ => Value::Obj(self.protos.iterator),
+        }
+    }
+
     pub(crate) fn ctx_of_env(&self, env: &EnvRef) -> Option<crate::context::CtxId> {
         let mut cur = env.clone();
         let root = loop {
@@ -9966,7 +10007,12 @@ impl Engine {
     /// non-extensibilité s'appliquent à la lettre (JS-C606).
     /// `Ok(false)` = refus ordinaire (l'appelant tranche
     /// `Ok(false)` vs `TypeError`) ; abrupts propagés en `Err`.
-    fn create_data_prop_on(&mut self, rid: ObjId, key: &str, v: Value) -> JsResult<bool> {
+    pub(crate) fn create_data_prop_on(
+        &mut self,
+        rid: ObjId,
+        key: &str,
+        v: Value,
+    ) -> JsResult<bool> {
         // Own existante sur le receiver (spec
         // `OrdinarySetWithOwnDescriptor`) : accesseur ou data
         // non-writable → refus **direct** ; sinon descripteur
@@ -9985,6 +10031,33 @@ impl Engine {
             self.set_own(d, "enumerable", Value::Bool(true), true);
             self.set_own(d, "configurable", Value::Bool(true), true);
         }
+        crate::builtins::object::define_one_prop(self, rid, key, d)
+    }
+
+    /// `CreateDataProperty` spec (JS-C615) — descripteur **complet**
+    /// `{V, W:true, E:true, C:true}` appliqué même sur own existante :
+    /// une prop configurable est **redéfinie** (attrs remplacés,
+    /// contrairement au merge `{value}` de [`Self::create_data_prop_on`]) ;
+    /// seule une non-configurable refuse (`ValidateAndApply`). C'est le
+    /// helper des `CreateDataPropertyOrThrow` spec (`Array.from`,
+    /// `Array.of`, `splice` species…). `Ok(false)` = refus ordinaire ;
+    /// abrupts propagés en `Err`.
+    pub(crate) fn create_data_prop_spec_on(
+        &mut self,
+        rid: ObjId,
+        key: &str,
+        v: Value,
+    ) -> JsResult<bool> {
+        if let Some(Prop::Acc { attrs, .. } | Prop::Data { attrs, .. }) = self.find_own(rid, key) {
+            if !attrs.configurable {
+                return Ok(false);
+            }
+        }
+        let d = self.new_object();
+        self.set_own(d, "value", v, true);
+        self.set_own(d, "writable", Value::Bool(true), true);
+        self.set_own(d, "enumerable", Value::Bool(true), true);
+        self.set_own(d, "configurable", Value::Bool(true), true);
         crate::builtins::object::define_one_prop(self, rid, key, d)
     }
 
@@ -12899,10 +12972,24 @@ impl Engine {
                 }
             }
             if let (Value::Obj(iid), Value::Obj(fid)) = (it.clone(), f.clone()) {
-                if let Some(proto) = self.get_prop(fid, "prototype") {
-                    if let Some(o) = self.heap.obj_mut(iid) {
-                        o.set_proto(proto);
+                // `OrdinaryCreateFromConstructor(f, "%Generator
+                // Prototype%")` : `f.prototype` non-objet →
+                // intrinsèque du realm DE LA FONCTION
+                // (`fn_realm`), pas du ctx appelant — gen et
+                // async-gen (JS-C615, `eval-body-proto-realm`).
+                let proto = match self.get_prop_value(Value::Obj(fid), "prototype") {
+                    Ok(p) if self.is_spec_object(&p) => p,
+                    Ok(_) => self.realm_gen_proto(self.fn_realm(&f), lit.is_async),
+                    Err(t) => {
+                        self.call_depth -= 1;
+                        self.call_stack.pop();
+                        self.call_sites.pop();
+                        self.strict = outer_strict;
+                        return Err(t);
                     }
+                };
+                if let Some(o) = self.heap.obj_mut(iid) {
+                    o.set_proto(proto);
                 }
             }
             self.call_depth -= 1;

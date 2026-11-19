@@ -860,8 +860,17 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
             if i >= len && integ & 3 != 0 {
                 return Ok(false);
             }
-            if i < len && has_value {
-                e.set_prop(id, &i.to_string(), v)?;
+            if has_value {
+                // `[[DefineOwnProperty]]` — écriture own directe
+                // de l'élément : jamais `[[Set]]` (les accesseurs
+                // de la chaîne proto sont invisibles ici, JS-C615)
+                // et stockage effectif quel que soit `i` (avant :
+                // `i >= len` retournait vrai sans rien écrire).
+                // Pas de garde d'alloc (JS-C613) : les indices
+                // hauts vivent dans la map sparse de `Arr`.
+                if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
+                    elems.set(i as u32, v);
+                }
             }
             return Ok(true);
         }

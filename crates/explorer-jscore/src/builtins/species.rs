@@ -16,13 +16,23 @@ use super::*;
 /// (sous-classes `Array.of.call(C, …)`), sinon un Array ordinaire.
 pub(crate) fn array_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let len = args.len();
-    let a = if e.is_callable(this.clone()) {
+    // Spec : `IsConstructor(this)` → `A = Construct(this, «len»)`,
+    // sinon `ArrayCreate`. Éléments via `CreateDataPropertyOrThrow`
+    // — les setters/accessors de la chaîne proto ne sont jamais
+    // sollicités (`does-not-use-prototype-properties`).
+    let a = if e.is_constructor(this.clone()) {
         e.construct(this, &[Value::Num(len as f64)])?
     } else {
         e.new_array(vec![Value::Undefined; len])
     };
     for (i, v) in args.iter().enumerate() {
-        e.set_prop_value(a.clone(), &i.to_string(), v.clone())?;
+        let ok = match a {
+            Value::Obj(aid) => e.create_data_prop_spec_on(aid, &i.to_string(), v.clone())?,
+            _ => true,
+        };
+        if !ok {
+            return Err(e.type_error("Array.of: element is not creatable"));
+        }
     }
     e.set_prop_value(a.clone(), "length", Value::Num(len as f64))?;
     Ok(a)
@@ -64,22 +74,47 @@ pub(crate) fn install_species(e: &mut Engine, ctor: &Value) {
 }
 
 /// `ArraySpeciesCreate(src, len)` (spec) : `new src.constructor
-/// [@@species](len)` si la prop existe ; un `undefined`/`null` →
-/// tableau ordinaire, autre chose → `TypeError` via `construct`.
+/// [@@species](len)` ; `undefined`/`null` → tableau ordinaire.
+/// Lectures **observables** (`Get`) — `constructor` et `@@species`
+/// invoquent leurs accesseurs (JS-C615 ; avant `get_prop`
+/// data-only, les getters étaient invisibles).
+///
+/// Démotion cross-realm (spec étape 6.c) : si `C` est un ctor
+/// d'un **autre** realm identique à **son** `%Array%`, `C` est
+/// ramené à `undefined` — `@@species` n'est alors jamais lu
+/// (`create-proto-from-ctor-realm-array` : `callCount` reste 0).
+/// Déviation cataloguée : `IsArray` ne traverse pas les proxies.
 pub(crate) fn species_array(e: &mut Engine, src: Value, len: usize) -> JsResult<Value> {
-    if let Value::Obj(id) = src {
-        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
-            let sp = e.get_prop(id, "constructor").and_then(|c| match c {
-                Value::Obj(cid) => e.get_prop(cid, crate::interp::SYM_SPECIES),
-                _ => None,
-            });
-            match sp {
-                None | Some(Value::Undefined | Value::Null) => {}
-                Some(ctor_v) => return e.construct(ctor_v, &[Value::Num(len as f64)]),
+    // `ArrayCreate(len)` — le repli valide la borne spec
+    // (`len > 2³²−1` → `RangeError`) et pose `length` ; la
+    // représentation sparse ne densifie rien.
+    let array_create = |e: &mut Engine| -> JsResult<Value> {
+        if len > u32::MAX as usize {
+            return Err(e.range_error("Invalid array length"));
+        }
+        Ok(e.new_array_len(len as u32))
+    };
+    let Value::Obj(id) = src else {
+        return array_create(e);
+    };
+    if !matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
+        return array_create(e);
+    }
+    let mut c = e.get_prop_value(src.clone(), "constructor")?;
+    if e.is_constructor(c.clone()) {
+        if let Some(rc) = e.fn_realm(&c) {
+            if rc != e.cur_ctx && e.realm_global_own(rc, "Array").is_some_and(|a| a == c) {
+                c = Value::Undefined;
             }
         }
     }
-    Ok(e.new_array(Vec::new()))
+    if e.is_spec_object(&c) {
+        match e.get_prop_value(c, crate::interp::SYM_SPECIES)? {
+            Value::Undefined | Value::Null => {}
+            s => return e.construct(s, &[Value::Num(len as f64)]),
+        }
+    }
+    array_create(e)
 }
 
 /// Algorithme `rx.exec`-résultat partagé `str.match`/`@@match`

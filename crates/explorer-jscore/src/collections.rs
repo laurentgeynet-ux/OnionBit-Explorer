@@ -1028,7 +1028,7 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// Étape d'un record itérateur — spec `IteratorStep` +
 /// `IteratorValue` : résultat non-objet → `TypeError`, getters
 /// `done`/`value` propagés (`get_prop` data-only les avalait).
-fn it_step(e: &mut Engine, src: &Value, next: &Value) -> JsResult<Option<Value>> {
+pub(crate) fn it_step(e: &mut Engine, src: &Value, next: &Value) -> JsResult<Option<Value>> {
     e.tick()?;
     let r = e.call_value(next.clone(), src.clone(), &[])?;
     let Value::Obj(rid) = r else {
@@ -1059,7 +1059,7 @@ fn it_done_step(e: &mut Engine, src: &Value, next: &Value) -> JsResult<bool> {
 /// nullish → rien, **non-callable → `TypeError`** (`GetMethod`),
 /// sinon appelé avec zéro arg (complétion abrupte) ; résultat
 /// non-objet → `TypeError`, sinon ignoré.
-fn it_close(e: &mut Engine, src: &Value) -> JsResult<()> {
+pub(crate) fn it_close(e: &mut Engine, src: &Value) -> JsResult<()> {
     if !matches!(src, Value::Obj(_)) {
         return Ok(());
     }

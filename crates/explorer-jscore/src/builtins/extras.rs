@@ -381,6 +381,7 @@ pub(crate) fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> 
 /// `elems` n'est réécrit qu'à la fin : un throw en cours de
 /// conversion des args laisse l'array intact.
 pub(crate) fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let this_v = this.clone();
     let id = this_array(e, this)?;
     // `with_elems` — `to_number` des args peut jeter : le tableau
     // reste intact (JS-C319). Le refus `sealed` repose aussi le
@@ -422,7 +423,21 @@ pub(crate) fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
         {
             return Err(e.type_error("cannot splice a sealed array"));
         }
-        let darr = e.new_array(deleted);
+        // `A = ? ArraySpeciesCreate(O, actualDeleteCount)` (spec,
+        // JS-C615) — `splice` fabriquait `new_array` direct :
+        // `@@species`/`constructor` invisibles et le proto du
+        // résultat ignorait le ctor résolu.
+        let darr = species_array(e, this_v.clone(), del)?;
+        if let Value::Obj(did) = darr.clone() {
+            for (i, v) in deleted.iter().enumerate() {
+                // `CreateDataPropertyOrThrow` — trou → `undefined`
+                // (spec `Get`), jamais la cellule `Hole`.
+                if !e.create_data_prop_spec_on(did, &i.to_string(), v.unhole())? {
+                    return Err(e.type_error("splice: element is not creatable"));
+                }
+            }
+        }
+        e.set_prop_value(darr.clone(), "length", Value::Num(del as f64))?;
         *elems = out_v;
         Ok(darr)
     })
