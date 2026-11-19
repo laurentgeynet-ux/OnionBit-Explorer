@@ -92,8 +92,11 @@ pub(crate) fn number_to_fixed(e: &mut Engine, this: Value, args: &[Value]) -> Js
 }
 
 pub(crate) fn boolean_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    match this {
-        Value::Bool(b) => Ok(e.str_val(if b { "true" } else { "false" })),
+    // `thisBooleanValue` (spec) : primitive **ou** wrapper —
+    // `this_prim` déballe (JS-C618 : `.toString` refusait les
+    // `new Boolean(...)`/`new Object(b)` que `valueOf` accepte).
+    match this_prim(e, this) {
+        Some(Value::Bool(b)) => Ok(e.str_val(if b { "true" } else { "false" })),
         _ => Err(e.type_error("Boolean method on non-boolean")),
     }
 }

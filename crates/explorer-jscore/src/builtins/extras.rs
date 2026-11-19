@@ -595,13 +595,34 @@ pub(crate) fn string_iterator(e: &mut Engine, this: Value, _a: &[Value]) -> JsRe
 /// `matchAll(re)` — requires the `g` flag (spec `TypeError`); yields
 /// an iterator of match arrays.
 pub(crate) fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_jstr(e, this.clone())?;
-    // `rx[Symbol.matchAll](this)` (spec `GetMethod`).
-    if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_MATCH_ALL, &[this])? {
-        return Ok(v);
+    // Spec (JS-C618) : `RequireObjectCoercible` ; `IsRegExp` +
+    // `flags` requis `g` ; `GetMethod(@@matchAll)` ; `ToString`
+    // ; repli `RegExpCreate(rx, "g")` + `Invoke(@@matchAll)`.
+    if let Value::Undefined | Value::Null = this {
+        return Err(e.type_error("String method called on null/undefined"));
     }
-    let (re, _id) = as_regexp(e, arg(args, 0))?;
-    re_match_all_impl(e, &re, &s)
+    let pat = arg(args, 0);
+    if !matches!(pat, Value::Undefined | Value::Null) {
+        if is_regexp_spec(e, pat.clone())? {
+            let fv = e.get_prop_value(pat.clone(), "flags")?;
+            if !e.to_js_string(fv)?.contains('g') {
+                return Err(e.type_error("matchAll requires a global regex"));
+            }
+        }
+        if let Some(v) = sym_method(
+            e,
+            pat,
+            crate::interp::SYM_MATCH_ALL,
+            std::slice::from_ref(&this),
+        )? {
+            return Ok(v);
+        }
+    }
+    let s = e.to_js_jstr(this)?;
+    let g = e.str_val("g".to_string());
+    let rx = regexp_create(e, arg(args, 0), g)?;
+    let m = e.get_prop_value(rx.clone(), crate::interp::SYM_MATCH_ALL)?;
+    e.call_value(m, rx, &[Value::Str(s)])
 }
 
 /// `String.fromCodePoint(...)` — 0..=0x10FFFF entier (spec :

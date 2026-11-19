@@ -500,6 +500,10 @@ impl Heap {
                             push_value(out, v);
                         }
                     }
+                    IterOp::ReMatchAll { rx, s, .. } => {
+                        push_value(out, rx);
+                        push_value(out, s);
+                    }
                     _ => {}
                 }
             }
@@ -2736,6 +2740,21 @@ pub enum IterOp {
         mode: ZipMode,
         /// Padding pré-tiré par position d'itérateur fini.
         pads: Vec<Value>,
+    },
+    /// `%RegExpStringIterator%` (spec `CreateRegExpString
+    /// Iterator`, JS-C618) — pas de source-itérateur : `rx` est
+    /// le matcher construit par `@@matchAll`, `s` la chaîne ;
+    /// chaque pas = `RegExpExec(rx, s)` dynamique (exec et
+    /// `lastIndex` observables).
+    ReMatchAll {
+        /// Matcher (objet produit par `SpeciesConstructor`).
+        rx: Value,
+        /// Chaîne itérée.
+        s: Value,
+        /// `global` — un résultat puis `done` quand `false`.
+        global: bool,
+        /// `unicode` — pilote `AdvanceStringIndex`.
+        unicode: bool,
     },
     /// Sentinelle de course — posée dans le tas pendant que
     /// `it_helper_next` exécute une étape ; une ré-entrance la

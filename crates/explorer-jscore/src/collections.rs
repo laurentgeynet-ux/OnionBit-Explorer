@@ -1112,6 +1112,37 @@ pub(crate) fn it_record(e: &mut Engine, v: Value) -> JsResult<(Value, Value)> {
     Err(e.type_error("value is not iterable"))
 }
 
+/// `CreateRegExpStringIterator` (spec 22.2.9.1, JS-C618) —
+/// objet `%RegExpStringIteratorPrototype%` paresseux : chaque
+/// `next` = `RegExpExec(rx, s)` sur le matcher vivant.
+pub(crate) fn re_match_all_iter(
+    e: &mut Engine,
+    rx: Value,
+    s: Value,
+    global: bool,
+    unicode: bool,
+) -> Value {
+    let id = e
+        .heap
+        .alloc_obj(Object::ordinary(Value::Obj(e.protos.regexp_iter)));
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::IterHelper(Box::new(IterHelperState {
+            source: Value::Undefined,
+            next: Value::Undefined,
+            inner: None,
+            done: false,
+            counter: 0,
+            op: IterOp::ReMatchAll {
+                rx,
+                s,
+                global,
+                unicode,
+            },
+        }));
+    }
+    Value::Obj(id)
+}
+
 /// `%WrapForValidIteratorPrototype%` (spec `Iterator.from`) —
 /// le record est forwardé **verbatim** par `next`.
 pub(crate) fn it_wrap(e: &mut Engine, source: Value, next: Value) -> Value {
@@ -1478,6 +1509,43 @@ fn it_helper_step(e: &mut Engine, st: &mut IterHelperState) -> JsResult<ItOut> {
         // brut sans extraction) ; `Running` = sentinelle de
         // course — les deux sont interceptées avant ce point,
         // filet de sécurité.
+        IterOp::ReMatchAll {
+            rx,
+            s,
+            global,
+            unicode,
+        } => {
+            // `%RegExpStringIteratorPrototype%.next` (spec
+            // 22.2.9.2.1, JS-C618) : `RegExpExec` dynamique —
+            // `exec` custom et `lastIndex` sont observés à
+            // chaque pas.
+            let m = crate::builtins::species::reg_exp_exec(e, rx.clone(), s.clone())?;
+            if matches!(m, Value::Null) {
+                ItOut::Done
+            } else if !*global {
+                // Dernier pas : valeur émise, `done` après.
+                st.done = true;
+                ItOut::Val(m)
+            } else {
+                let ms = e.get_prop_value(m.clone(), "0")?;
+                if e.to_js_string(ms)?.is_empty() {
+                    // Match vide : `AdvanceStringIndex` sur
+                    // `lastIndex` relu (un exec custom peut
+                    // l'avoir déplacé) — +2 units sous `unicode`.
+                    let idx_v = e.get_prop_value(rx.clone(), "lastIndex")?;
+                    let idx = e.to_number(idx_v)?.max(0.0);
+                    let s_js = e.to_js_jstr(s.clone())?;
+                    let next = crate::builtins::species::advance_str_index(&s_js, idx, *unicode);
+                    crate::builtins::species::set_strict(
+                        e,
+                        rx.clone(),
+                        "lastIndex",
+                        Value::Num(next),
+                    )?;
+                }
+                ItOut::Val(m)
+            }
+        }
         IterOp::Wrap | IterOp::Running => {
             return Err(e.type_error("generator is already running"));
         }

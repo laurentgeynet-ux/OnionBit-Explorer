@@ -155,11 +155,16 @@ fn exec_result_contract() {
 fn flags_to_constructor() {
     let out = run("var seen='';\
          var rx=/x/gi;\
-         function C(a,b){seen=b;this.exec=a.exec;this.lastIndex=0;}\
+         function C(a,b){seen=b;\
+           this.exec=function(s){var i=s.indexOf('x',this.lastIndex);\
+             if(i<0)return null;this.lastIndex=i+1;\
+             return {index:i,length:1};};\
+           this.lastIndex=0;}\
          C[Symbol.species]=C;\
          rx.constructor=C;\
          rx[Symbol.split]('aXb');seen");
-    // flags 'gi' + 'y' ajouté.
+    // flags 'gi' + 'y' ajouté (exec custom — `a.exec` sur un
+    // non-RegExp lève `TypeError` : slot `[[RegExpMatcher]]`).
     assert_eq!(out, "giy");
 }
 
@@ -168,7 +173,9 @@ fn flags_to_constructor() {
 fn sticky_flag_preserved() {
     let out = run("var seen='';\
          var rx=/x/uy;\
-         function C(a,b){seen=b;this.exec=a.exec;this.lastIndex=0;}\
+         function C(a,b){seen=b;\
+           this.exec=function(){return null};\
+           this.lastIndex=0;}\
          C[Symbol.species]=C;\
          rx.constructor=C;\
          rx[Symbol.split]('ab');seen");

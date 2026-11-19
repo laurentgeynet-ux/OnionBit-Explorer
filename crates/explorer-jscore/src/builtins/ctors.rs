@@ -101,24 +101,25 @@ pub(crate) fn wrap_or_prim(e: &mut Engine, this: Value, proto: ObjId, prim: Valu
 }
 
 pub(crate) fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
-    match arg(args, 0) {
-        Value::Undefined => {
-            let prim = e.str_val("");
-            Ok(wrap_or_prim(e, t, e.protos.string, prim))
-        }
-        v => {
-            let prim = if let Some(d) = sym_desc(e, v.clone()) {
-                e.str_val(if d.is_empty() {
-                    "Symbol()".to_string()
-                } else {
-                    format!("Symbol({d})")
-                })
-            } else {
-                e.to_str_val(v)?
-            };
-            Ok(wrap_or_prim(e, t, e.protos.string, prim))
-        }
+    // Spec : `String()` **sans argument** → `""`, mais
+    // `String(undefined)` → `"undefined"` — la distinction
+    // passe par l'arité (comme `Number(undefined)` → `NaN`,
+    // JS-C618).
+    if args.is_empty() {
+        let prim = e.str_val("");
+        return Ok(wrap_or_prim(e, t, e.protos.string, prim));
     }
+    let v = arg(args, 0);
+    let prim = if let Some(d) = sym_desc(e, v.clone()) {
+        e.str_val(if d.is_empty() {
+            "Symbol()".to_string()
+        } else {
+            format!("Symbol({d})")
+        })
+    } else {
+        e.to_str_val(v)?
+    };
+    Ok(wrap_or_prim(e, t, e.protos.string, prim))
 }
 
 pub(crate) fn number_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {

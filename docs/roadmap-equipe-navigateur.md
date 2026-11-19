@@ -15247,3 +15247,42 @@ chaque gain rapporté contre les **deux** archétypes.
   c616 10/10, c611/c613/c615/c617/c335/c456/iter_lazy/
   agen_queue/await_thenable/lazy_gen/t262_realm verts,
   hostile 12/12 release, lib 54/54, clippy/fmt/doc propres.
+- [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
+  + `String.prototype.{split,match,matchAll,replace,replaceAll,
+  search}` spec : boucles `RegExpExec` dynamiques (exec custom,
+  `lastIndex`, accesseurs observables), `%RegExpStringIterator%`
+  paresseux — sous-ensemble RegExp+String (609 fichiers) :
+  816 → **1 180/1 206 passes-mode** (+364 ; baseline
+  pré-C617 : 798)** (`builtins/{species,string,extras,ctors,
+  number,arities}.rs`, `collections.rs`, `heap.rs`, `t262.rs`
+  + gate `tests/c618_sym_methods.rs` **17/17**).
+  **`@@match`** : `flags`+`global`+`unicode` lus par `Get`
+  (algo corpus — shadow/accesseurs observés), boucle globale
+  `CreateDataPropertyOrThrow` + `AdvanceStringIndex` sur match
+  vide (+2 units sous `unicode`). **`@@search`** : `lastIndex`
+  sauvé/`Set(+0)`/restauré via `SameValue` bit-exact
+  (`-0 ≠ +0`). **`@@replace`** : collecte avant substitution,
+  replacer fonction + `GetSubstitution` complet
+  (`$$`/`$&`/`` $` ``/`$'`/`$n`/`$nn`/`$<name>` — `groups:null`
+  → `ToObject` → `TypeError`). **`@@matchAll`** :
+  `SpeciesConstructor` → `Construct(C, «rx, flags»)` →
+  `IterOp::ReMatchAll` (exec dynamique à chaque `next`).
+  **`String.prototype.*`** : ordre spec `RequireObjectCoercible`
+  → `GetMethod` accesseur → `ToString(this)` ; `split` en
+  `ToUint32` ; `replaceAll` exige `flags g` ; replacer fonction
+  enfin appelée sur le chemin string (bug préexistant).
+  **`set_strict`** (`Set(…,Throw=true)`) sur `lastIndex` —
+  un gel bouclait à l'infini (5,6 Go). **Bugs adjacents** :
+  `sym_method` ignorait les accesseurs ; `exec` lit
+  `lastIndex` par `Get`+`ToLength` même non-global ;
+  `Boolean.prototype.toString` sur wrapper ;
+  `String(undefined)` ≠ `""` ; arités `exec`/`test`/`match`/
+  `search`/`split` ; `print` hôte t262. Gates : c618 17/17,
+  c617 12/12, c613/c615 11/11, clippy/fmt propres. **Reste**
+  (C619 candidat) : index en code-units sous `u`/`v`
+  (8 fichiers — astrals = 2 units vs 1 char), noms de groupes
+  non-BMP (fancy-regex ASCII — renommage `__gN` + mapping),
+  `poisoned-stdlib` (`[[DefineOwnProperty]]` sur index +
+  proto empoisonné), captures réinitialisées par itération de
+  groupe quantifié, `builtin-infer-unicode` (matching `u`
+  sur slot interne).

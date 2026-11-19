@@ -10537,8 +10537,8 @@ impl Engine {
     pub(crate) fn note_re(&mut self, input: &str, m: Option<&crate::regexp::ExecMatch>) {
         self.re_static = m.map(|m| ReStatic {
             input: input.to_string(),
-            start_b: m.start_b,
-            end_b: m.end_b,
+            start_b: crate::regexp::char_to_byte(input, m.index),
+            end_b: crate::regexp::char_to_byte(input, m.end),
             groups: m.groups.clone(),
         });
     }

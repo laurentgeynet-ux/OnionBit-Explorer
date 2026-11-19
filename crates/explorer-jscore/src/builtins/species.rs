@@ -46,11 +46,16 @@ pub(crate) fn sym_method(
     sym: &str,
     args: &[Value],
 ) -> JsResult<Option<Value>> {
-    let Value::Obj(id) = obj else { return Ok(None) };
-    match e.get_prop(id, sym) {
-        None | Some(Value::Undefined | Value::Null) => Ok(None),
-        Some(m) if e.is_callable(m.clone()) => e.call_value(m, obj, args).map(Some),
-        Some(_) => Err(e.type_error("symbol method is not callable")),
+    if !e.is_spec_object(&obj) {
+        return Ok(None);
+    }
+    // `GetMethod` (spec, JS-C618) : `Get` complet — accesseurs
+    // invoqués et abrupts propagés (`get_prop` brut lisait la
+    // donnée sans déclencher les getters → throws avalés).
+    match e.get_prop_value(obj.clone(), sym)? {
+        Value::Undefined | Value::Null => Ok(None),
+        m if e.is_callable(m.clone()) => e.call_value(m, obj, args).map(Some),
+        _ => Err(e.type_error("symbol method is not callable")),
     }
 }
 
@@ -117,134 +122,457 @@ pub(crate) fn species_array(e: &mut Engine, src: Value, len: usize) -> JsResult<
     array_create(e)
 }
 
-/// Algorithme `rx.exec`-résultat partagé `str.match`/`@@match`
-/// (spec : global → liste de textes + `lastIndex` reset ; sinon
-/// résultat d'un seul `exec`).
-pub(crate) fn re_match_exec(
-    e: &mut Engine,
-    re: &std::rc::Rc<crate::regexp::JsRegExp>,
-    id: crate::value::ObjId,
-    s: &crate::value::JsStr,
-) -> JsResult<Value> {
-    let (hay, dec) = re.enc_hay(s);
-    if re.global {
-        // Garde §B-59 : `exec_all` matérialise TOUS les matches
-        // en eager — un match par char sur géante chaîne →
-        // `len` Vec<Match> + cellules sans tick.
-        e.alloc_guard(hay.len().saturating_mul(160))?;
-        let matches = re.exec_all(&hay, 0);
-        e.note_re(&hay, matches.last());
-        let texts: Vec<Value> = matches
-            .into_iter()
-            .map(|m| re_str_val(e, &m.text, dec))
-            .collect();
-        let _ = e.set_prop(id, "lastIndex", Value::Num(0.0));
-        return Ok(if texts.is_empty() {
-            Value::Null
-        } else {
-            arr_of(e, texts)
-        });
-    }
-    let m = re.exec(&hay, 0);
-    e.note_re(&hay, m.as_ref());
-    match m {
-        Some(m) => Ok(match_result(e, &m, re, s, dec)),
-        None => Ok(Value::Null),
-    }
-}
+// ------------------------------------------------------------------
+// JS-C618 — `RegExp.prototype[@@match]/[@@matchAll]/[@@replace]/
+// [@@search]` spec : boucles `RegExpExec` dynamiques (exec custom
+// et `lastIndex` observables) au lieu des stubs natifs `exec_all`.
+// ------------------------------------------------------------------
 
-pub(crate) fn re_match_all_impl(
-    e: &mut Engine,
-    re: &std::rc::Rc<crate::regexp::JsRegExp>,
-    s: &crate::value::JsStr,
-) -> JsResult<Value> {
-    if !re.global {
-        return Err(e.type_error("matchAll needs a global regex"));
-    }
-    let (hay, dec) = re.enc_hay(s);
-    e.alloc_guard(hay.len().saturating_mul(160))?;
-    let items: Vec<Value> = re
-        .exec_all(&hay, 0)
-        .iter()
-        .map(|m| match_result(e, m, re, s, dec))
-        .collect();
-    Ok(crate::collections::iter_obj(e, items, e.protos.regexp_iter))
-}
-
-/// Branche `RegExp` de `replace`/`@@replace` (global → toutes les
-/// occurrences ; sinon la première).
-pub(crate) fn re_replace_impl(
-    e: &mut Engine,
-    re: &std::rc::Rc<crate::regexp::JsRegExp>,
-    s: &crate::value::JsStr,
-    rep: Value,
-) -> JsResult<Value> {
-    if std::env::var("DBG_DRIVE").is_ok() {
-        eprintln!(
-            "[re_replace] src={:?} g={} s.len={}",
-            re.source,
-            re.global,
-            s.len()
-        );
-    }
-    let (hay, dec) = re.enc_hay(s);
-    let matches = if re.global {
-        e.alloc_guard(hay.len().saturating_mul(160))?;
-        re.exec_all(&hay, 0)
+/// `Set(O, P, V, Throw=true)` (spec) — `[[Set]]` rend le
+/// booléen spec (`set_prop_recv`) ; un refus (prop non-writable,
+/// trap proxy `false`) lève `TypeError` au lieu du silence
+/// sloppy — sans lui un `lastIndex` gelé boucle à l'infini.
+pub(crate) fn set_strict(e: &mut Engine, base: Value, key: &str, v: Value) -> JsResult<()> {
+    if let Value::Obj(id) = base.clone() {
+        if !e.set_prop_recv(id, base, key, v)? {
+            return Err(e.type_error(format!("cannot assign to `{key}`")));
+        }
+        Ok(())
     } else {
-        re.exec(&hay, 0).into_iter().collect()
-    };
-    if std::env::var("DBG_DRIVE").is_ok() {
-        eprintln!("[re_replace] matches={} s.len={}", matches.len(), hay.len());
+        e.set_prop_value(base, key, v)
     }
-    e.note_re(&hay, matches.last());
-    if matches.is_empty() {
-        return Ok(Value::Str(s.clone()));
-    }
-    splice_matches(e, &hay, s, &matches, rep, dec)
 }
 
-/// `rx[Symbol.match](str)` — `RegExp.prototype[@@match]` (spec).
+/// `SameValue` spec — NaN ~ NaN mais `-0 ≠ +0` (le `==` de
+/// Rust les confond ; `to_bits` porte le signe). Employé sur
+/// `lastIndex` (@@search compare avant de restaurer).
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Num(x), Value::Num(y)) => x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan()),
+        _ => a == b,
+    }
+}
+
+/// `SpeciesConstructor(rx, %RegExp%)` — `constructor` puis
+/// `@@species` lus par `Get` (accesseurs observables) ; défaut
+/// `%RegExp%` du realm courant (JS-C617/618 partagé).
+fn species_ctor_regexp(e: &mut Engine, this: &Value) -> JsResult<Value> {
+    let c = e.get_prop_value(this.clone(), "constructor")?;
+    if matches!(c, Value::Undefined) {
+        return regexp_intrinsic(e);
+    }
+    if !e.is_spec_object(&c) {
+        return Err(e.type_error("constructor is not an object"));
+    }
+    match e.get_prop_value(c, crate::interp::SYM_SPECIES)? {
+        Value::Undefined | Value::Null => regexp_intrinsic(e),
+        sc if e.is_constructor(sc.clone()) => Ok(sc),
+        _ => Err(e.type_error("@@species is not a constructor")),
+    }
+}
+
+/// `RegExpCreate(pattern, flags)` — `Construct(%RegExp%, «p, f»)`
+/// du realm courant — repli `String.prototype.*` (JS-C618).
+pub(crate) fn regexp_create(e: &mut Engine, pattern: Value, flags: Value) -> JsResult<Value> {
+    let ctor = regexp_intrinsic(e)?;
+    e.construct(ctor, &[pattern, flags])
+}
+
+/// `IsRegExp(v)` (spec) — `Symbol.match` observable ; à défaut
+/// le slot `[[RegExpMatcher]]` tranche.
+pub(crate) fn is_regexp_spec(e: &mut Engine, v: Value) -> JsResult<bool> {
+    if !e.is_spec_object(&v) {
+        return Ok(false);
+    }
+    let m = e.get_prop_value(v.clone(), crate::interp::SYM_MATCH)?;
+    if !matches!(m, Value::Undefined) {
+        return Ok(e.to_boolean(m));
+    }
+    Ok(matches!(v, Value::Obj(id)
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::RegExp(_)))))
+}
+
+/// `JsStr` → domaine encodé du haystack regex (inverse de
+/// `re_str_val` : les `units` redeviennent sentinelles).
+fn enc_js(s: &JsStr) -> String {
+    if s.has_units() {
+        crate::regexp::re_encode(&s.units_view())
+    } else {
+        s.as_str().to_string()
+    }
+}
+
+/// `ToString(v)` → domaine encodé (cf. [`enc_js`]).
+fn enc_val(e: &mut Engine, v: Value) -> JsResult<String> {
+    Ok(enc_js(&e.to_js_jstr(v)?))
+}
+
+/// `GetSubstitution(matched, S, position, captures, named,
+/// template)` (spec 22.1.3.19.1, JS-C618) — tout est en domaine
+/// encodé (chars) ; `captures` déjà `ToString`ées à l'appel.
+/// `named` = objet `groups` (`ToObject`é) ou `undefined`.
+/// `$$` `$&` `` $` `` `$'` `$n`/`$nn` `$<name>` — un `$` non
+/// résolu est émis littéralement (spec `refReplacement = ref`).
+#[allow(clippy::too_many_arguments)]
+fn get_substitution(
+    e: &mut Engine,
+    matched: &str,
+    hay: &[char],
+    position: usize,
+    captures: &[Value],
+    named: &Value,
+    rep: &str,
+) -> JsResult<String> {
+    let size = hay.len();
+    let rc: Vec<char> = rep.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < rc.len() {
+        if rc[i] == '$' && i + 1 < rc.len() {
+            match rc[i + 1] {
+                '$' => {
+                    out.push('$');
+                    i += 2;
+                    continue;
+                }
+                '&' => {
+                    out.push_str(matched);
+                    i += 2;
+                    continue;
+                }
+                '`' => {
+                    let t: String = hay[..position].iter().collect();
+                    out.push_str(&t);
+                    i += 2;
+                    continue;
+                }
+                '\'' => {
+                    // `tailPosition` peut dépasser `size` avec un
+                    // exec custom (spec : borné à stringLength).
+                    let tail = (position + matched.chars().count()).min(size);
+                    let t: String = hay[tail..].iter().collect();
+                    out.push_str(&t);
+                    i += 2;
+                    continue;
+                }
+                '<' => {
+                    // `$<name>` — `named` requis (sinon ref
+                    // littéral) ; la valeur est lue par `Get`
+                    // (accesseurs observables) puis `ToString`.
+                    if let Some(end) = rc[i + 2..].iter().position(|&c| c == '>') {
+                        if e.is_spec_object(named) {
+                            let name: String = rc[i + 2..i + 2 + end].iter().collect();
+                            let g = e.get_prop_value(named.clone(), &name)?;
+                            if !matches!(g, Value::Undefined) {
+                                out.push_str(&enc_val(e, g)?);
+                            }
+                            i += end + 3;
+                            continue;
+                        }
+                    }
+                }
+                c if c.is_ascii_digit() => {
+                    let d1 = rc[i + 1].to_digit(10).unwrap_or(0) as usize;
+                    let d2 = rc
+                        .get(i + 2)
+                        .and_then(|c| c.to_digit(10))
+                        .map(|d| d as usize);
+                    // `$nn` compte si n ≤ nb captures ; sinon
+                    // repli `$n` suivi d'un chiffre littéral.
+                    let (n, step) = match d2 {
+                        Some(d2) if d1 * 10 + d2 >= 1 && d1 * 10 + d2 <= captures.len() => {
+                            (d1 * 10 + d2, 3)
+                        }
+                        _ => (d1, 2),
+                    };
+                    if n >= 1 && n <= captures.len() {
+                        if let Value::Str(cs) = &captures[n - 1] {
+                            out.push_str(&enc_js(cs));
+                        }
+                        i += step;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
+        out.push(rc[i]);
+        i += 1;
+    }
+    Ok(out)
+}
+
+/// `rx[Symbol.match](str)` — spec 22.2.6.8 (JS-C618) : `flags`
+/// lu par `Get` ; sans `g` → un seul `RegExpExec` ; avec `g` →
+/// `lastIndex` = 0 puis boucle `RegExpExec` collectant
+/// `Get(result,"0")`, `AdvanceStringIndex` sur match vide,
+/// `null` si aucun match.
 pub(crate) fn re_sym_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if !e.is_spec_object(&this) {
+        return Err(e.type_error("Symbol.match receiver is not an object"));
+    }
     let s = e.to_js_jstr(arg(args, 0))?;
-    let (re, id) = as_regexp(e, this)?;
-    re_match_exec(e, &re, id, &s)
+    // `flags` lu par `Get`+`ToString` (observable) ; `global` et
+    // `unicode` lus comme **propriétés** (algo corpus — un
+    // getter ou shadow `global` est observé).
+    let flags_v = e.get_prop_value(this.clone(), "flags")?;
+    let _flags = e.to_js_string(flags_v)?;
+    let global = {
+        let g = e.get_prop_value(this.clone(), "global")?;
+        e.to_boolean(g)
+    };
+    let unicode = {
+        let u = e.get_prop_value(this.clone(), "unicode")?;
+        e.to_boolean(u)
+    };
+    if !global {
+        return reg_exp_exec(e, this, Value::Str(s));
+    }
+    set_strict(e, this.clone(), "lastIndex", Value::Num(0.0))?;
+    let a = e.new_array(Vec::new());
+    let Value::Obj(aid) = a.clone() else {
+        return Ok(a);
+    };
+    let mut n = 0usize;
+    loop {
+        let result = reg_exp_exec(e, this.clone(), Value::Str(s.clone()))?;
+        if matches!(result, Value::Null) {
+            return Ok(if n == 0 { Value::Null } else { a });
+        }
+        let m0 = e.get_prop_value(result, "0")?;
+        let match_str = e.to_js_string(m0)?;
+        let mv = e.str_val(match_str.clone());
+        if !e.create_data_prop_spec_on(aid, &n.to_string(), mv)? {
+            return Err(e.type_error("match: element is not creatable"));
+        }
+        if match_str.is_empty() {
+            // `AdvanceStringIndex` sur `lastIndex` relu (spec
+            // `ToLength`) — +2 units sous `unicode` sur paire.
+            let idx_v = e.get_prop_value(this.clone(), "lastIndex")?;
+            let idx = e.to_number(idx_v)?.max(0.0);
+            let next = advance_str_index(&s, idx, unicode);
+            set_strict(e, this.clone(), "lastIndex", Value::Num(next))?;
+        }
+        n += 1;
+    }
 }
 
-/// `rx[Symbol.matchAll](str)` — itérateur de résultats, `g` requis.
+/// `AdvanceStringIndex(S, index, unicode)` (spec) — `index` en
+/// code units UTF-16 ; sous `unicode`, une paire surrogate est
+/// franchie d'un coup (+2 units).
+pub(crate) fn advance_str_index(s: &JsStr, index: f64, unicode: bool) -> f64 {
+    let i = index as usize;
+    if unicode {
+        let u = s.units_view();
+        if i + 1 < u.len()
+            && (0xD800..0xDC00).contains(&u[i])
+            && (0xDC00..0xE000).contains(&u[i + 1])
+        {
+            return index + 2.0;
+        }
+    }
+    index + 1.0
+}
+
+/// `rx[Symbol.matchAll](str)` — spec 22.2.6.9 (JS-C618) :
+/// `SpeciesConstructor` → `Construct(C, «rx, flags»)` →
+/// `lastIndex` copié → `%RegExpStringIterator%` paresseux
+/// (`IterOp::ReMatchAll` — exec dynamique à chaque `next`).
 pub(crate) fn re_sym_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if !e.is_spec_object(&this) {
+        return Err(e.type_error("Symbol.matchAll receiver is not an object"));
+    }
     let s = e.to_js_jstr(arg(args, 0))?;
-    let (re, _id) = as_regexp(e, this)?;
-    re_match_all_impl(e, &re, &s)
+    let ctor = species_ctor_regexp(e, &this)?;
+    let flags_v = e.get_prop_value(this.clone(), "flags")?;
+    let flags = e.to_js_string(flags_v)?;
+    let flags_arg = e.str_val(flags.clone());
+    let matcher = e.construct(ctor, &[this.clone(), flags_arg])?;
+    let li = e.get_prop_value(this, "lastIndex")?;
+    let li_n = e.to_number(li)?.max(0.0);
+    set_strict(e, matcher.clone(), "lastIndex", Value::Num(li_n))?;
+    let global = flags.contains('g');
+    let unicode = flags.contains('u') || flags.contains('v');
+    Ok(crate::collections::re_match_all_iter(
+        e,
+        matcher,
+        Value::Str(s),
+        global,
+        unicode,
+    ))
 }
 
-/// `rx[Symbol.replace](str, rep)` — global ou première occurrence.
+/// `rx[Symbol.replace](str, rep)` — spec 22.2.6.11 (JS-C618) :
+/// `RegExpExec` dynamique collecté **avant** toute substitution
+/// (ordre observable) ; `position`/`index`/captures/`groups`
+/// lus par `Get` ; remplacement fonction appelé avec
+/// `« matched, caps…, position, string [, groups] »`, sinon
+/// `GetSubstitution`. `flags`/`global`/`lastIndex` observables.
 pub(crate) fn re_sym_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if !e.is_spec_object(&this) {
+        return Err(e.type_error("Symbol.replace receiver is not an object"));
+    }
     let s = e.to_js_jstr(arg(args, 0))?;
     let rep = arg(args, 1);
-    let (re, _id) = as_regexp(e, this)?;
-    re_replace_impl(e, &re, &s, rep)
-}
-
-/// `rx[Symbol.search](str)` — indice du premier match, `-1` sinon.
-pub(crate) fn re_sym_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_jstr(arg(args, 0))?;
-    let (re, _id) = as_regexp(e, this)?;
-    let (hay, _dec) = re.enc_hay(&s);
-    let m = re.exec(&hay, 0);
-    e.note_re(&hay, m.as_ref());
-    match m {
-        Some(m) => Ok(Value::Num(m.index as f64)),
-        None => Ok(Value::Num(-1.0)),
+    let functional = e.is_callable(rep.clone());
+    // `rep_str` dans le domaine encodé (comme `hay`/`matched`)
+    // — un template portant des units passe par `enc_js`.
+    let rep_str = if functional {
+        String::new()
+    } else {
+        enc_js(&e.to_js_jstr(rep.clone())?)
+    };
+    // `flags` lu par `Get`+`ToString` (observable) ; `global` et
+    // `unicode` lus comme **propriétés** (algo corpus —
+    // `get-global-err`/`coerce-global`/`get-unicode-error`).
+    let flags_v = e.get_prop_value(this.clone(), "flags")?;
+    let _flags = e.to_js_string(flags_v)?;
+    let global = {
+        let g = e.get_prop_value(this.clone(), "global")?;
+        e.to_boolean(g)
+    };
+    let unicode = {
+        let u = e.get_prop_value(this.clone(), "unicode")?;
+        e.to_boolean(u)
+    };
+    if global {
+        set_strict(e, this.clone(), "lastIndex", Value::Num(0.0))?;
     }
+    // Collecte des résultats — TOUS les `exec` avant la
+    // première lecture de capture (ordre spec observable).
+    let mut results: Vec<Value> = Vec::new();
+    loop {
+        let result = reg_exp_exec(e, this.clone(), Value::Str(s.clone()))?;
+        if matches!(result, Value::Null) {
+            break;
+        }
+        let empty = {
+            let m0 = e.get_prop_value(result.clone(), "0")?;
+            e.to_js_string(m0)?.is_empty()
+        };
+        results.push(result);
+        if !global {
+            break;
+        }
+        if empty {
+            let idx_v = e.get_prop_value(this.clone(), "lastIndex")?;
+            let idx = e.to_number(idx_v)?.max(0.0);
+            let next = advance_str_index(&s, idx, unicode);
+            set_strict(e, this.clone(), "lastIndex", Value::Num(next))?;
+        }
+    }
+    if results.is_empty() {
+        return Ok(Value::Str(s));
+    }
+    // Domaine encodé quand `s` porte des `units` — pièces et
+    // captures ré-encodées, décodage unique en sortie.
+    let (hay_cow, dec): (std::borrow::Cow<'_, str>, bool) = if s.has_units() {
+        (
+            std::borrow::Cow::Owned(crate::regexp::re_encode(&s.units_view())),
+            true,
+        )
+    } else {
+        (std::borrow::Cow::Borrowed(s.as_str()), false)
+    };
+    let hay: Vec<char> = hay_cow.chars().collect();
+    let size = hay.len();
+    let mut acc = String::new();
+    let mut next_pos = 0usize;
+    for result in results {
+        let lv = e.get_prop_value(result.clone(), "length")?;
+        let n_caps = (e.to_number(lv)?.max(0.0) as usize).saturating_sub(1);
+        let m0 = e.get_prop_value(result.clone(), "0")?;
+        // `matched_js` = l'argument JS du remplacement fonction
+        // (units conservés) ; `matched` = sa forme encodée pour
+        // l'arithmétique de positions dans `hay`.
+        let matched_js = e.to_js_jstr(m0)?;
+        let matched = enc_js(&matched_js);
+        let match_len = matched.chars().count();
+        let iv = e.get_prop_value(result.clone(), "index")?;
+        let pos = (e.to_number(iv)?.trunc().max(0.0) as usize).min(size);
+        // Captures ToStringées (spec : `Get` puis `ToString`
+        // pour chaque non-undefined — observable).
+        let mut caps: Vec<Value> = Vec::with_capacity(n_caps);
+        for ci in 1..=n_caps {
+            let c = e.get_prop_value(result.clone(), &ci.to_string())?;
+            caps.push(if matches!(c, Value::Undefined) {
+                c
+            } else {
+                Value::Str(e.to_js_jstr(c)?)
+            });
+        }
+        let named = e.get_prop_value(result, "groups")?;
+        let rep_out = if functional {
+            let mut call_args = Vec::with_capacity(n_caps + 4);
+            call_args.push(Value::Str(matched_js));
+            call_args.extend(caps.iter().cloned());
+            call_args.push(Value::Num(pos as f64));
+            call_args.push(Value::Str(s.clone()));
+            if !matches!(named, Value::Undefined) {
+                call_args.push(named.clone());
+            }
+            let r = e.call_value(rep.clone(), Value::Undefined, &call_args)?;
+            enc_val(e, r)?
+        } else {
+            // `namedCaptures` : `undefined` saute `ToObject` ;
+            // `null` → `ToObject` → `TypeError` (spec — un
+            // `groups:null` retourné par un exec custom
+            // doit jeter) ; primitives → boxing.
+            let named_obj = if matches!(named, Value::Undefined) || e.is_spec_object(&named) {
+                named
+            } else if matches!(named, Value::Null) {
+                return Err(e.type_error("cannot convert null to object"));
+            } else {
+                e.box_primitive(named)
+            };
+            get_substitution(e, &matched, &hay, pos, &caps, &named_obj, &rep_str)?
+        };
+        if pos >= next_pos {
+            // `position` reculant : la substitution est ignorée
+            // (spec — exec custom malveillant).
+            let piece: String = hay[next_pos..pos].iter().collect();
+            acc.push_str(&piece);
+            acc.push_str(&rep_out);
+            next_pos = pos + match_len;
+        }
+        if next_pos >= size {
+            return Ok(re_str_val(e, &acc, dec));
+        }
+    }
+    let tail: String = hay[next_pos..size].iter().collect();
+    acc.push_str(&tail);
+    Ok(re_str_val(e, &acc, dec))
 }
 
+/// `rx[Symbol.search](str)` — spec 22.2.6.12 (JS-C618) :
+/// `lastIndex` sauvegardé, remis à 0, puis **restauré** après
+/// `RegExpExec` dynamique — `global`/`lastIndex` n'influent
+/// pas la recherche ; `index` relu par `Get`.
+pub(crate) fn re_sym_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if !e.is_spec_object(&this) {
+        return Err(e.type_error("Symbol.search receiver is not an object"));
+    }
+    let s = e.to_js_jstr(arg(args, 0))?;
+    let prev = e.get_prop_value(this.clone(), "lastIndex")?;
+    if !same_value(&prev, &Value::Num(0.0)) {
+        set_strict(e, this.clone(), "lastIndex", Value::Num(0.0))?;
+    }
+    let result = reg_exp_exec(e, this.clone(), Value::Str(s))?;
+    let cur = e.get_prop_value(this.clone(), "lastIndex")?;
+    if !same_value(&cur, &prev) {
+        set_strict(e, this, "lastIndex", prev)?;
+    }
+    if matches!(result, Value::Null) {
+        return Ok(Value::Num(-1.0));
+    }
+    e.get_prop_value(result, "index")
+}
 /// `RegExpExec(R, S)` (spec 22.2.7.1, JS-C617) : `exec`
 /// callable (lu par `Get` — observable) → `Call(exec, R, «S»)`,
 /// résultat non-objet non-null → `TypeError` ; non-callable →
 /// `RegExpBuiltinExec` — le slot `[[RegExpMatcher]]` est requis
 /// (un objet sans slot → `TypeError`).
-fn reg_exp_exec(e: &mut Engine, rx: Value, s: Value) -> JsResult<Value> {
+pub(crate) fn reg_exp_exec(e: &mut Engine, rx: Value, s: Value) -> JsResult<Value> {
     let exec = e.get_prop_value(rx.clone(), "exec")?;
     if e.is_callable(exec.clone()) {
         let r = e.call_value(exec, rx, &[s])?;
@@ -363,7 +691,8 @@ pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     let mut search_index = 0usize;
     while search_index < size {
         // `Set(splitter, "lastIndex", 𝔽(q), true)` — observable.
-        e.set_prop_value(
+        set_strict(
+            e,
             splitter.clone(),
             "lastIndex",
             Value::Num(search_index as f64),

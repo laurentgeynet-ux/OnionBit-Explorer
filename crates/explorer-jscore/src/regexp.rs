@@ -128,13 +128,7 @@ pub struct ExecMatch {
     pub index: usize,
     /// Char offset just past the whole match (new `lastIndex`).
     pub end: usize,
-    /// Byte index of the whole match (for splicing).
-    pub start_b: usize,
-    /// Byte offset just past the whole match.
-    pub end_b: usize,
-    /// Whole match text.
-    pub text: String,
-    /// `groups[0]` == `text`; `groups[i]` is capture `i`.
+    /// `groups[0]` is the whole match; `groups[i]` is capture `i`.
     pub groups: Vec<Option<String>>,
     /// `(?<name>…)` captures — `None` quand le groupe déclaré
     /// n'a pas participé au match (spec : `groups` l'expose
@@ -282,6 +276,12 @@ impl JsRegExp {
     /// the match must begin exactly at `start`.
     pub fn exec(&self, hay: &str, start: usize) -> Option<ExecMatch> {
         crate::j17_tick(&crate::J17_REGEX);
+        // Spec `RegExpBuiltinExec` : `lastIndex > length` → pas
+        // de match (le clamp de `char_to_byte` ferait sinon
+        // matcher un motif vide à la fin, boucle infinie).
+        if start > hay.chars().count() {
+            return None;
+        }
         let byte_start = char_to_byte(hay, start);
         let caps = self.re.captures_from_pos(hay, byte_start).ok()??;
         let m = caps.get(0)?;
@@ -301,70 +301,15 @@ impl JsRegExp {
         Some((m, end))
     }
 
-    /// All matches of a `g` regex from `start`, empty matches bumped
-    /// one char forward (spec: `RegExpExec` on empty match advances).
-    pub fn exec_all(&self, hay: &str, start: usize) -> Vec<ExecMatch> {
-        let mut out = Vec::new();
-        let mut pos = start;
-        let hay_len = hay.chars().count();
-        while pos <= hay_len {
-            match self.exec(hay, pos) {
-                None => break,
-                Some(m) => {
-                    let next = if m.end == m.index { m.end + 1 } else { m.end };
-                    pos = next;
-                    out.push(m);
-                }
-            }
-        }
-        out
-    }
-
-    /// `str.split(re)` pieces + captured-group insertions (spec puts
-    /// capture groups between the literal pieces).
-    pub fn split<'h>(&self, hay: &'h str) -> Vec<&'h str> {
-        let mut out = Vec::new();
-        let mut last = 0usize; // byte offset
-        let hay_len = hay.len();
-        let mut pos = 0usize; // byte offset
-        while pos <= hay_len {
-            match self.re.captures_from_pos(hay, pos).ok().flatten() {
-                None => break,
-                Some(caps) => {
-                    let Some(m) = caps.get(0) else { break };
-                    if self.sticky && m.start() != pos {
-                        break;
-                    }
-                    out.push(&hay[last..m.start()]);
-                    for i in 1..caps.len() {
-                        if let Some(g) = caps.get(i) {
-                            out.push(&hay[g.start()..g.end()]);
-                        }
-                    }
-                    last = m.end();
-                    pos = if m.end() == m.start() {
-                        next_boundary(hay, m.end())
-                    } else {
-                        m.end()
-                    };
-                }
-            }
-        }
-        out.push(&hay[last..]);
-        out
-    }
-
     fn build_match(&self, hay: &str, caps: &fancy_regex::Captures) -> ExecMatch {
         let m = caps.get(0);
-        let (index, end, start_b, end_b, text) = match m {
+        let (index, end, text) = match m {
             Some(m) => (
                 byte_to_char(hay, m.start()),
                 byte_to_char(hay, m.end()),
-                m.start(),
-                m.end(),
                 m.as_str().to_string(),
             ),
-            None => (0, 0, 0, 0, String::new()),
+            None => (0, 0, String::new()),
         };
         let mut groups = Vec::with_capacity(caps.len());
         groups.push(Some(text.clone()));
@@ -399,9 +344,6 @@ impl JsRegExp {
         ExecMatch {
             index,
             end,
-            start_b,
-            end_b,
-            text,
             groups,
             named,
             group_indices,
@@ -1896,7 +1838,8 @@ fn short_regex_error(e: &fancy_regex::Error) -> String {
         .to_string()
 }
 
-fn char_to_byte(hay: &str, char_pos: usize) -> usize {
+/// Char index → byte offset in `hay` (`len` past the end).
+pub(crate) fn char_to_byte(hay: &str, char_pos: usize) -> usize {
     hay.char_indices()
         .nth(char_pos)
         .map_or(hay.len(), |(b, _)| b)
@@ -1904,14 +1847,6 @@ fn char_to_byte(hay: &str, char_pos: usize) -> usize {
 
 fn byte_to_char(hay: &str, byte: usize) -> usize {
     hay[..byte.min(hay.len())].chars().count()
-}
-
-fn next_boundary(hay: &str, byte: usize) -> usize {
-    let mut b = byte + 1;
-    while b < hay.len() && !hay.is_char_boundary(b) {
-        b += 1;
-    }
-    b
 }
 
 #[cfg(test)]

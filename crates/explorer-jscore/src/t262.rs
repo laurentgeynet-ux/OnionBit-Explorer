@@ -34,7 +34,19 @@ impl Engine {
         let d = self.native_fn("detachArrayBuffer", t262_detach_ab);
         self.set_own(o, "detachArrayBuffer", d, true);
         self.set_own(g, "$262", Value::Obj(o), true);
+        // `print` — global hôte du runner (test262 le suppose
+        // dans le harness `doneprintHandle` et quelques fichiers
+        // l'emploient directement ; no-op suffisant, les sorties
+        // n'entrent pas dans les assertions).
+        let p = self.native_fn("print", t262_print);
+        self.set_own(g, "print", p, true);
     }
+}
+
+/// `print(...)` hôte — no-op (l'espionnage des arguments n'est
+/// pas requis par les fichiers du corpus).
+fn t262_print(_e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
 }
 
 /// Évalue `src_v` comme un **script** dans le contexte `ctx`
