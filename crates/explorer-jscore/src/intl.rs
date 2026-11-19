@@ -1517,6 +1517,13 @@ fn locale_parts(tag: &str) -> (String, String, String) {
     let mut script = String::new();
     let mut region = String::new();
     for (i, sub) in tag.split('-').enumerate() {
+        // Sous-étiquette singleton (`-u-`, `-x-`, `-a-`…) : ouvre
+        // une extension BCP47 — tout ce qui suit est de
+        // l'extension, jamais langue/script/région (audit oracle :
+        // 'en-US-u-ca-gregory' rendait région 'ca' → 'en-CA').
+        if i > 0 && sub.len() == 1 {
+            break;
+        }
         if i == 0 {
             lang = sub.to_string();
         } else if sub.len() == 4 && sub.chars().all(|c| c.is_ascii_alphabetic()) {

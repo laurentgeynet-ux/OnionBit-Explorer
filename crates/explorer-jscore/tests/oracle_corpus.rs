@@ -983,4 +983,35 @@ pub const PROBES: &[(&str, &str)] = &[
     // vérifier, retirées si tous les oracles répondent na) ---
     ("cov_iter_chunks", "var it=[1,2,3,4].values().chunks(2);it.next().value.join(',')+'|'+it.next().value.join(',')"),
     ("cov_iter_zip", "Iterator.zip([[1,2],[3]]).next().value.join(',')"),
+    // --- vague C : arbitrabilité partielle — `Intl` arbitrable
+    // V8/JSC seulement (qjs sans Intl), suites membres flaggées
+    // par oracle_coverage ---
+    ("cov_intl_canon", "Intl.getCanonicalLocales('en-US').join(',')+'|'+typeof Intl.DateTimeFormat+'|'+typeof Intl.Segmenter+'|'+typeof Intl.DurationFormat"),
+    ("cov_intl_collator", "new Intl.Collator('en').compare('a','b')+'|'+new Intl.PluralRules('en').select(1)+'|'+new Intl.PluralRules('en').select(2)"),
+    ("cov_intl_list", "new Intl.ListFormat('en').format(['a','b','c'])"),
+    ("cov_intl_rtf", "new Intl.RelativeTimeFormat('en').format(-1,'day')"),
+    ("cov_intl_disp", "new Intl.DisplayNames('en',{type:'language'}).of('fr')+'|'+new Intl.Locale('en-US-u-ca-gregory').baseName"),
+    ("cov_intl_resopts", "new Intl.DateTimeFormat('en-US').resolvedOptions().locale+'|'+new Intl.NumberFormat('en-US').resolvedOptions().numberingSystem"),
+    // --- Iterator : membres flaggés (JSC seul pour l'instant) ---
+    ("cov_iter_windows", "var it=[1,2,3].values().windows(2);it.next().value.join(',')+'|'+it.next().value.join(',')"),
+    ("cov_iter_zipk", "var z=Iterator.zipKeyed({a:[1],b:[2]}).next().value;z.a+'|'+z.b"),
+    // --- membres restants des globales couvertes ---
+    ("cov_obj_toloc", "({}).toLocaleString()+'|'+[1,'a'].toLocaleString()"),
+    ("cov_str_small", "'x'.small()+'|'+''.big()"),
+    ("cov_date_settime", "var d=new Date(0);d.setTime(1500);d.getTime()+'|'+d.getUTCMilliseconds()"),
+    ("cov_date_iso", "new Date(Date.UTC(2000,0,1)).toISOString()"),
+    ("cov_math_c", "Math.exp(0)+Math.log(1)+Math.sin(0)+Math.cos(0)+Math.hypot(3,4)"),
+    ("cov_math_d", "Math.asin(0)+Math.acos(1)+Math.atan(0)+Math.sinh(0)+Math.asinh(0)+Math.tanh(0)+Math.imul(-1,4294967296)"),
+    ("cov_math_rand", "typeof Math.random()+'|'+(Math.PI>3)+'|'+(Math.LN2>0)"),
+    ("cov_atomic_ops", "var a=new Int32Array(new SharedArrayBuffer(8));a[0]=12;Atomics.and(a,0,10)+'|'+Atomics.or(a,0,1)+'|'+Atomics.xor(a,0,15)+'|'+a[0]+'|'+typeof Atomics.pause"),
+    ("cov_dv_more", "var v=new DataView(new ArrayBuffer(32));v.setBigInt64(0,9n);v.setFloat16(16,1.5);v.getBigInt64(0)+'|'+v.getFloat16(16)"),
+    ("cov_ta_bpe", "[Int8Array,Uint8Array,Uint8ClampedArray,Int16Array,Uint16Array,Int32Array,Uint32Array,Float32Array,Float64Array,BigInt64Array,BigUint64Array,Float16Array].map(function(c){return c.BYTES_PER_ELEMENT}).join(',')"),
+    // --- marqueurs extensions (jscore ou V8-compat) — divergence
+    // attendue et documentée : verrous de régression seulement,
+    // PAS des prétentions de conformité ---
+    ("cov_ext_allkeyed", "typeof Promise.allKeyed+'|'+typeof Promise.allSettledKeyed"),
+    ("cov_ext_v8limit", "typeof Error.stackTraceLimit+'|'+typeof Error.captureStackTrace"),
+    ("cov_ext_sym_meta", "typeof Symbol.metadata"),
+    ("cov_ext_totemporal", "typeof new Date().toTemporalInstant"),
+    ("cov_ext_temporal", "typeof Temporal+'|'+(typeof Temporal==='undefined'?'absent':typeof Temporal.Duration)"),
 ];
