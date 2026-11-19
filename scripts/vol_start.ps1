@@ -16,15 +16,24 @@
        entre pistes parallèles sur corpus partagé (jonction).
        Un claim vivant = CLAIMED.json sans `DONE` (`vol_status`
        est imprimé en tête de sortie — pas de fichier à tenir).
-    2. Arbre : `git status --porcelain` doit être vide sur le
-       repo de build (`-Force` pour un WIP assumé — noté dans
-       CLAIMED.json) ; `git rev-parse main` est relevé (jamais
-       HEAD — un worktree détaché le fige).
+    2. Arbre : le sha de référence est `git rev-parse main`
+       (jamais HEAD — un worktree détaché le fige). Par défaut
+       le build ne touche PAS l'arbre principal : un worktree
+       éphémère `<repo>-vol<N>-wt` (voisin de la racine, nom
+       reconnaissable → ménage par `vol_clean.ps1`) est créé
+       au sha de main — le WIP des autres pistes ne peut pas
+       contaminer le binaire. `-Repo <arbre>` = mode expert :
+       build direct dans l'arbre donné (exigé propre, ou
+       `-Force` assumé — `wip` noté dans CLAIMED.json). Le
+       worktree n'est supprimé que sur décision de
+       l'opérateur (fin de mission), pas à la clôture du vol.
     3. Build : `cargo build --release -p explorer-daemon` —
-       `CARGO_TARGET_DIR` honoré tel quel, défaut
-       `C:\cargo-target\<leaf-repo>` (incrémental stable, la
-       convention « un target par agent » est laissée à
-       l'appelant qui pose sa variable).
+       target/ LOCAL de l'arbre de build (config cargo par
+       défaut : un target par arbre, plus de `CARGO_TARGET_DIR`
+       partagé ni de sous-dossier <triple> ; sccache amortit
+       le premier build). `EXPLORER_DATA` est épinglé au
+       corpus du repo du script — `data_root()` du daemon ne
+       dépend plus du lieu du worktree.
     4. Spawn : `spawn_daemon.ps1` (watchdog cmd caché, canal
        `session`, exe.log + exit.log + pidfile). Port dérivé du
        numéro de vol (9385 + (N-1) mod 200 — arbitré par le même
@@ -52,8 +61,8 @@ param(
   [string]$Agent = '',
   # Cibles déclarées (coordination — lisible par les autres pistes).
   [string[]]$Cibles = @(),
-  # Repo de build — défaut : dépôt du script (passer le worktree
-  # de vol si le binaire ne sort pas du dépôt principal).
+  # Build DIRECT dans cet arbre (mode expert) — défaut : un
+  # worktree éphémère <repo>-vol<N>-wt est créé au sha de main.
   [string]$Repo = '',
   # Port forcé ; 0 = premier libre ≥ 9385 (jamais 9377 = humain).
   [int]$Port = 0,
@@ -65,10 +74,18 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$repo = if ($Repo -ne '') { $Repo } else { Split-Path -Parent $PSScriptRoot }
-$repo = (Resolve-Path $repo).Path
-$vols = Join-Path $repo 'Explorer-data\vols'
+$scriptRepo = Split-Path -Parent $PSScriptRoot
+# Corpus = Explorer-data du repo du script (jonction : même
+# corpus physique quel que soit le clone de travail).
+$corpus = Join-Path $scriptRepo 'Explorer-data'
+$vols = Join-Path $corpus 'vols'
 New-Item -ItemType Directory -Force -Path $vols | Out-Null
+
+# -Repo explicite = build direct dans cet arbre (expert) ;
+# défaut = repo du script → le build vivra dans un worktree
+# éphémère vol<N>-wt créé après le claim.
+$explicitRepo = $Repo -ne ''
+$refRepo = if ($explicitRepo) { (Resolve-Path $Repo).Path } else { $scriptRepo }
 
 # --- claims vivants (CLAIMED.json sans DONE) : coordination ---
 $usedPorts = @{}
@@ -78,18 +95,22 @@ foreach ($d in Get-ChildItem $vols -Directory -ErrorAction SilentlyContinue) {
     try {
       $j = Get-Content $cj -Raw | ConvertFrom-Json
       if ($j.port) { $usedPorts[[int]$j.port] = $true }
-      Write-Output ("actif : {0} agent={1} port={2} mission={3}" -f `
-        $d.Name, $j.agent, $j.port, $j.mission)
+      # claim > 2 h sans DONE = probable zombie (session morte) —
+      # la règle « >2 h » est mécanisée ici, pas mémorisée.
+      $age = [DateTimeOffset]::Now.ToUnixTimeSeconds() - [long]$j.claimed_at
+      $z = if ($age -gt 7200) { ' (zombie? >2h)' } else { '' }
+      Write-Output ("actif : {0} agent={1} port={2} mission={3}{4}" -f `
+        $d.Name, $j.agent, $j.port, $j.mission, $z)
     } catch { }
   }
 }
 
-# --- arbre propre avant tout build (verdict = binaire frais) ---
-$dirty = git -C $repo status --porcelain
-$sha = (git -C $repo rev-parse main).Trim()
-$head = (git -C $repo rev-parse HEAD).Trim()
-if ($dirty -and -not $Force) {
-  Write-Error "arbre de build sale — commiter/stasher, voler un worktree, ou -Force assumé"
+# --- sha de référence + arbre (mode expert seul : propre) ---
+$dirty = git -C $refRepo status --porcelain
+$sha = (git -C $refRepo rev-parse main).Trim()
+$head = (git -C $refRepo rev-parse HEAD).Trim()
+if ($explicitRepo -and $dirty -and -not $Force) {
+  Write-Error "arbre de build sale — commiter/stasher ou -Force assumé"
   exit 1
 }
 if ($head -ne $sha) {
@@ -126,20 +147,23 @@ $logdir = Join-Path $voldir 'logs'
 New-Item -ItemType Directory -Force -Path $logdir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $voldir 'captures') | Out-Null
 
+$claimData = [ordered]@{
+  vol        = $N
+  agent      = $agent
+  mission    = $Mission
+  repo       = $refRepo
+  sha_main   = $sha
+  head       = $head
+  wip        = [bool]$dirty
+  cibles     = $Cibles
+  claimed_at = [DateTimeOffset]::Now.ToUnixTimeSeconds()
+}
 function Write-Claim([hashtable]$Extra) {
-  $j = [ordered]@{
-    vol        = $N
-    agent      = $agent
-    mission    = $Mission
-    repo       = $repo
-    sha_main   = $sha
-    head       = $head
-    wip        = [bool]$dirty
-    cibles     = $Cibles
-    claimed_at = [DateTimeOffset]::Now.ToUnixTimeSeconds()
-  }
-  foreach ($k in $Extra.Keys) { $j[$k] = $Extra[$k] }
-  $text = ($j | ConvertTo-Json)
+  # Merge cumulatif : chaque Write-Claim ajoute des champs à
+  # l'état courant (worktree posé à 'building' survit à
+  # 'flying' — une réécriture complète l'aurait effacé).
+  foreach ($k in $Extra.Keys) { $claimData[$k] = $Extra[$k] }
+  $text = ($claimData | ConvertTo-Json)
   $claimStream.Position = 0
   $claimStream.SetLength(0)
   $b = [Text.Encoding]::UTF8.GetBytes($text)
@@ -153,13 +177,28 @@ function Abort-Vol([string]$Why) {
 }
 Write-Claim @{ state = 'claimed' }
 
-# --- 2/3. build release (Finished attendu par cargo) ---
-if (-not $NoBuild) {
-  if (-not $env:CARGO_TARGET_DIR) {
-    $env:CARGO_TARGET_DIR = "C:\cargo-target\$(Split-Path -Leaf $repo)"
+# --- 2/3. worktree éphémère + build release ---
+# Le binaire ne sort JAMAIS de l'arbre principal : worktree
+# `vol<N>-wt` voisin de la racine, épinglé au sha de main —
+# un arbre principal sale ne contamine plus le vol, et le nom
+# reconnaissable rend le ménage trivial (vol_clean.ps1).
+# target/ est local au worktree : provenance = chemin.
+$buildRepo = $refRepo; $wt = ''
+if (-not $explicitRepo) {
+  if ($NoBuild) {
+    Abort-Vol '-NoBuild sans -Repo : le worktree frais n''a pas de binaire — passer -Repo <arbre buildé>'
   }
-  Write-Output "build : cargo build --release -p explorer-daemon (CARGO_TARGET_DIR=$env:CARGO_TARGET_DIR)"
-  Push-Location $repo
+  $leaf = Split-Path -Leaf $refRepo
+  $wt = Join-Path (Split-Path -Parent $refRepo) "$leaf-vol$N-wt"
+  git -C $refRepo worktree add --detach $wt $sha 2>&1 | ForEach-Object { Write-Output $_ }
+  if ($LASTEXITCODE -ne 0) { Abort-Vol "worktree éphémère $wt impossible" }
+  $buildRepo = $wt
+  Write-Output "worktree éphémère : $wt @ $sha"
+}
+Write-Claim @{ state = 'building'; worktree = $wt }
+if (-not $NoBuild) {
+  Write-Output "build : cargo build --release -p explorer-daemon ($buildRepo)"
+  Push-Location $buildRepo
   try { cargo build --release -p explorer-daemon } finally { Pop-Location }
   if ($LASTEXITCODE -ne 0) { Abort-Vol 'build échoué' }
 }
@@ -208,6 +247,7 @@ function Get-PortOwner([int]$p) {
 $env:EXPLORER_VIEWPORT   = '1366x900'
 $env:EXPLORER_MEM_DIAG   = '1'
 $env:EXPLORER_PROFILE    = "vol:vol$N"
+$env:EXPLORER_DATA       = $corpus
 $env:EXPLORER_DEATH_LOG  = Join-Path $logdir 'explorer_daemon_death.log'
 $env:EXPLORER_FLIGHT_LOG = Join-Path $logdir 'explorer_daemon_flight.log'
 
@@ -229,7 +269,7 @@ for ($try = 1; $try -le 4 -and -not $spawned; $try++) {
   Write-Claim @{ state = 'spawning'; port = $Port }
 
   $out = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'spawn_daemon.ps1') `
-    -Port $Port -Repo $repo -LogDir $logdir 2>&1
+    -Port $Port -Repo $buildRepo -LogDir $logdir 2>&1
   $out | ForEach-Object { Write-Output $_ }
   $dpid = 0
   $m = $out | Select-String -Pattern 'daemon PID (\d+)' | Select-Object -First 1
@@ -244,7 +284,10 @@ for ($try = 1; $try -le 4 -and -not $spawned; $try++) {
     [bool](Get-Process -Id $dpid -ErrorAction SilentlyContinue)
   if ($alive -and (Get-PortOwner $Port) -eq $dpid) { $spawned = $true; break }
   Write-Output "port $Port : pid $dpid ne possède pas le listener — essai suivant"
-  if ($alive) { taskkill /PID $dpid /F | Out-Null }
+  if ($alive) {
+    $proc = Get-Process -Id $dpid -ErrorAction SilentlyContinue
+    if ($proc.ProcessName -eq 'explorer-daemon') { taskkill /PID $dpid /F | Out-Null }
+  }
   if ($forcedPort) { Abort-Vol "port forcé $Port perdu au bind" }
   $Port = 0
 }
@@ -262,5 +305,6 @@ Write-Output ''
 Write-Output "=== vol $N prêt ==="
 Write-Output "agent=$agent mission=$Mission port=$Port daemon_pid=$dpid"
 Write-Output "binaire=$exePath sha_main=$sha"
+if ($wt) { Write-Output "worktree=$wt (fin de mission : scripts/vol_clean.ps1 -Apply)" }
 Write-Output "profil=vol:vol$N logs=$logdir"
 Write-Output "clôture : pwsh -File scripts/vol_close.ps1 -Vol $N"

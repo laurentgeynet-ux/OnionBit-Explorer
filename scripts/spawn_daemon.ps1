@@ -70,9 +70,9 @@ param(
   [string]$Exe = '',
   [string]$LogDir = '',
   # Racine pour `cargo metadata` — défaut = dépôt du script ;
-  # passer le worktree de vol (`-Repo C:\OnionBit-Explorer-youtube-wt`)
-  # sinon l'exe résolu est le binaire du dépôt principal
-  # (vol 814 : daemon 16:25 périmé mesuré au lieu du SHA claimé).
+  # passer l'arbre de build (worktree de vol) sinon l'exe
+  # résolu est celui du dépôt principal (vol 814 : daemon
+  # 16:25 périmé mesuré au lieu du SHA claimé).
   [string]$Repo = ''
 )
 
@@ -91,22 +91,15 @@ if ($Exe -eq '') {
     $meta = cargo metadata --no-deps --format-version 1 |
       ConvertFrom-Json
   } finally { Pop-Location }
-  # Racines de sortie possibles : `target_directory` (config
-  # projet), `build_directory` (build.build-dir global —
-  # {workspace-path-hash} déplace les artefacts HORS de
-  # target_dir), `CARGO_TARGET_DIR` de l'appelant, et le
-  # dossier historique `C:\cargo-target\<nom du repo>` (vols
-  # construits avec CARGO_TARGET_DIR explicite — vol 814 : le
-  # seul target_dir métadata datait du 9 nov, le binaire réel
-  # vivait sous cargo-target\OnionBit-Explorer-youtube-wt).
+  # Racines de sortie : `target_directory` (config projet),
+  # `build_directory` (build.build-dir global s'il est posé)
+  # et `CARGO_TARGET_DIR` de l'appelant — la vérité vient de
+  # `cargo metadata`, pas d'un chemin codé en dur (vol 814 :
+  # un exe périmé sous cargo-target gagnait sur le frais).
   $roots = @(
     $meta.target_directory
     $meta.build_directory
     $env:CARGO_TARGET_DIR
-    $(if ($env:CARGO_TARGET_DIR -eq '' -or $env:CARGO_TARGET_DIR -eq $null) {
-        $leaf = Split-Path -Leaf $repo
-        if ($leaf) { Join-Path 'C:\cargo-target' $leaf }
-      })
   ) | Where-Object { $_ } | Select-Object -Unique
   # Triple hôte (`x86_64-pc-windows-msvc`…) — rustc absent =
   # chaîne vide, le glob ci-dessous couvre alors.
@@ -258,6 +251,22 @@ if ($dpid) {
   Write-Output "daemon PID $dpid (pidfile $pidfile)"
 }
 
+# « en ligne » seulement si NOTRE pid possède le listener :
+# le port peut être répondu par un daemon voisin qui a gagné
+# le bind (course constatée vols 908/909 : deux « en ligne »
+# sur 9388, le perdant mort `os error 10048` — son
+# /api/status était servi par le vainqueur).
+$owner = 0
+foreach ($line in (netstat -ano)) {
+  if ($line -notmatch 'LISTENING') { continue }
+  $t = $line -split '\s+' | Where-Object { $_ }
+  if ($t.Count -ge 5 -and $t[1] -match ":(\d+)$" -and `
+      [int]$Matches[1] -eq $Port) { $owner = [int]$t[-1]; break }
+}
+if ($ok -and $owner -gt 0 -and $owner -ne $dpid) {
+  $ok = $false
+  Write-Warning "port $Port possédé par pid $owner (≠ daemon $dpid) — bind perdu"
+}
 if ($ok) {
   Write-Output "daemon $Port en ligne"
 } else {

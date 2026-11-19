@@ -94,9 +94,15 @@ if (-not $KeepDaemon -and $port -gt 0) {
            (Get-Process -Id $dpid -ErrorAction SilentlyContinue)) {
       Start-Sleep -Milliseconds 400
     }
-    if (Get-Process -Id $dpid -ErrorAction SilentlyContinue) {
+    $proc = Get-Process -Id $dpid -ErrorAction SilentlyContinue
+    if ($proc -and $proc.ProcessName -eq 'explorer-daemon') {
       taskkill /PID $dpid /F | Out-Null
       $outcome = "$outcome+killed" -replace '^absent\+', ''
+    } elseif ($proc) {
+      # pid recyclé sur un processus tiers — jamais de kill
+      # à main levée (vol 698 : PID 7392 = autre daemon tué).
+      Write-Warning "pid $dpid recyclé ($($proc.ProcessName)) — taskkill sauté"
+      $outcome = "$outcome+pid-recycled" -replace '^absent\+', ''
     } elseif ($outcome -eq 'absent') {
       $outcome = 'graceful'
     }
@@ -162,4 +168,7 @@ if (-not $NoCommit -and (Test-Path (Join-Path $vols '.git'))) {
 Write-Output ''
 Write-Output "=== vol $N clos ==="
 Write-Output "daemon=$outcome registre_gc=$removed claim=libéré (DONE)"
+if ($claim.worktree) {
+  Write-Output "worktree conservé : $($claim.worktree) — ménage fin de mission : scripts/vol_clean.ps1 -Apply"
+}
 Write-Output "vol suivant : pwsh -File scripts/vol_start.ps1 -Mission <TAG> -Cibles <liste>"

@@ -332,27 +332,26 @@ Règles de la coexistence :
      des vôtres — race réelle `tree_construction`
      « corpus dir NotFound » : autre
      `CARGO_MANIFEST_DIR`, fixtures absentes). La
-     centralisation relève du poste : la config cargo
-     de la **machine** (niveau utilisateur, hors
-     dépôt) pose `build-dir` avec le templating
-     `{workspace-path-hash}` (cargo ≥ 1.91) → chaque
-     projet/worktree obtient un sous-dossier unique
-     sous la racine centrale du poste, rien à
-     déclarer dans le dépôt (`cargo metadata`
-     expose `build_directory`/`target_directory`).
-     Les binaires finaux restent dans le `target/`
-     local du worktree — défaut cargo, isolation
-     automatique ; pour les déporter aussi :
-     `CARGO_TARGET_DIR` par session (cf. docs de
-     vol) ou `.cargo/config` non commité
-     (prioritaire sur `config.toml`, gitignoré).
-     **Scripts** : l'exe d'un binaire se résout via
-     `cargo metadata` + repli
-     `<target>/<triple>/<profil>` — un
-     `build.target` explicite (config machine)
-     range les artefacts finaux sous le
-     sous-dossier triple ; jamais de chemin
-     `target/<profil>` en dur.
+     source unique = la config cargo de la
+     **machine** (`~/.cargo/config.toml`) — aucun
+     épinglage dans le dépôt (ni `.cargo/config.toml`
+     de projet, ni chemin codé dans les scripts) :
+     chaque arbre — projet ou worktree — écrit dans
+     son `target/<profil>` local, isolation
+     automatique (un worktree éphémère de vol ne
+     partage ni n'écrase le binaire d'une autre
+     piste ; sccache amortit les builds à froid).
+     L'ancien modèle (`build-dir` hashé
+     `{workspace-path-hash}` + `build.target`
+     épinglé → sous-dossier `<triple>`) est
+     retiré — chemin frais par vol = build froid
+     et exe périmés sous `C:\cargo-target`
+     (vol 814). **Scripts** : l'exe se résout via
+     `cargo metadata` (`target_directory`) +
+     repli `<target>/<triple>/<profil>` ; jamais
+     de chemin `target/<profil>` en dur.
+     `CARGO_TARGET_DIR` par session reste honoré
+     (l'env prime toute config).
    - **Gate entier avant push** : `verify_all` complet, pas
      seulement son crate — le couplage est asymétrique :
      PIPELINE (amont) peut casser des tests `explorer-core`
