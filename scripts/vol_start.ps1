@@ -31,7 +31,11 @@
        target/ LOCAL de l'arbre de build (config cargo par
        défaut : un target par arbre, plus de `CARGO_TARGET_DIR`
        partagé ni de sous-dossier <triple> ; sccache amortit
-       le premier build). `EXPLORER_DATA` est épinglé au
+       le premier build). Réutilisation : si le claim d'un
+       vol précédent prouve (sha_main + exe + worktree) que
+       le sha courant est déjà buildé, l'exe est repris tel
+       quel via `spawn_daemon -Exe` — pas de rebuild en
+       chaîne de campagne. `EXPLORER_DATA` est épinglé au
        corpus du repo du script — `data_root()` du daemon ne
        dépend plus du lieu du worktree.
     4. Spawn : `spawn_daemon.ps1` (watchdog cmd caché, canal
@@ -191,20 +195,38 @@ Write-Claim @{ state = 'claimed' }
 # un arbre principal sale ne contamine plus le vol, et le nom
 # reconnaissable rend le ménage trivial (vol_clean.ps1).
 # target/ est local au worktree : provenance = chemin.
-$buildRepo = $refRepo; $wt = ''
+$buildRepo = $refRepo; $wt = ''; $exeOverride = ''
 if (-not $explicitRepo) {
   if ($NoBuild) {
     Abort-Vol '-NoBuild sans -Repo : le worktree frais n''a pas de binaire — passer -Repo <arbre buildé>'
   }
-  $leaf = Split-Path -Leaf $refRepo
-  $wt = Join-Path (Split-Path -Parent $refRepo) "$leaf-vol$N-wt"
-  git -C $refRepo worktree add --detach $wt $sha 2>&1 | ForEach-Object { Write-Output $_ }
-  if ($LASTEXITCODE -ne 0) { Abort-Vol "worktree éphémère $wt impossible" }
-  $buildRepo = $wt
-  Write-Output "worktree éphémère : $wt @ $sha"
+  # Réutilisation : le claim d'un vol précédent prouve
+  # (sha_main + exe + worktree) que CE sha est déjà buildé —
+  # ~9 min de rebuild épargnées par vol enchaîné à sha
+  # constant. L'exe reste dans l'ancien worktree tant que le
+  # daemon tourne (vol_clean dessus échouerait proprement —
+  # fichier verrouillé).
+  foreach ($d in Get-ChildItem $vols -Directory -Filter 'vol*' | Sort-Object Name -Descending) {
+    $cj = Join-Path $d.FullName 'CLAIMED.json'
+    if (-not (Test-Path $cj)) { continue }
+    try { $j = Get-Content $cj -Raw | ConvertFrom-Json } catch { continue }
+    if ($j.sha_main -eq $sha -and $j.exe -and (Test-Path $j.exe)) {
+      $exeOverride = $j.exe; break
+    }
+  }
+  if ($exeOverride) {
+    Write-Output "binaire réutilisé : $exeOverride (sha $sha déjà buildé — pas de rebuild)"
+  } else {
+    $leaf = Split-Path -Leaf $refRepo
+    $wt = Join-Path (Split-Path -Parent $refRepo) "$leaf-vol$N-wt"
+    git -C $refRepo worktree add --detach $wt $sha 2>&1 | ForEach-Object { Write-Output $_ }
+    if ($LASTEXITCODE -ne 0) { Abort-Vol "worktree éphémère $wt impossible" }
+    $buildRepo = $wt
+    Write-Output "worktree éphémère : $wt @ $sha"
+  }
 }
 Write-Claim @{ state = 'building'; worktree = $wt }
-if (-not $NoBuild) {
+if (-not $NoBuild -and -not $exeOverride) {
   Write-Output "build : cargo build --release -p explorer-daemon ($buildRepo)"
   Push-Location $buildRepo
   try { cargo build --release -p explorer-daemon } finally { Pop-Location }
@@ -276,8 +298,9 @@ for ($try = 1; $try -le 4 -and -not $spawned; $try++) {
   }
   Write-Claim @{ state = 'spawning'; port = $Port }
 
+  $exeArgs = if ($exeOverride) { @('-Exe', $exeOverride) } else { @() }
   $out = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'spawn_daemon.ps1') `
-    -Port $Port -Repo $buildRepo -LogDir $logdir 2>&1
+    -Port $Port -Repo $buildRepo -LogDir $logdir @exeArgs 2>&1
   $out | ForEach-Object { Write-Output $_ }
   $dpid = 0
   $m = $out | Select-String -Pattern 'daemon PID (\d+)' | Select-Object -First 1
