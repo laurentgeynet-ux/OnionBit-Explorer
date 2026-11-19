@@ -478,6 +478,72 @@ fn lift_ftarget(t: &mut ForTarget, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
     }
 }
 
+/// JS-C620 — cible `for-of`/`for-in` porteuse de suspends :
+/// les expressions du motif (défauts `x = yield`, clés
+/// calculées `o[yield]`, restes `...a[yield]`) doivent
+/// s'évaluer **par itération**, pas une fois avant la
+/// boucle. La cible devient `var __gN` et le bind réel
+/// (`var/let pat = __gN` ou `expr = __gN`) est injecté en
+/// tête de corps — ses `__gM = yield`/`await` hissés s'y
+/// suspendent à chaque tour. Sans suspend : `lift_ftarget`
+/// inchangé.
+fn lower_for_target_per_iter(
+    t: &mut ForTarget,
+    body: &mut Stmt,
+    pre: &mut Vec<Stmt>,
+    cx: &mut LowerCx,
+) {
+    if !ftarget_has_suspend(t) {
+        lift_ftarget(t, pre, cx);
+        return;
+    }
+    let mut head = Vec::new();
+    let tname = cx.fresh();
+    let bind = match t {
+        ForTarget::Var(p) => {
+            lift_pat(p, &mut head, cx);
+            Some(Stmt::Var(vec![VarDecl {
+                pat: p.clone(),
+                init: Some(Expr::Ident(tname.clone())),
+            }]))
+        }
+        ForTarget::Lexical { pat: p, constant } => {
+            lift_pat(p, &mut head, cx);
+            Some(Stmt::Lexical {
+                constant: *constant,
+                decls: vec![VarDecl {
+                    pat: p.clone(),
+                    init: Some(Expr::Ident(tname.clone())),
+                }],
+            })
+        }
+        ForTarget::Expr(e) => {
+            lift(e, &mut head, cx);
+            Some(Stmt::Expr(Expr::Assign(
+                Box::new(e.clone()),
+                AssignOp::Set,
+                Box::new(Expr::Ident(tname.clone())),
+            )))
+        }
+        // `using` — repli : hissage avant boucle (inchangé).
+        ForTarget::Using { .. } => None,
+    };
+    let Some(bind) = bind else {
+        lift_ftarget(t, pre, cx);
+        return;
+    };
+    head.push(bind);
+    let mut old = std::mem::replace(body, Stmt::Block(Vec::new()));
+    let mut stmts = if let Stmt::Block(l) = &mut old {
+        std::mem::take(l)
+    } else {
+        vec![old]
+    };
+    head.append(&mut stmts);
+    *body = Stmt::Block(head);
+    *t = ForTarget::Var(Pat::Ident(tname));
+}
+
 /// `true` si l'init `for (…)` porte un suspend.
 fn finit_has_suspend(i: &ForInit) -> bool {
     match i {
@@ -620,21 +686,24 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
                 lift(u, &mut pre, cx);
             }
         }
-        Stmt::ForOf { target, iter, .. } => {
-            lift_ftarget(target, &mut pre, cx);
+        Stmt::ForOf {
+            target, iter, body, ..
+        } => {
             lift(iter, &mut pre, cx);
+            lower_for_target_per_iter(target, body, &mut pre, cx);
         }
         Stmt::ForIn {
             target,
             obj,
             var_init,
+            body,
             ..
         } => {
-            lift_ftarget(target, &mut pre, cx);
             lift(obj, &mut pre, cx);
             if let Some(v) = var_init {
                 lift(v, &mut pre, cx);
             }
+            lower_for_target_per_iter(target, body, &mut pre, cx);
         }
         Stmt::Switch { disc, cases } => {
             lift(disc, &mut pre, cx);
@@ -1010,6 +1079,28 @@ enum FKind {
         target: ForTarget,
         issued: bool,
         sync_iter: bool,
+    },
+    /// `for await ([…] of it)` — destructuration par item via
+    /// le protocole **async** (JS-C620, spec
+    /// `AsyncIteratorBindingInitialization`) : un `next()`
+    /// awaited par élément du motif ; `done` prématuré →
+    /// `undefined` aux éléments restants ; fin de motif →
+    /// `AsyncIteratorClose` awaited si l'itérateur n'est pas
+    /// épuisé. `issued` : mécanique `next()`/`await` en vol
+    /// (erreurs propagées sans close) ; `closing` : le
+    /// `return()` de fin de motif est en vol — la livraison
+    /// `__awaitit` suivante est son résultat.
+    DstrAwait {
+        it: Value,
+        next: Value,
+        sync_iter: bool,
+        elems: Rc<Vec<Option<Pat>>>,
+        idx: usize,
+        done: bool,
+        issued: bool,
+        closing: bool,
+        rest: Vec<Value>,
+        mode: BindMode,
     },
     /// `try` — throw → throw → catch si présent ; `finally`
     /// toujours.
@@ -1565,6 +1656,16 @@ impl GExec {
                         None => return Ok(()),
                     }
                 }
+                // JS-C620 — destructuration `for await` en
+                // cours : `AsyncIteratorClose` awaited quand
+                // l'abrupte vient du bind (`!issued`) et que
+                // l'itérateur n'est pas épuisé (`!done`).
+                FKind::DstrAwait {
+                    it, issued, done, ..
+                } if !issued && !done => match self.close_iter_async(e, it, f.env, u)? {
+                    Some(u2) => u = u2,
+                    None => return Ok(()),
+                },
                 _ => {}
             }
         }
@@ -1879,11 +1980,228 @@ impl GExec {
                         *issued = false;
                     }
                 }
+                // JS-C620 — cible `[…]` : destructuration via
+                // le protocole **async** (`@@asyncIterator`,
+                // repli `AsyncFromSyncIterator`) — frame
+                // `DstrAwait` au-dessus ; le corps reprend à
+                // `pc=0` quand elle se dépile.
+                if let Some((elems, mode)) = Self::forawait_dstr(&target) {
+                    let (pit, pnext, psi) = match async_iterator(e, val) {
+                        Ok(r) => r,
+                        Err(Thrown(v)) => return self.throw_into(e, v),
+                    };
+                    if let Some(fr) = self.stack.last_mut() {
+                        fr.pc = 0;
+                    }
+                    self.stack.push(GFrame {
+                        list: Rc::new(Vec::new()),
+                        pc: 0,
+                        env: env.clone(),
+                        labels: Vec::new(),
+                        kind: FKind::DstrAwait {
+                            it: pit,
+                            next: pnext,
+                            sync_iter: psi,
+                            elems,
+                            idx: 0,
+                            done: false,
+                            issued: false,
+                            closing: false,
+                            rest: Vec::new(),
+                            mode,
+                        },
+                    });
+                    return Ok(());
+                }
                 if let Err(Thrown(v)) = self.bind_for_target(e, &env, &target, val) {
                     return self.throw_into(e, v);
                 }
                 if let Some(fr) = self.stack.last_mut() {
                     fr.pc = 0;
+                }
+            }
+            // `for await` — destructuration `[…]` de la cible
+            // (JS-C620) : un `it.next()` awaited par élément
+            // (`issued` — erreurs de mécanique propagées sans
+            // close), bind par élément (erreurs → close via
+            // l'unwind), `done` → `undefined` aux éléments
+            // restants, `...rest` draine jusqu'à `done`, fin
+            // de motif → `AsyncIteratorClose` awaited
+            // (`closing`) si non épuisé.
+            FKind::DstrAwait {
+                it,
+                next,
+                sync_iter,
+                elems,
+                idx,
+                done,
+                issued,
+                closing,
+                rest,
+                mode,
+            } => {
+                let env = f.env.clone();
+                let (it, next, elems, mut idx, mut done, mut issued, mut closing, mut rest, mode) = (
+                    it.clone(),
+                    next.clone(),
+                    elems.clone(),
+                    *idx,
+                    *done,
+                    *issued,
+                    *closing,
+                    rest.clone(),
+                    *mode,
+                );
+                let sync_iter = *sync_iter;
+                macro_rules! wb {
+                    () => {
+                        if let Some(fr) = self.stack.last_mut() {
+                            if let FKind::DstrAwait {
+                                idx: i,
+                                done: d,
+                                issued: s,
+                                closing: c,
+                                rest: r,
+                                ..
+                            } = &mut fr.kind
+                            {
+                                (*i, *d, *s, *c) = (idx, done, issued, closing);
+                                r.clone_from(&rest);
+                            }
+                        }
+                    };
+                }
+                'steps: loop {
+                    if !issued {
+                        if done {
+                            // Épuisé — le reste du motif lie
+                            // `undefined` (`...rest` ← accumulé).
+                            while idx < elems.len() {
+                                if let Some(p) = &elems[idx] {
+                                    let r = if let Pat::Rest(inner) = p {
+                                        let arr = e.new_array(std::mem::take(&mut rest));
+                                        e.bind_pat(&env, self.this.clone(), inner, arr, mode)
+                                    } else {
+                                        e.bind_pat(
+                                            &env,
+                                            self.this.clone(),
+                                            p,
+                                            Value::Undefined,
+                                            mode,
+                                        )
+                                    };
+                                    if let Err(Thrown(v)) = r {
+                                        return self.throw_into(e, v);
+                                    }
+                                }
+                                idx += 1;
+                            }
+                            self.stack.pop();
+                            return Ok(());
+                        }
+                        if idx >= elems.len() {
+                            // `AsyncIteratorClose` — `it.return()`
+                            // awaited ; livraison → pop.
+                            closing = true;
+                            issued = true;
+                            wb!();
+                            let ret = match e.get_prop_value(it.clone(), "return") {
+                                Ok(r) => r,
+                                Err(Thrown(v)) => return self.throw_into(e, v),
+                            };
+                            if matches!(ret, Value::Undefined | Value::Null) {
+                                self.stack.pop();
+                                return Ok(());
+                            }
+                            if !e.is_callable(ret.clone()) {
+                                let Thrown(v) = e.type_error("iterator return is not callable");
+                                return self.throw_into(e, v);
+                            }
+                            let r = match e.call_value(ret, it.clone(), &[]) {
+                                Ok(r) => r,
+                                Err(Thrown(v)) => return self.throw_into(e, v),
+                            };
+                            let flow = self.arm_await(e, r, &env, Some("__awaitit".into()))?;
+                            if self.pending.is_some() || matches!(flow, GFlow::Susp) {
+                                return Ok(());
+                            }
+                            continue 'steps;
+                        }
+                        // `next()` — mécanique : `issued`
+                        // (pas de close sur erreur).
+                        issued = true;
+                        wb!();
+                        let r = match e.call_value(next.clone(), it.clone(), &[]) {
+                            Ok(v) => v,
+                            Err(Thrown(v)) => return self.throw_into(e, v),
+                        };
+                        let awaited = if sync_iter {
+                            let Value::Obj(id) = r else {
+                                let Thrown(v) = e.type_error("iterator result is not an object");
+                                return self.throw_into(e, v);
+                            };
+                            if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
+                                done = true;
+                                issued = false;
+                                wb!();
+                                continue 'steps;
+                            }
+                            match e.get_prop_value(Value::Obj(id), "value") {
+                                Ok(v) => v,
+                                Err(Thrown(v)) => return self.throw_into(e, v),
+                            }
+                        } else {
+                            r
+                        };
+                        let flow = self.arm_await(e, awaited, &env, Some("__awaitit".into()))?;
+                        if self.pending.is_some() || matches!(flow, GFlow::Susp) {
+                            return Ok(());
+                        }
+                        continue 'steps;
+                    }
+                    // Livraison `__awaitit`.
+                    let r = e.env_get(&env, "__awaitit").unwrap_or(Value::Undefined);
+                    if closing {
+                        // `AsyncIteratorClose` — le résultat
+                        // awaited doit être un objet.
+                        if !matches!(r, Value::Obj(_)) {
+                            let Thrown(v) = e.type_error("iterator result is not an object");
+                            return self.throw_into(e, v);
+                        }
+                        self.stack.pop();
+                        return Ok(());
+                    }
+                    let val = if sync_iter {
+                        r
+                    } else {
+                        let Value::Obj(id) = r else {
+                            let Thrown(v) = e.type_error("iterator result is not an object");
+                            return self.throw_into(e, v);
+                        };
+                        if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
+                            done = true;
+                            issued = false;
+                            wb!();
+                            continue 'steps;
+                        }
+                        e.get_prop(id, "value").unwrap_or(Value::Undefined)
+                    };
+                    // Bind de l'élément — ses erreurs closent
+                    // l'itérateur (`issued=false` avant).
+                    issued = false;
+                    let is_rest = matches!(elems.get(idx), Some(Some(Pat::Rest(_))));
+                    if is_rest {
+                        rest.push(val);
+                    } else if let Some(Some(p)) = elems.get(idx) {
+                        wb!();
+                        if let Err(Thrown(v)) = e.bind_pat(&env, self.this.clone(), p, val, mode) {
+                            return self.throw_into(e, v);
+                        }
+                    }
+                    if !is_rest {
+                        idx += 1;
+                    }
+                    wb!();
                 }
             }
             FKind::Try { finally, .. } => {
@@ -2011,13 +2329,35 @@ impl GExec {
             ForTarget::Var(p) | ForTarget::Lexical { pat: p, .. } => {
                 e.bind_pat(env, self.this.clone(), p, v, BindMode::Var)
             }
-            ForTarget::Expr(x) => {
-                if let Some(lv) = e.resolve_lvalue(env, self.this.clone(), x)? {
-                    e.store_lvalue(env, lv, v)?;
-                }
-                Ok(())
-            }
+            // `write_lvalue` couvre aussi les motifs `[…]`/`{…}`
+            // d'assignation (`expr_to_pat` + `bind_pat`) —
+            // `resolve_lvalue` rendait `None` → cible liée
+            // jamais (JS-C620).
+            ForTarget::Expr(x) => e.write_lvalue(env, self.this.clone(), x, v),
             ForTarget::Using { .. } => Ok(()),
+        }
+    }
+
+    /// `for await` — si la cible est un motif `[…]`
+    /// (déclaration ou assignation), ses éléments + mode de
+    /// liaison (JS-C620) : la destructuration suit le
+    /// protocole itérateur **async** — frame `DstrAwait`,
+    /// pas le `bind_pat` sync.
+    fn forawait_dstr(t: &ForTarget) -> Option<(Rc<Vec<Option<Pat>>>, BindMode)> {
+        match t {
+            ForTarget::Var(Pat::Array(items))
+            | ForTarget::Lexical {
+                pat: Pat::Array(items),
+                ..
+            } => Some((Rc::new(items.clone()), BindMode::Var)),
+            ForTarget::Expr(x @ Expr::Array(_)) => {
+                let mut pat = crate::interp::ops::expr_to_pat(x)?;
+                let Pat::Array(items) = &mut pat else {
+                    return None;
+                };
+                Some((Rc::new(std::mem::take(items)), BindMode::Assign))
+            }
+            _ => None,
         }
     }
 
@@ -2457,6 +2797,13 @@ impl GExec {
             if let FKind::ForAwait { iter, next, .. } = &f.kind {
                 pv(iter, out);
                 pv(next, out);
+            }
+            if let FKind::DstrAwait { it, next, rest, .. } = &f.kind {
+                pv(it, out);
+                pv(next, out);
+                for v in rest {
+                    pv(v, out);
+                }
             }
         }
         if let Some(Pending::Drain { items, .. }) = &self.pending {

@@ -15210,3 +15210,40 @@ chaque gain rapporté contre les **deux** archétypes.
   (flag « ident échappé » lexer — `o\u0066` doit être rejeté),
   `unresolvable` sloppy propagé (~3 fichiers `no-strict`),
   LHS `async function` en cible (`*-invalid`).
+- [x] **JS-C620 — destructuration par item dans `for await` :
+  protocole async + suspends LHS par itération — mesure
+  `for-await-of` 2 376 → 2 410/2 431 (+34, 21 échecs
+  catalogués)** (`interp/lazy.rs` + gate
+  `tests/c620_dstr.rs` **11/11**). **Frame `DstrAwait`** (spec
+  `AsyncIteratorBindingInitialization`) : les cibles `[…]` de
+  `for await` (déclaration `var`/`let`/`const` ou assignation)
+  itèrent désormais via `@@asyncIterator` avec repli
+  `AsyncFromSyncIterator` — un `next()` awaited par élément,
+  trou consommé, `...rest` drainé jusqu'à `done`, éléments
+  restants ← `undefined` sur `done` prématuré,
+  `AsyncIteratorClose` awaited en fin de motif si l'itérateur
+  n'est pas épuisé et sur abrupt de bind (`issued`/`done`
+  distinguent mécanique/corps, même convention que
+  `ForAwait`) — avant : `bind_pat` sync cherchait
+  `@@iterator` → `TypeError` sur itérables purement async
+  (`close-skip`/`rtrn-close`). **Suspend de motif LHS par
+  itération** (`lower_for_target_per_iter`) : une cible
+  `for-of`/`for-in`/`for await` porteuse de suspends devient
+  `var __gN` et le bind réel (`var/let pat = __gN` ou
+  `expr = __gN`) est injecté en tête de corps — les
+  `__gM = yield`/`await` hissés s'y suspendent à chaque tour
+  au lieu d'une fois avant la boucle (`[x = yield]`,
+  `{x: x = yield}`, `[{} = yield]`, `[...a[yield]]` —
+  `yield-expr` résorbé). **Cibles `Expr` motifs** : `for …
+  ([x]/{x} of y)` passait par `resolve_lvalue` → `None` →
+  jamais liées ; `write_lvalue` couvre la
+  destructuration-assignation (`expr_to_pat` + `bind_pat`
+  `Assign`). **Reste catalogué** : ordonnancement
+  `PromiseResolve` (`ticks-*` ×3 + `continuation` ×1),
+  `escaped-of` (flag lexer ×2), `unresolvable` sloppy (×3),
+  early-errors `yield`/motifs imbriqués en contexte
+  `async function` (`*-invalid` ×7), `rtrn-close-null` (×2),
+  `target-simple-strict` (×2). Gates : c620 11/11, c619 8/8,
+  c616 10/10, c611/c613/c615/c617/c335/c456/iter_lazy/
+  agen_queue/await_thenable/lazy_gen/t262_realm verts,
+  hostile 12/12 release, lib 54/54, clippy/fmt/doc propres.
