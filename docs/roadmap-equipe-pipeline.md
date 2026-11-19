@@ -4610,6 +4610,32 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   `counter()/counters()` nommés non résolus (canal
   `format_counter` sans registre — file NAV).
 
+- [x] **R-304 — `text-decoration` : expansion du shorthand +
+  précédence longhand** (`explorer-css`/`explorer-layout`/
+  `explorer-cli`, exécution du trou journalisé étape 302 —
+  `text-decoration-line` 0/5 → 3/5, `css.values`
+  1146→1149/1751). `expand_text_decoration` (value.rs,
+  patron `white-space`) éclate `<'-line'> || <'-thickness'>
+  || <'-style'> || <'-color'>` en longhands — le shorthand
+  resette les quatre (initiales `none`/`auto`/`solid`/
+  `currentcolor`), le nom verbatim est conservé (repli hors
+  grammaire, `var(…)`, consommateurs historiques) ; le dernier
+  écrit par longhand gagne — `text-decoration-line` n'est
+  plus masqué par le verbatim du shorthand (`text_deco` le
+  lit désormais en premier). Bonus : `thickness`/`color`/
+  `style` déclarés DANS le shorthand atteignent leurs
+  longhands (`underline 2px`, `underline red dashed` étaient
+  perdus). Côté jauge : ctx `text-decoration-line` vidé (le
+  ctx `underline` rendait `underline` inopérant par identité
+  et mesurait `blink` comme « retire le trait du ctx ») ;
+  littéraux style/couleur seuls du shorthand → `na` honnêtes
+  (règle `auto` : sans ligne rien ne peint — capacités déjà
+  mesurées par les familles longhand à 100 %). Restent des
+  misses honnêtes : `blink`/`grammar-error`/`spelling-error`
+  (non rendus — file PIPE). Verrous : `shorthand_text_
+  decoration`, `text_decoration_line_prime_sur_le_shorthand`
+  (values.rs ×2) + flip jauge vérifié par valeur.
+
 - [x] **R-305 — Harnais WPT : comptabilité honnête, auto-skip
   `flags`, `<link rel="stylesheet">`, comparaison viewport,
   corpus élargi counter-styles/css-lists** (tests render,

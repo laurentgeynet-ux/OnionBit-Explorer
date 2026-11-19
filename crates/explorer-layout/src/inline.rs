@@ -121,10 +121,14 @@ pub struct TextDeco {
 /// `text-decoration` de `st` → entrée résolue, `None` si
 /// absente/`none`. Mots inconnus tolérés (`blink`, styles et
 /// couleurs du shorthand Level 4 — ignorés, jamais d'échec).
+/// Le longhand `text-decoration-line` est lu d'abord : le
+/// shorthand s'expande en longhands depuis R-304, et le
+/// verbatim ne sert que de repli pour les valeurs hors
+/// grammaire (ex. `var(…)` non expansé).
 fn text_deco(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> Option<TextDeco> {
     let v = st
-        .get("text-decoration")
-        .or_else(|| st.get("text-decoration-line"))?;
+        .get("text-decoration-line")
+        .or_else(|| st.get("text-decoration"))?;
     let mut lines = 0u8;
     let mut style = DECO_SOLID;
     let style_of = |t: &str| match t {

@@ -1068,6 +1068,7 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             | "text-wrap" => "none",
             "font" => "medium serif",
             "-webkit-text-stroke" => "1px black",
+            "text-decoration" | "-webkit-text-decoration" | "-moz-text-decoration" => "underline",
             "list-style" => "disc",
             "place-items" | "place-content" | "place-self" => "center",
             _ => "",
@@ -1369,6 +1370,9 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
         // pliait sur `-webkit-text-stroke-width` et la couleur
         // partait dans la largeur.
         "-webkit-text-stroke" => Some(expand_webkit_text_stroke(value)),
+        "text-decoration" | "-webkit-text-decoration" | "-moz-text-decoration" => {
+            expand_text_decoration(value)
+        }
         "container" => expand_container(value),
         _ => None,
     }
@@ -1582,6 +1586,100 @@ fn expand_webkit_text_stroke(value: &str) -> Vec<(String, String)> {
         pos += tok.len() + 1;
     }
     out
+}
+
+/// `text-decoration` (css-text-decor-4 §2) : `<'text-
+/// decoration-line'> || <'text-decoration-thickness'> ||
+/// <'text-decoration-style'> || <'text-decoration-color'>` —
+/// le shorthand resette les quatre longhands (absents →
+/// initiales `none`/`auto`/`solid`/`currentcolor`) ; un
+/// longhand déclaré APRÈS l'emporte par ordre de cascade —
+/// avant, le verbatim stocké masquait `text-decoration-line`
+/// (`text_deco` lisait le shorthand d'abord, R-304). Le nom
+/// est gardé (comme `white-space`) : consommateurs
+/// historiques et valeurs hors grammaire (`var(…)` — slot
+/// indécidable) passent par le verbatim.
+fn expand_text_decoration(value: &str) -> Option<Vec<(String, String)>> {
+    let mut lines: Vec<&str> = Vec::new();
+    let mut thick = None;
+    let mut style = None;
+    let mut color = None;
+    let len_or_pct = |s: &str| {
+        parse_length(s).is_some()
+            || s.strip_suffix('%')
+                .is_some_and(|n| n.parse::<f64>().is_ok())
+    };
+    for tok in split_ws_top(value) {
+        let l = tok.to_ascii_lowercase();
+        match l.as_str() {
+            "none" => {
+                if !lines.is_empty() {
+                    return None; // `none` est exclusif
+                }
+                lines.push("none");
+            }
+            "underline" | "overline" | "line-through" | "blink" => {
+                if lines.first() == Some(&"none") {
+                    return None;
+                }
+                lines.push(tok);
+            }
+            "solid" | "double" | "dotted" | "dashed" | "wavy" => {
+                if style.replace(tok).is_some() {
+                    return None; // `||` = une occurrence par classe
+                }
+            }
+            "auto" | "from-font" => {
+                if thick.replace(tok).is_some() {
+                    return None;
+                }
+            }
+            _ => {
+                if l.contains("var(") {
+                    return None;
+                }
+                if len_or_pct(tok)
+                    || l.starts_with("calc(")
+                    || l.starts_with("min(")
+                    || l.starts_with("max(")
+                    || l.starts_with("clamp(")
+                {
+                    if thick.replace(tok).is_some() {
+                        return None;
+                    }
+                } else if color_like(tok) {
+                    if color.replace(tok).is_some() {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(vec![
+        ("text-decoration".to_string(), value.trim().to_string()),
+        (
+            "text-decoration-line".to_string(),
+            if lines.is_empty() {
+                "none".to_string()
+            } else {
+                lines.join(" ")
+            },
+        ),
+        (
+            "text-decoration-thickness".to_string(),
+            thick.unwrap_or("auto").to_string(),
+        ),
+        (
+            "text-decoration-style".to_string(),
+            style.unwrap_or("solid").to_string(),
+        ),
+        (
+            "text-decoration-color".to_string(),
+            color.unwrap_or("currentcolor").to_string(),
+        ),
+    ])
 }
 
 /// `columns` : `[<width>] [<count>]` ordre libre (CSS

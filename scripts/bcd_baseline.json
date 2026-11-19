@@ -6,7 +6,7 @@
     "css.at": 20,
     "js.builtins": 648,
     "api": 3501,
-    "css.values": 1146,
+    "css.values": 1149,
     "html.elem": 119,
     "css.atd": 39
   },
@@ -319,7 +319,7 @@
       "text-combine-upright": 0,
       "text-decoration": 5,
       "text-decoration-color": 1,
-      "text-decoration-line": 0,
+      "text-decoration-line": 3,
       "text-decoration-skip-ink": 1,
       "text-decoration-skip-spaces": 3,
       "text-decoration-style": 4,

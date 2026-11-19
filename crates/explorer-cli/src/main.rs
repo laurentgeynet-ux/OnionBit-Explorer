@@ -1412,10 +1412,20 @@ fn context_css(name: &str) -> &'static str {
         // les trois aires coïncident → `clip`/`origin` inertes).
         "background-image:linear-gradient(red,blue);border:10px solid black;padding:10px;width:100px;height:80px"
     } else if n.starts_with("text-decoration-") || n.starts_with("text-underline-") {
-        // `text-decoration-color`/`-line`/`-style`/`-thickness`,
+        // `text-decoration-color`/`-style`/`-thickness`,
         // `text-underline-position`/`-offset` n'ont d'effet
-        // qu'avec un trait posé.
-        "text-decoration:underline"
+        // qu'avec un trait posé. `text-decoration-line` pose
+        // le trait **lui-même** : un ctx `underline` rendait
+        // `underline` inopérant par identité (étape 302) et
+        // mesurait `blink`/`grammar-error` comme « retire le
+        // trait du ctx » — avec un ctx vide chaque valeur
+        // montre son trait propre (blink sans rendu = miss
+        // honnête, R-304).
+        if n == "text-decoration-line" {
+            ""
+        } else {
+            "text-decoration:underline"
+        }
     } else if n.starts_with("outline") {
         "outline:2px solid black;width:100px;height:80px"
     } else if n.starts_with("corner") {
@@ -2367,6 +2377,22 @@ const INITIAL_EXTRA: &[(&str, &str)] = &[
     // `text-decoration:<style|color>` seul ne pose aucune
     // ligne → rien ne peint.
     ("background-size", "contain"),
+    // R-304 — même règle étendue aux autres littéraux
+    // style/couleur/épaisseur du shorthand (sous-features
+    // BCD) : `text-decoration:dashed` seul = `line:none`
+    // style `dashed` → aucune marque ne peut exister, inerte
+    // par construction. La capacité du mot-clé est mesurée
+    // sous les familles longhand (`text-decoration-style`
+    // 4/4, `-color` 1/1, `-thickness` 1/1) — restent `miss`
+    // les mots de ligne non rendus (`blink`, `grammar-
+    // error`, `spelling-error` — vrais trous moteur).
+    ("text-decoration", "dashed"),
+    ("text-decoration", "dotted"),
+    ("text-decoration", "double"),
+    ("text-decoration", "solid"),
+    ("text-decoration", "wavy"),
+    ("text-decoration", "currentColor"),
+    ("text-decoration", "transparent"),
     ("clip-path", "none"),
     ("clip-path", "border-box"),
     ("clip-path", "view-box"),

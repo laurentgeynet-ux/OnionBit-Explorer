@@ -136,6 +136,32 @@ fn shorthand_font_et_overflow() {
     );
 }
 
+#[test]
+fn shorthand_text_decoration() {
+    // Ligne seule → les trois autres longhands à l'initiale
+    // (le shorthand resette toute la famille, css-text-
+    // decor-4 §2) ; le nom verbatim est conservé.
+    let e = expand_shorthand("text-decoration", "underline").unwrap();
+    assert!(e.contains(&("text-decoration".into(), "underline".into())));
+    assert!(e.contains(&("text-decoration-line".into(), "underline".into())));
+    assert!(e.contains(&("text-decoration-style".into(), "solid".into())));
+    assert!(e.contains(&("text-decoration-color".into(), "currentcolor".into())));
+    assert!(e.contains(&("text-decoration-thickness".into(), "auto".into())));
+    // Ordre libre, quatre classes.
+    let e = expand_shorthand("text-decoration", "underline red dashed").unwrap();
+    assert!(e.contains(&("text-decoration-line".into(), "underline".into())));
+    assert!(e.contains(&("text-decoration-style".into(), "dashed".into())));
+    assert!(e.contains(&("text-decoration-color".into(), "red".into())));
+    let e = expand_shorthand("text-decoration", "2px underline").unwrap();
+    assert!(e.contains(&("text-decoration-thickness".into(), "2px".into())));
+    // Multi-lignes + `none` exclusif ; doublons de classe →
+    // passthrough verbatim.
+    let e = expand_shorthand("text-decoration", "underline overline").unwrap();
+    assert!(e.contains(&("text-decoration-line".into(), "underline overline".into())));
+    assert!(expand_shorthand("text-decoration", "underline none").is_none());
+    assert!(expand_shorthand("text-decoration", "dotted wavy").is_none());
+}
+
 // ── cascade + shorthands + valeurs typées ────────────────────
 
 fn fixture() -> (Dom, NodeId) {
@@ -167,6 +193,30 @@ fn shorthand_en_cascade() {
         e.compute(&dom, div, &StyleEnv::default()).get("margin-top"),
         Some("9px")
     );
+}
+
+#[test]
+fn text_decoration_line_prime_sur_le_shorthand() {
+    // R-304 — le verbatim du shorthand ne masque plus un
+    // `text-decoration-line` déclaré après : l'expansion fait
+    // gagner le dernier écrit par longhand (ordre de cascade).
+    let (dom, div) = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { text-decoration: underline; text-decoration-line: line-through }",
+        Origin::Author,
+    );
+    let s = e.compute(&dom, div, &StyleEnv::default());
+    assert_eq!(s.get("text-decoration-line"), Some("line-through"));
+    // Symétrique : un shorthand déclaré après resette le
+    // longhand (initiale incluse).
+    let mut e2 = StyleEngine::new();
+    e2.add_css(
+        "div { text-decoration-line: line-through; text-decoration: overline }",
+        Origin::Author,
+    );
+    let s2 = e2.compute(&dom, div, &StyleEnv::default());
+    assert_eq!(s2.get("text-decoration-line"), Some("overline"));
 }
 
 #[test]
