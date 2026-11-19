@@ -15447,6 +15447,53 @@ chaque gain rapporté contre les **deux** archétypes.
   10/10, c611/c613/c615/c617/c96/c348/c456/c458/iter_lazy/
   lazy_gen verts, hostile 12/12 release, lib 54/54,
   clippy/fmt/doc propres.
+- [x] **JS-C627 — `for-of` synchrone spec : record itérateur,
+  `IteratorClose` sans masquage, itérateurs vivants
+  array/map/set/TA/`arguments`, TDZ de tête, early errors,
+  complétion `UpdateEmpty` — sous-ensemble `statements/for-of`
+  soldé à 347/347 passes-mode (182 fichiers, 248 → 347
+  passes, 99 → 0 échec)** (`interp/{exec,mod,eval}.rs`,
+  `collections.rs`, `builtins/object.rs`, `heap.rs`,
+  `parser.rs`, `module.rs`, `typed_array.rs`,
+  `builtins/extras.rs` + gate `tests/c627_forof.rs` **7/7**).
+  **Record `GetIterator`** : `next` capturé **une fois** au
+  prologue (`iterator-next-reference`) ; abrupts de
+  `next`/`done`/`value` propagés **sans** close ; résultat
+  non-objet → `TypeError` (symboles = primitives spec via
+  `is_spec_object`). **`IteratorClose`** : `break`/`return`/
+  `continue` externe closent ; throw du corps conservée si
+  `return()` échoue ; `return()` non-objet → `TypeError` sur
+  complétion normale. **`ObjKind::LiveIter`** (remplace les
+  snapshots `Iter{items}` pour array/map/set/TA/arguments) :
+  `length`/`ToLength` relus par pas, `[[Get]]` réel par index
+  (getters et `args_map` observables), `IsTypedArrayOutOfBounds`
+  → `TypeError` sur RAB rétréci, curseurs map/set vivants ;
+  `arguments[i]=v` n'étend plus `length` (`Arr::set_keep_len`).
+  **Early errors** : `for (x of [], [])` → `SyntaxError` (RHS
+  `of` = `AssignmentExpression`) ; lookahead littéral
+  `async of` interdit — `\u0061sync`/`(async)` restent légaux
+  (check au niveau token). **TDZ de tête** : `Env::block_tdz` +
+  `tdz_hit` → `ReferenceError` sur lecture/écriture/`typeof`
+  avant init ; les noms sont déclarés `Uninit` **directement
+  depuis le motif** (`env_put_uninit`) — `names_table` clé par
+  pointeur d'AST rate quand le corps async est ré-écrit par le
+  lowering (fix porté à `for-in` aussi). **Accessseur sur index
+  d'array** : `defineProperty(arr, i, {get})` légal — prop dans
+  `props` (bit 8 de `elem_integrity`, lookup prioritaire),
+  `length` étendu à `i+1` spec (`array-key-get-error`).
+  **`for (await using x of y)`** parsé (itération synchrone,
+  `@@asyncDispose`) ; `using` en tête autorisé top-level script
+  (libération par itération). **Modules** : une faute de parse
+  instanciée remonte `Error::Syntax` reconnu par `ObjId`
+  (`module_syntax`) — tous les négatifs `phase:parse` en mode
+  Module étaient systématiquement `Uncaught`. Complétion :
+  `V = undefined` par boucle (`cptn-*`). Mesures : corpus
+  extrait 6 174 → **6 275/6 279** (+101 ; le fix module a
+  résorbé des négatifs hors `for-of`), 4 résidus catalogués
+  (`labeled/static-init-invalid-await`, `types/reference/
+  get-value-prop-base-primitive-realm`), aucune régression.
+  Gates : c627 7/7, c616-c626/agen_queue/await_thenable verts,
+  hostile 12/12 release, lib 54/54, clippy/fmt/doc propres.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

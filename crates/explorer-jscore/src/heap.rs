@@ -469,6 +469,9 @@ impl Heap {
                 }
                 push_value(out, ret);
             }
+            ObjKind::LiveIter { target, .. } => {
+                push_value(out, target);
+            }
             ObjKind::IterHelper(st) => {
                 push_value(out, &st.source);
                 push_value(out, &st.next);
@@ -955,8 +958,9 @@ fn cell_bytes(data: &CellData) -> usize {
                     // Partagés/opaques : `Fun::Script` (`Rc<FnLit>`
                     // mutualisé — compter le corps par instance
                     // doublerait), `Host`, `RegExp`, `Temp`,
-                    // `WeakRef`, `Proxy`, vues (`DataView`/
-                    // `TypedArray` — le `ByteBuf` porte le coût).
+                    // `WeakRef`, `Proxy`, `LiveIter` (état
+                    // scalaire), vues (`DataView`/`TypedArray` —
+                    // le `ByteBuf` porte le coût).
                     _ => 0,
                 }
         }
@@ -1171,7 +1175,11 @@ pub struct Object {
     /// Intégrité des *éléments* de tableau (spec
     /// `SetIntegrityLevel`), en bits : `1` = sealed (éléments
     /// non-configurables), `2` = frozen (non-writable aussi),
-    /// `4` = `length` non-writable. Sans effet hors `ObjKind::Array`.
+    /// `4` = `length` non-writable, `8` = un **accesseur posé
+    /// par `defineProperty` sur un index** vit dans `props` et
+    /// ombre les éléments aux lookups (JS-C627 — les index d'un
+    /// `ObjKind::Array` court-circuitent `props` sans ce flag).
+    /// Sans effet hors `ObjKind::Array`.
     pub elem_integrity: u8,
     /// JS-C510 — compteur d'arming de `idx` : scans linéaires de
     /// [`Object::prop_pos`] subis par un objet **sous**
@@ -1369,6 +1377,17 @@ impl Arr {
                 .insert(i, v);
         }
         self.len = self.len.max(i.saturating_add(1));
+    }
+
+    /// `arguments[i] = v` (JS-C627) : `arguments` n'est pas un
+    /// exotique array — écrire `arguments[len]` crée la prop
+    /// sans étendre `length` (`ArraySetLength` ne s'applique
+    /// pas — `arguments-mutation` : `args[3] = NaN` puis
+    /// l'itérateur lit `length` inchangée `3`).
+    pub fn set_keep_len(&mut self, i: u32, v: Value) {
+        let keep = self.len;
+        self.set(i, v);
+        self.len = keep;
     }
 
     /// `ArraySetLength` : `n > dense.len()` ne stocke rien ;
@@ -1599,6 +1618,25 @@ pub enum ObjKind {
         /// Terminal value — `{value, done:true}` after exhaustion
         /// (generator `return v`; `Undefined` for plain iterators).
         ret: Value,
+    },
+    /// Itérateur **live** sur collection (JS-C627 — spec
+    /// `CreateArrayIterator`/`%MapIteratorPrototype%`/
+    /// `%SetIteratorPrototype%`/`%TypedArray%.values`) : la
+    /// cible est relue à chaque `next()` — `length` recalculée,
+    /// `[[Get]]` réel par index (getters observés, `args_map`
+    /// honoré), ajouts/suppressions pendant l'itération visibles
+    /// (curseur par position dans le Vec d'insertion — déviation
+    /// résiduelle : retirer un élément **déjà visité** décale le
+    /// curseur, l'élément suivant peut être sauté).
+    LiveIter {
+        /// Collection cible (Array, array-like/`arguments`,
+        /// Map, Set, `TypedArray`).
+        target: Value,
+        /// Index du prochain pas (incrémenté avant la lecture,
+        /// spec `[[ArrayIteratorNextIndex]]`).
+        idx: u32,
+        /// Famille (values/keys/entries × collection).
+        kind: LiveIterKind,
     },
     /// Helper itérateur **paresseux** (spec
     /// `%IteratorHelperPrototype%` — `map`/`filter`/`take`/
@@ -2695,6 +2733,38 @@ pub struct IterHelperState {
     pub op: IterOp,
 }
 
+/// Famille d'un [`ObjKind::LiveIter`] (JS-C627) — la sémantique
+/// de `next()` dépend de la collection cible et du triplet
+/// values/keys/entries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LiveIterKind {
+    /// `Array.prototype.values` / `@@iterator` — `[[Get]]` de
+    /// l'index, `length` relue à chaque pas (array-likes et
+    /// `arguments` inclus).
+    ArrValues,
+    /// `Array.prototype.keys`.
+    ArrKeys,
+    /// `Array.prototype.entries` — `[i, v]`.
+    ArrEntries,
+    /// `Map.prototype.values`.
+    MapValues,
+    /// `Map.prototype.keys`.
+    MapKeys,
+    /// `Map.prototype.entries` / `@@iterator` — `[k, v]` lu live.
+    MapEntries,
+    /// `Set.prototype.values`/`keys` / `@@iterator`.
+    SetValues,
+    /// `Set.prototype.entries` — `[v, v]`.
+    SetEntries,
+    /// `%TypedArray%.prototype.values`/`@@iterator` — longueur
+    /// vivante (`ta_live_len`), OOB → `TypeError`.
+    TaValues,
+    /// `%TypedArray%.prototype.keys`.
+    TaKeys,
+    /// `%TypedArray%.prototype.entries` — `[i, v]`.
+    TaEntries,
+}
+
 /// Opération d'un [`IterHelperState`].
 pub enum IterOp {
     /// `map(f)` — `f(v, i)` transforme chaque valeur.
@@ -2794,7 +2864,7 @@ fn cell_kind_name(d: &CellData) -> &'static str {
             ObjKind::Promise(_) => "Promise",
             ObjKind::Map(_) => "Map",
             ObjKind::Set(_) => "Set",
-            ObjKind::Iter { .. } => "Iter",
+            ObjKind::Iter { .. } | ObjKind::LiveIter { .. } => "Iter",
             ObjKind::IterHelper(_) => "IterHelper",
             ObjKind::GenLive { .. } => "GenLive",
             ObjKind::Temp(_) => "Temp",
@@ -2824,6 +2894,11 @@ pub struct Env {
     pub kind: EnvKind,
     /// Enclosing scope.
     pub parent: Option<EnvRef>,
+    /// JS-C627 — env TDZ dédié (tête de `for (let … of …)` etc.) :
+    /// lire/écrire une cellule `Uninit` lève `ReferenceError` au
+    /// lieu de remonter au parent. `false` partout ailleurs —
+    /// le comportement historique « Uninit = absent » reste.
+    pub tdz: bool,
 }
 
 /// Storage flavour of an [`Env`].
@@ -3409,6 +3484,7 @@ impl Env {
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Local(Bindings::new(std::panic::Location::caller())),
             parent: Some(parent),
+            tdz: false,
         }))
     }
 
@@ -3420,6 +3496,7 @@ impl Env {
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Global(Bindings::new(std::panic::Location::caller())),
             parent: None,
+            tdz: false,
         }))
     }
 
@@ -3432,7 +3509,19 @@ impl Env {
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Block(Bindings::new(std::panic::Location::caller())),
             parent: Some(parent),
+            tdz: false,
         }))
+    }
+
+    /// `block` marqué TDZ (JS-C627) — les cellules `Uninit`
+    /// lèvent `ReferenceError` en lecture/écriture au lieu de
+    /// remonter au parent (tête `for (let x of …)` spec
+    /// `ForIn/OfHeadEvaluation`).
+    #[track_caller]
+    pub fn block_tdz(parent: EnvRef) -> EnvRef {
+        let e = Self::block(parent);
+        e.borrow_mut().tdz = true;
+        e
     }
 
     /// `with (obj)` — object-as-scope chained to `parent`.
@@ -3442,6 +3531,7 @@ impl Env {
         Rc::new(RefCell::new(Env {
             kind: EnvKind::With(obj),
             parent: Some(parent),
+            tdz: false,
         }))
     }
 }

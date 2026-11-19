@@ -26,22 +26,6 @@ fn svz(h: &crate::heap::Heap, a: &Value, b: &Value) -> bool {
         || matches!((a, b), (Value::Num(x), Value::Num(y)) if x.is_nan() && y.is_nan())
 }
 
-/// Snapshot des entrées d'une `Map` — clone du Vec backing
-/// (sémantique d'itérateur gelé, déviation documentée). Gardé
-/// sur la taille totale : le clone commet `len×16` en UNE alloc
-/// (§B-59 — un `keys()`/`entries()`/`forEach` sur Map géante).
-fn map_entries(e: &mut Engine, id: ObjId) -> JsResult<Vec<(Value, Value)>> {
-    let len = e.heap.obj(id).map_or(0, |o| match &o.kind {
-        ObjKind::Map(m) => m.len(),
-        _ => 0,
-    });
-    e.alloc_guard(len.saturating_mul(std::mem::size_of::<(Value, Value)>()))?;
-    Ok(match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Map(m)) => m.clone(),
-        _ => Vec::new(),
-    })
-}
-
 fn set_items(e: &mut Engine, id: ObjId) -> JsResult<Vec<Value>> {
     let len = e.heap.obj(id).map_or(0, |o| match &o.kind {
         ObjKind::Set(s) => s.len(),
@@ -90,9 +74,35 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>, proto: ObjId) -> Value
     }))
 }
 
-// ------------------------------------------------------------------
-// ctors
-// ------------------------------------------------------------------
+/// Itérateur **live** sur collection (JS-C627 — spec
+/// `CreateArrayIterator`) : `next()` relit `length` et fait un
+/// `[[Get]]` par index à chaque pas — ajouts/retraits/mutations
+/// pendant l'itération observés (`array-expand`/`contract`,
+/// `*-mutate`, resizable buffers). `proto` comme [`iter_obj`].
+pub(crate) fn live_iter_obj(
+    e: &mut Engine,
+    target: Value,
+    kind: crate::heap::LiveIterKind,
+    proto: ObjId,
+) -> Value {
+    let proto = Value::Obj(proto);
+    Value::Obj(e.heap.alloc_obj(Object {
+        proto,
+        props: Vec::new(),
+        idx: std::cell::OnceCell::new(),
+        shape: std::cell::Cell::new(0),
+        kind: ObjKind::LiveIter {
+            target,
+            idx: 0,
+            kind,
+        },
+        extensible: true,
+        elem_integrity: 0,
+        lookups: std::cell::Cell::new(0),
+        flags: std::cell::Cell::new(0),
+        args_map: None,
+    }))
+}
 
 fn map_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     map_new(e, args, e.protos.map)
@@ -392,29 +402,34 @@ fn coll_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 }
 
 fn map_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let items: Vec<Value> = map_entries(e, c_id(this))?
-        .into_iter()
-        .map(|(k, _)| k)
-        .collect();
-    Ok(iter_obj(e, items, e.protos.map_iter))
+    c_id(this.clone());
+    Ok(live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::MapKeys,
+        e.protos.map_iter,
+    ))
 }
 
 fn map_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let items: Vec<Value> = map_entries(e, c_id(this))?
-        .into_iter()
-        .map(|(_, v)| v)
-        .collect();
-    Ok(iter_obj(e, items, e.protos.map_iter))
+    c_id(this.clone());
+    Ok(live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::MapValues,
+        e.protos.map_iter,
+    ))
 }
 
-/// `map.entries()` — iterator of `[k, v]` arrays.
+/// `map.entries()` — live iterator of `[k, v]` pairs (JS-C627).
 fn map_iter_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let pairs = map_entries(e, c_id(this))?;
-    let mut items = Vec::with_capacity(pairs.len());
-    for (k, v) in pairs {
-        items.push(e.new_array(vec![k, v]));
-    }
-    Ok(iter_obj(e, items, e.protos.map_iter))
+    c_id(this.clone());
+    Ok(live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::MapEntries,
+        e.protos.map_iter,
+    ))
 }
 
 // ------------------------------------------------------------------
@@ -480,19 +495,27 @@ fn set_size(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Num(n as f64))
 }
 
-/// `set.values()`/`keys()`/`entries()` + `[Symbol.iterator]`.
+/// `set.values()`/`keys()`/`entries()` + `[Symbol.iterator]` —
+/// live cursor (JS-C627) : ajouts/retraits pendant l'itération
+/// observés.
 fn set_values_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let items = set_items(e, c_id(this))?;
-    Ok(iter_obj(e, items, e.protos.set_iter))
+    c_id(this.clone());
+    Ok(live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::SetValues,
+        e.protos.set_iter,
+    ))
 }
 
 fn set_entries_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let items = set_items(e, c_id(this))?;
-    let mut out = Vec::with_capacity(items.len());
-    for v in items {
-        out.push(e.new_array(vec![v.clone(), v]));
-    }
-    Ok(iter_obj(e, out, e.protos.set_iter))
+    c_id(this.clone());
+    Ok(live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::SetEntries,
+        e.protos.set_iter,
+    ))
 }
 
 // -- ES2025 Set composition ------------------------------------------------
@@ -617,6 +640,29 @@ pub(crate) fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Va
     ) {
         return it_helper_next(e, id);
     }
+    // `LiveIter` (JS-C627) — `(target, idx, kind)` extraits sous
+    // emprunt court, `idx` incrémenté **avant** la lecture (spec
+    // `[[ArrayIteratorNextIndex]]`), puis lecture live de la
+    // collection hors emprunt (un getter peut ré-entrer — le pas
+    // est déjà consommé).
+    let live = {
+        let Some(o) = e.heap.obj_mut(id) else {
+            return Err(e.type_error("next on non-iterator"));
+        };
+        match &mut o.kind {
+            ObjKind::LiveIter { target, idx, kind } => {
+                let t = target.clone();
+                let i = *idx;
+                let k = *kind;
+                *idx = idx.saturating_add(1);
+                Some((t, i as usize, k))
+            }
+            _ => None,
+        }
+    };
+    if let Some((t, i, k)) = live {
+        return live_iter_step(e, t, i, k);
+    }
     let (item, ret) = {
         let Some(o) = e.heap.obj_mut(id) else {
             return Err(e.type_error("next on non-iterator"));
@@ -638,7 +684,190 @@ pub(crate) fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Va
     Ok(iter_result(e, item.unwrap_or(ret), done))
 }
 
-/// Iterator proto's `[Symbol.iterator]` returns `this` —
+/// One `next()` step of an [`ObjKind::LiveIter`] (JS-C627) —
+/// runs outside any heap borrow so `Get` on the target can
+/// re-enter the engine. Reads the collection **live**: `length`
+/// and the element at `idx` are resolved at call time, so
+/// growth, shrinkage and mutations during `for-of` are observed
+/// exactly as the spec iterators expose them.
+fn live_iter_step(
+    e: &mut Engine,
+    target: Value,
+    i: usize,
+    kind: crate::heap::LiveIterKind,
+) -> JsResult<Value> {
+    use crate::heap::LiveIterKind as K;
+    match kind {
+        K::ArrKeys | K::ArrValues | K::ArrEntries => {
+            // `LengthOfArrayLike` per spec — live `Get("length")`
+            // + `ToLength`, so mid-iteration push/pop/length
+            // writes on arrays, array-likes and `arguments` are
+            // all observed.
+            let len = live_array_like_len(e, &target)?;
+            if i >= len {
+                return Ok(iter_result(e, Value::Undefined, true));
+            }
+            if kind == K::ArrKeys {
+                return Ok(iter_result(e, Value::Num(i as f64), false));
+            }
+            // Real `[[Get]]` — index getters and `args_map`
+            // aliasing on `arguments` are observable.
+            let v = e.get_prop_value(target, &i.to_string())?;
+            if kind == K::ArrEntries {
+                let pair = e.new_array(vec![Value::Num(i as f64), v]);
+                Ok(iter_result(e, pair, false))
+            } else {
+                Ok(iter_result(e, v, false))
+            }
+        }
+        K::TaKeys | K::TaValues | K::TaEntries => {
+            let Value::Obj(tid) = target else {
+                return Err(e.type_error("next on non-iterator"));
+            };
+            let (ta, buffer, offset, len, auto) = match e.heap.obj(tid) {
+                Some(o) => match &o.kind {
+                    ObjKind::TypedArray {
+                        ta,
+                        buffer,
+                        offset,
+                        len,
+                        auto,
+                    } => (*ta, buffer.clone(), *offset, *len, *auto),
+                    _ => return Err(e.type_error("next on non-iterator")),
+                },
+                None => return Err(e.type_error("next on non-iterator")),
+            };
+            // `IsTypedArrayOutOfBounds` (spec) — detached or
+            // shrunken past the declared view is a `TypeError`,
+            // not a silent `done` (resizable-buffer tests).
+            let buf_len = match &buffer {
+                Value::Obj(bid) => match e.heap.obj(*bid) {
+                    Some(b) => match &b.kind {
+                        ObjKind::ByteBuf(bytes) => bytes.len(),
+                        _ => 0,
+                    },
+                    None => 0,
+                },
+                _ => 0,
+            };
+            let oob = if auto {
+                offset > buf_len
+            } else {
+                offset + len.saturating_mul(ta.size()) > buf_len
+            };
+            if oob {
+                return Err(e.type_error("typed array out of bounds"));
+            }
+            let live_len = crate::interp::ops::ta_live_len(&e.heap, ta, &buffer, offset, len, auto);
+            if i >= live_len {
+                return Ok(iter_result(e, Value::Undefined, true));
+            }
+            if kind == K::TaKeys {
+                return Ok(iter_result(e, Value::Num(i as f64), false));
+            }
+            let v = ta_element_at(e, ta, &buffer, offset, i)
+                .ok_or_else(|| e.type_error("typed array out of bounds"))?;
+            if kind == K::TaEntries {
+                let pair = e.new_array(vec![Value::Num(i as f64), v]);
+                Ok(iter_result(e, pair, false))
+            } else {
+                Ok(iter_result(e, v, false))
+            }
+        }
+        K::MapKeys | K::MapValues | K::MapEntries => {
+            let Value::Obj(tid) = target else {
+                return Err(e.type_error("next on non-iterator"));
+            };
+            let (k, v) = match e.heap.obj(tid) {
+                Some(o) => match &o.kind {
+                    ObjKind::Map(entries) => match entries.get(i) {
+                        Some((k, v)) => (k.clone(), v.clone()),
+                        None => {
+                            return Ok(iter_result(e, Value::Undefined, true));
+                        }
+                    },
+                    _ => return Err(e.type_error("next on non-iterator")),
+                },
+                None => return Err(e.type_error("next on non-iterator")),
+            };
+            match kind {
+                K::MapKeys => Ok(iter_result(e, k, false)),
+                K::MapValues => Ok(iter_result(e, v, false)),
+                _ => {
+                    let pair = e.new_array(vec![k, v]);
+                    Ok(iter_result(e, pair, false))
+                }
+            }
+        }
+        K::SetValues | K::SetEntries => {
+            let Value::Obj(tid) = target else {
+                return Err(e.type_error("next on non-iterator"));
+            };
+            let v = match e.heap.obj(tid) {
+                Some(o) => match &o.kind {
+                    ObjKind::Set(items) => match items.get(i) {
+                        Some(v) => v.clone(),
+                        None => {
+                            return Ok(iter_result(e, Value::Undefined, true));
+                        }
+                    },
+                    _ => return Err(e.type_error("next on non-iterator")),
+                },
+                None => return Err(e.type_error("next on non-iterator")),
+            };
+            if kind == K::SetEntries {
+                let pair = e.new_array(vec![v.clone(), v]);
+                Ok(iter_result(e, pair, false))
+            } else {
+                Ok(iter_result(e, v, false))
+            }
+        }
+    }
+}
+
+/// `LengthOfArrayLike` — `Get(O, "length")` + `ToLength`, live
+/// per call. `ObjKind::Array` uses its structural `len` (matches
+/// the `length` prop); everything else (array-likes, `arguments`,
+/// objects with a `length` prop) goes through a real `Get` so
+/// overrides are honoured. Non-Array targets without a usable
+/// `length` iterate to zero — same as the spec's `ToLength(0)`.
+fn live_array_like_len(e: &mut Engine, target: &Value) -> JsResult<usize> {
+    if let Value::Obj(tid) = target {
+        if let Some(ObjKind::Array(a)) = e.heap.obj(*tid).map(|o| &o.kind) {
+            return Ok(a.len() as usize);
+        }
+    }
+    let raw = e.get_prop_value(target.clone(), "length")?;
+    let n = e.to_number(raw)?;
+    if n.is_nan() || n <= 0.0 {
+        return Ok(0);
+    }
+    Ok(n.min(9_007_199_254_740_991.0) as usize)
+}
+
+/// Single live element read from a `TypedArray` view — the live
+/// analogue of [`Engine::ta_elements`] for one index.
+fn ta_element_at(
+    e: &mut Engine,
+    ta: crate::heap::TaKind,
+    buffer: &Value,
+    offset: usize,
+    i: usize,
+) -> Option<Value> {
+    let Value::Obj(bid) = buffer else { return None };
+    let ObjKind::ByteBuf(bytes) = &e.heap.obj(*bid)?.kind else {
+        return None;
+    };
+    if ta.is_big() {
+        let start = offset + i * ta.size();
+        let region = bytes.get(start..start + ta.size())?;
+        Some(e.big_val(ta.get_big(region, 0)))
+    } else {
+        let start = offset + i * ta.size();
+        let region = bytes.get(start..start + ta.size())?;
+        Some(Value::Num(ta.get(region, 0)))
+    }
+}
 /// sert aussi `[Symbol.asyncIterator]` de
 /// `%AsyncIteratorPrototype%` (JS-C601 : `this` nu dans les
 /// deux cas).

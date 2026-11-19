@@ -803,6 +803,13 @@ pub struct Engine {
     /// publics convertissent en `Error::Deadline` (→ `JsError::
     /// Timeout` côté adaptateur → disjoncteur moteur figé).
     pub(crate) deadline_hit: bool,
+    /// JS-C627 — `(ObjId de l'objet SyntaxError, line, col, msg)`
+    /// de la dernière faute de **parse module** instanciée par
+    /// [`crate::module`] : `eval_module` reconnaît le `Thrown`
+    /// par identité et remonte `Error::Syntax` (un
+    /// `throw new SyntaxError` ordinaire reste `Uncaught` —
+    /// distinction des négatifs `phase:parse` du harnais).
+    pub(crate) module_syntax: Option<(u32, usize, usize, String)>,
     /// Host-side timer queue (JS-3) — pumped by the embedder's event
     /// loop via [`Engine::run_due_timers`].
     pub(crate) timers: crate::timers::TimerQueue,
@@ -1118,6 +1125,13 @@ pub struct Engine {
     /// `EXPLORER_NO_SLOTS=1` — coupe pré-déclare + fast-path
     /// slot (A/B en vol, précédent `resolve_off`).
     pub(crate) slots_off: bool,
+    /// JS-C627 — nom dont la lecture a buté sur une cellule
+    /// `Uninit` dans un env `tdz` (`Env::block_tdz`) : le
+    /// lookups renvoie `None` et le site d'évaluation traduit
+    /// en `ReferenceError` (« before initialization ») au lieu
+    /// de « not defined » — `typeof` sur liaison TDZ jette aussi
+    /// (spec `GetValue` → `typeof` non absorbé).
+    pub(crate) tdz_hit: Option<std::rc::Rc<str>>,
     /// `FnLit` déjà résolus, indexés par `Rc::as_ptr` — dédup
     /// par corps + gardien AST + clés contribuées. JS-C537 :
     /// éviction **par lit** (FIFO `resolved_fifo`) au cap au
@@ -1762,6 +1776,7 @@ impl Engine {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_BOOT_GRACE_MS),
             deadline_hit: false,
+            module_syntax: None,
             gc_threshold: DEFAULT_GC_THRESHOLD,
             ops_total: 0,
             last_parse_us: 0,
@@ -1854,6 +1869,7 @@ impl Engine {
             resolved_map: FastMap::default(),
             names_table: FastMap::default(),
             slots_off: std::env::var("EXPLORER_NO_SLOTS").is_ok_and(|v| v == "1"),
+            tdz_hit: None,
             resolved_guard: FastMap::default(),
             resolved_fifo: std::collections::VecDeque::new(),
             resolved_envs: FastMap::default(),
@@ -7064,7 +7080,19 @@ impl Engine {
                             Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
                             // JS-C502 — `Uninit` = absent : la
                             // lecture remonte (no TDZ préservé).
-                            Some(EnvCell::Uninit) | None => Next::Up(b.parent.clone()),
+                            // JS-C627 — sauf dans un env `tdz`
+                            // (tête `for (let x of …)`) : la
+                            // lecture arrête la marche et signale
+                            // `tdz_hit` → `ReferenceError` au
+                            // site d'évaluation.
+                            Some(EnvCell::Uninit) => {
+                                if b.tdz {
+                                    self.tdz_hit = Some(name.into());
+                                    return None;
+                                }
+                                Next::Up(b.parent.clone())
+                            }
+                            None => Next::Up(b.parent.clone()),
                         }),
                     ),
                     EnvKind::Global(m) => match m.get(name) {
@@ -7309,6 +7337,17 @@ impl Engine {
                     }
                     EnvKind::Global(m) if m.has_live(name) => Act::Local(e.clone()),
                     EnvKind::Global(_) => Act::Global,
+                    // JS-C627 — écriture sur cellule `Uninit`
+                    // d'un env `tdz` : `ReferenceError` (spec —
+                    // assignation avant initialisation), pas de
+                    // remontée au parent.
+                    EnvKind::Local(m) | EnvKind::Block(m)
+                        if b.tdz && matches!(m.get(name), Some(EnvCell::Uninit)) =>
+                    {
+                        return Err(
+                            self.ref_error(format!("cannot access `{name}` before initialization"))
+                        );
+                    }
                     // `With` déjà géré au-dessus — repli défensif
                     // identique à `Local` sans la clé.
                     EnvKind::Local(_) | EnvKind::Block(_) | EnvKind::With(_) => {
@@ -7485,6 +7524,28 @@ impl Engine {
         };
         if let Some(p) = parent {
             Self::env_put(&p, name, v, mutable);
+        }
+    }
+
+    /// Cellule `Uninit` directe (JS-C627) — la TDZ de tête
+    /// `for-in`/`for-of` déclare les noms du motif **sans passer
+    /// par `names_table`** : la table est clé par pointeur d'AST
+    /// et rate quand le corps a été ré-écrit par le lowering
+    /// async (le `Stmt` exécuté n'est plus le nœud résolu).
+    /// Idempotent sur un slot déjà câblé `Uninit`.
+    pub(crate) fn env_put_uninit(env: &EnvRef, name: &str) {
+        let parent = {
+            let mut b = env.borrow_mut();
+            match &mut b.kind {
+                EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
+                    m.insert(Self::intern(name), EnvCell::Uninit);
+                    return;
+                }
+                EnvKind::With(_) => b.parent.clone(),
+            }
+        };
+        if let Some(p) = parent {
+            Self::env_put_uninit(&p, name);
         }
     }
 
@@ -7687,7 +7748,7 @@ impl Engine {
                 // Initialization`). La voie eager `iter_values`
                 // reste pour les valeurs sans itérateur
                 // observable (scalars — même erreur `TypeError`).
-                if let Some(it) = self.forof_iterator(v.clone())? {
+                if let Some((it, _next)) = self.forof_iterator(v.clone())? {
                     return self.bind_pat_array_iter(env, this, elems, it, mode);
                 }
                 let items = self.iter_values(v)?;
@@ -8521,6 +8582,16 @@ impl Engine {
                 });
             }
             if let Some(i) = ai {
+                // JS-C627 — bit 8 de `elem_integrity` : un
+                // accesseur a été posé par `defineProperty` sur un
+                // index — il vit dans `props` et **ombre**
+                // l'élément (`array-key-get-error`). Le drapeau
+                // garde le lookup ordinaire sans coût.
+                if o.elem_integrity & 8 != 0 {
+                    if let Some(p) = o.find(key) {
+                        return Some(p);
+                    }
+                }
                 return elems
                     .get(i)
                     .cloned()
@@ -11169,8 +11240,16 @@ impl Engine {
                     return Ok(false);
                 }
                 // Dense si proche du tronçon, map sparse sinon —
-                // `len` suit `i + 1` dans `Arr::set`.
-                elems.set(i as u32, v);
+                // `len` suit `i + 1` dans `Arr::set`. `arguments`
+                // n'est pas un exotique array : `args[len] = v`
+                // crée la prop **sans** `ArraySetLength` (JS-C627
+                // — `arguments-mutation`, le `length` lu par
+                // `@@iterator` reste inchangé).
+                if o.args_map.is_some() {
+                    elems.set_keep_len(i as u32, v);
+                } else {
+                    elems.set(i as u32, v);
+                }
                 return Ok(true);
             }
         }
@@ -13791,7 +13870,7 @@ fn sonde_nullread(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 mod eval;
 mod exec;
 pub(crate) mod lazy;
-mod ops;
+pub(crate) mod ops;
 mod resolve;
 
 pub(crate) use ops::*;

@@ -2077,7 +2077,10 @@ impl Parser {
         is_await: bool,
     ) -> Result<Stmt> {
         if self.eat_of() {
-            let iter = self.expr(false)?;
+            // Spec : le RHS de `of` est `AssignmentExpression`
+            // (pas `Expression`) — `for (x of [], [])` est une
+            // erreur de syntaxe (JS-C627, `head-*-no-expr`).
+            let iter = self.assign(false)?;
             self.expect_p(P::RParen, "`)`")?;
             self.iter_depth += 1;
             let body = Box::new(self.stmt_body(false, false)?);
@@ -2322,9 +2325,10 @@ impl Parser {
                 if !matches!(pat, Pat::Ident(_)) {
                     return Err(self.err("`using` requires a simple binding identifier"));
                 }
-                if self.blk_depth == 0 && !self.module {
-                    return Err(self.err("`using` is not allowed at the top level of a script"));
-                }
+                // Top-level script OK : la libération `using` d'une
+                // tête `for-of` est **par itération** — interne à la
+                // boucle, sans dépendre d'un scope englobant
+                // (JS-C627, `head-using-fresh-binding-per-iteration`).
                 pat
             }
             ForTarget::Var(_) | ForTarget::Expr(_) => return Ok(()),
@@ -2412,6 +2416,31 @@ impl Parser {
             };
             return self.for_rest(Some(init));
         }
+        // `for (await using x of y)` (ES2026) — itération
+        // **synchrone** mais libération `@@asyncDispose` : la cible
+        // porte `is_await: true`, le paramètre `is_await` de
+        // `for_in_of` reste celui de la boucle (JS-C627).
+        let await_using = matches!(self.peek(), Tok::Ident(s) if &**s == "await")
+            && matches!(self.toks.get(self.pos + 1).map(|t| &t.tok),
+                Some(Tok::Ident(u)) if &**u == "using")
+            && matches!(self.toks.get(self.pos + 2).map(|t| &t.tok),
+                Some(Tok::Ident(u)) if &**u != "of");
+        if await_using {
+            self.next(); // `await`
+            self.next(); // `using`
+            let pat = self.pattern_decl()?;
+            if !self.peek_of() {
+                return Err(self.err("`await using` declarations require a `for-of` loop"));
+            }
+            return self.for_in_of(
+                ForTarget::Using {
+                    pat,
+                    is_await: true,
+                },
+                None,
+                is_await,
+            );
+        }
         // `for (using x of y)` (ES2026) — `using` est décl seulement
         // si suivi d'un binding ≠ `of` (`for (using of y)` = ident).
         let is_using = matches!(self.peek(), Tok::Ident(s) if &**s == "using")
@@ -2427,6 +2456,19 @@ impl Parser {
                 return Err(self.err("`using` declarations require a `for-of` loop"));
             }
             return self.for_in_of(ForTarget::Using { pat, is_await }, None, is_await);
+        }
+        // Spec early error (lookahead ∉ {`async` `of`}) : la
+        // séquence littérale `async of` ne peut pas ouvrir la LHS
+        // d'un `for-of` — réservée à `for await`. `\u0061sync`
+        // (échappé) et `(async)` (parenthésé) restent des cibles
+        // légales ; `for (async in …)` est légal aussi (JS-C627).
+        if !is_await
+            && matches!(self.peek(), Tok::Ident(s) if &**s == "async")
+            && !self.toks[self.pos].escaped
+            && matches!(self.toks.get(self.pos + 1), Some(t)
+                if matches!(&t.tok, Tok::Ident(s) if &**s == "of") && !t.escaped)
+        {
+            return Err(self.err("`async` is not a valid for-of target"));
         }
         let init = self.expr(true)?;
         if self.peek_of() || self.peek() == &Tok::Kw(Kw::In) {

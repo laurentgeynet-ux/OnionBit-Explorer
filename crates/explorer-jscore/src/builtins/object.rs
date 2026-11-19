@@ -841,7 +841,39 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                 .unwrap_or_default();
             let _ = cur_v;
             if has_acc {
-                return Ok(false);
+                // Spec `[[DefineOwnProperty]]` : un accesseur est
+                // légal sur un index d'array — `ArraySetLength`
+                // ne s'applique qu'aux data. Sous seal/freeze les
+                // éléments sont non-configurables et la cible
+                // non-extensible → refus ; sinon l'accesseur vit
+                // dans `props`, ombre l'élément via le bit 8 de
+                // `elem_integrity` (JS-C627, `array-key-get-error`).
+                if integ & 3 != 0 {
+                    return Ok(false);
+                }
+                return Ok(e.heap.obj_mut(id).is_some_and(|o| {
+                    // Spec `ArrayDefineOwnProperty` — index
+                    // `>= oldLen` sur `length` non-writable →
+                    // refus, même pour un accesseur.
+                    if i >= len && (!o.extensible || o.elem_integrity & 4 != 0) {
+                        return false;
+                    }
+                    if !o.define_accessor_strict(key, g, s, attrs) {
+                        return false;
+                    }
+                    if let ObjKind::Array(elems) = &mut o.kind {
+                        // Une seule own-prop : l'élément disparaît.
+                        // `i >= len` → `length` devient `i + 1`
+                        // (spec — l'accesseur est alors atteint
+                        // par l'itération, `array-key-get-error`).
+                        elems.delete(i as u32);
+                        if i >= len {
+                            elems.set_len(i as u32 + 1);
+                        }
+                    }
+                    o.elem_integrity |= 8;
+                    true
+                }));
             }
             // Descripteur demandant `configurable:true` sur élément
             // sealé/gelé, `writable:true` sur gelé, ou une autre

@@ -240,10 +240,7 @@ impl Engine {
             Expr::Bool(b) => Ok(Value::Bool(*b)),
             Expr::Null => Ok(Value::Null),
             Expr::This => Ok(this),
-            Expr::Ident(name) => self
-                .env_get_resolved(env, name, e)
-                .or_else(|| self.env_get(env, name))
-                .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
+            Expr::Ident(name) => self.ident_value(env, name, e),
             Expr::Array(elems) => {
                 let mut v = Vec::with_capacity(elems.len());
                 for el in elems {
@@ -1234,12 +1231,28 @@ impl Engine {
         Ok(Value::Bool(self.has_prop_at(id, &k, site)?))
     }
 
+    /// Lecture d'identifiant avec sémantique TDZ (JS-C627) —
+    /// une cellule `Uninit` dans un env `tdz` devient
+    /// `ReferenceError` « before initialization » au lieu de
+    /// « not defined » (`env_get_seen` signale via `tdz_hit`).
+    pub(crate) fn ident_value(&mut self, env: &EnvRef, name: &str, e: &Expr) -> JsResult<Value> {
+        if let Some(v) = self
+            .env_get_resolved(env, name, e)
+            .or_else(|| self.env_get(env, name))
+        {
+            return Ok(v);
+        }
+        let tdz = self.tdz_hit.take().is_some();
+        Err(self.ref_error(if tdz {
+            format!("cannot access `{name}` before initialization")
+        } else {
+            format!("{name} is not defined")
+        }))
+    }
+
     pub(crate) fn read_lvalue(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
         match e {
-            Expr::Ident(name) => self
-                .env_get_resolved(env, name, e)
-                .or_else(|| self.env_get(env, name))
-                .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
+            Expr::Ident(name) => self.ident_value(env, name, e),
             Expr::Member(base, name) => {
                 let b = self.eval_expr(env, this, base)?;
                 self.get_prop_value_at(b, name, std::ptr::from_ref::<Expr>(e) as usize)
@@ -1361,10 +1374,21 @@ impl Engine {
 
     pub(crate) fn read_lvalue_ref(&mut self, env: &EnvRef, lv: &LValueRef) -> JsResult<Value> {
         match lv {
-            LValueRef::Ident(name, site) => self
-                .env_get_resolved_at(env, name, *site)
-                .or_else(|| self.env_get(env, name))
-                .ok_or_else(|| self.ref_error(format!("{name} is not defined"))),
+            LValueRef::Ident(name, site) => {
+                if let Some(v) = self
+                    .env_get_resolved_at(env, name, *site)
+                    .or_else(|| self.env_get(env, name))
+                {
+                    Ok(v)
+                } else {
+                    let tdz = self.tdz_hit.take().is_some();
+                    Err(self.ref_error(if tdz {
+                        format!("cannot access `{name}` before initialization")
+                    } else {
+                        format!("{name} is not defined")
+                    }))
+                }
+            }
             LValueRef::Prop(b, k, site) => self.get_prop_value_at(b.clone(), k, *site),
         }
     }
@@ -1428,6 +1452,13 @@ impl Engine {
                         .or_else(|| self.env_get(env, name))
                     {
                         return Ok(self.str_val(typeof_str(v, &self.heap)));
+                    }
+                    // JS-C627 — `typeof` sur liaison TDZ jette
+                    // (spec : `GetValue` abrupt → non absorbé).
+                    if self.tdz_hit.take().is_some() {
+                        return Err(
+                            self.ref_error(format!("cannot access `{name}` before initialization"))
+                        );
                     }
                     return Ok(self.str_val("undefined"));
                 }

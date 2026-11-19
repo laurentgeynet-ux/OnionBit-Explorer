@@ -896,7 +896,19 @@ impl Engine {
                 body,
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
-                let ov = self.eval_expr(env, this.clone(), obj)?;
+                // Même sémantique de complétion que `for-of`
+                // (JS-C627) — `V` repart à `undefined`.
+                self.completion = Value::Undefined;
+                // Spec `ForIn/OfHeadEvaluation` (JS-C627) : les
+                // noms liés d'une `ForDeclaration` sont en TDZ
+                // pendant l'éval de l'expr itérée —
+                // `for (let x in {x:1})` → `ReferenceError`.
+                let ov = if matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. }) {
+                    let tdz = self.for_head_tdz_env(env, target);
+                    self.eval_expr(&tdz, this.clone(), obj)?
+                } else {
+                    self.eval_expr(env, this.clone(), obj)?
+                };
                 if let Some(init) = var_init {
                     let v = self.eval_expr(env, this.clone(), init)?;
                     self.assign_target(env, this.clone(), target, v)?;
@@ -965,7 +977,24 @@ impl Engine {
                 is_await,
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
-                let v = self.eval_expr(env, this.clone(), iter)?;
+                // Spec `ForIn/OfBodyEvaluation` (JS-C627) : la
+                // complétion du statement est `V`, initialisée
+                // `undefined` — les stmts-expression du corps la
+                // mettent à jour, `UpdateEmpty` ne propage rien
+                // d'avant la boucle (`for (a of []) {}` →
+                // `undefined`, `{3; break;}` → `3`).
+                self.completion = Value::Undefined;
+                // Spec `ForIn/OfHeadEvaluation` (JS-C627) : les
+                // noms liés d'une `ForDeclaration` (`let`/`const`/
+                // `using`) sont en TDZ pendant l'éval de l'expr
+                // itérée — `for (let x of [x])` → `ReferenceError`,
+                // une closure capturée ici garde la cellule TDZ.
+                let v = if matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. }) {
+                    let tdz = self.for_head_tdz_env(env, target);
+                    self.eval_expr(&tdz, this.clone(), iter)?
+                } else {
+                    self.eval_expr(env, this.clone(), iter)?
+                };
                 // JS-C456 — boucle **paresseuse** pour les
                 // itérateurs custom (`Symbol.iterator` callable)
                 // : `iter.next()` par tour, pas de Vec
@@ -977,7 +1006,7 @@ impl Engine {
                 // pour les valeurs sans itérateur (arrays/TA/
                 // strings — observablement identiques).
                 if !*is_await {
-                    if let Some(it) = self.forof_iterator(v.clone())? {
+                    if let Some((it, next)) = self.forof_iterator(v.clone())? {
                         let using = matches!(target, ForTarget::Using { .. });
                         let lex =
                             matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
@@ -986,6 +1015,7 @@ impl Engine {
                         // borne d'âge fine il n'est plus « jeune »
                         // après le premier tour).
                         self.safepoint_roots.push(it.clone());
+                        self.safepoint_roots.push(next.clone());
                         let mut out = Ok(Flow::Normal);
                         loop {
                             self.young_stack[yslot] = self.heap.alloc_seq();
@@ -993,48 +1023,40 @@ impl Engine {
                                 out = Err(e);
                                 break;
                             }
-                            let Value::Obj(iid) = it else { break };
-                            // Spec `GetIterator`/`IteratorStep` +
-                            // `IteratorValue` : `next` lu par Get,
-                            // résultat non-objet → `TypeError`,
-                            // getters `done`/`value` propagés —
-                            // `get_prop` data-only avalait un
-                            // `get done() { throw }` → boucle
-                            // infinie (JS-C603). Toute complétion
-                            // abrupte de la boucle passe par
-                            // `iterator_close` (spec).
-                            let nf = match self.get_prop_value(Value::Obj(iid), "next") {
-                                Ok(nf) if self.is_callable(nf.clone()) => nf,
-                                Ok(_) => {
-                                    let e = self.type_error("iterator next is not callable");
-                                    let _ = self.iterator_close(&it);
-                                    out = Err(e);
-                                    break;
-                                }
+                            // Spec `ForIn/OfBodyEvaluation`
+                            // (JS-C627) : les abrupts de
+                            // `next()`/`done`/`value` se propagent
+                            // **sans** `IteratorClose` — seuls les
+                            // abrupts du bind/corps closent
+                            // (`iterator-next-error`,
+                            // `iterator-next-result-value-attr-error`
+                            // : `return` jamais appelé). Résultat
+                            // non-objet → `TypeError`, non clos.
+                            let r = match self.call_value(next.clone(), it.clone(), &[]) {
                                 Err(e) => {
-                                    let _ = self.iterator_close(&it);
-                                    out = Err(e);
-                                    break;
-                                }
-                            };
-                            let r = match self.call_value(nf, it.clone(), &[]) {
-                                Err(e) => {
-                                    let _ = self.iterator_close(&it);
                                     out = Err(e);
                                     break;
                                 }
                                 Ok(r) => r,
                             };
+                            // `Type(result) is not Object` →
+                            // `TypeError` non clos — les symboles
+                            // sont des `Obj` heap mais restent des
+                            // primitives spec (JS-C627,
+                            // `iterator-next-result-type`).
                             let Value::Obj(rid) = r else {
                                 let e = self.type_error("iterator result is not an object");
-                                let _ = self.iterator_close(&it);
                                 out = Err(e);
                                 break;
                             };
+                            if !self.is_spec_object(&r) {
+                                let e = self.type_error("iterator result is not an object");
+                                out = Err(e);
+                                break;
+                            }
                             let done = match self.get_prop_value(Value::Obj(rid), "done") {
                                 Ok(d) => self.to_boolean(d),
                                 Err(e) => {
-                                    let _ = self.iterator_close(&it);
                                     out = Err(e);
                                     break;
                                 }
@@ -1045,7 +1067,6 @@ impl Engine {
                             let item = match self.get_prop_value(Value::Obj(rid), "value") {
                                 Ok(v) => v,
                                 Err(e) => {
-                                    let _ = self.iterator_close(&it);
                                     out = Err(e);
                                     break;
                                 }
@@ -1072,32 +1093,44 @@ impl Engine {
                             }
                             match rr {
                                 Err(e) => {
-                                    if let Err(e2) = self.iterator_close(&it) {
-                                        out = Err(e2);
-                                        break;
-                                    }
+                                    // Complétion **throw** : les
+                                    // erreurs de `return()` sont
+                                    // masquées — la complétion
+                                    // d'origine prime (spec
+                                    // `IteratorClose` §7.4.6,
+                                    // `iterator-close-throw-*` :
+                                    // Test262Error conservé).
+                                    let _ = self.iterator_close(&it);
                                     out = Err(e);
                                     break;
                                 }
                                 Ok(f) => {
                                     if let Some(f) = Self::loop_flow(f, &labels) {
-                                        // `Break` = consommé par
-                                        // la boucle (Normal ici) —
+                                        // `LoopContinues` faux →
                                         // `IteratorClose` sur
-                                        // break aussi, pas sur
-                                        // `done`/`continue`.
-                                        if !matches!(f, Flow::Continue(_)) {
-                                            if let Err(e) = self.iterator_close(&it) {
-                                                out = Err(e);
-                                                break;
-                                            }
+                                        // **toutes** les issues
+                                        // : `break` consommé,
+                                        // `continue`/`break` vers
+                                        // label externe, `return`
+                                        // (JS-C627 — avant, tout
+                                        // `Continue` sautait le
+                                        // close : `continue L`
+                                        // externe laissait
+                                        // l'itérateur ouvert).
+                                        // Complétion non-throw →
+                                        // l'erreur du close
+                                        // (résultat non-objet
+                                        // inclus) se propage.
+                                        match self.iterator_close(&it) {
+                                            Err(e) => out = Err(e),
+                                            Ok(()) => out = Ok(f),
                                         }
-                                        out = Ok(f);
                                         break;
                                     }
                                 }
                             }
                         }
+                        self.safepoint_roots.pop();
                         self.safepoint_roots.pop();
                         return out;
                     }
@@ -1331,7 +1364,39 @@ impl Engine {
     /// `for..of` paresseux (JS-C456). `None` = pas
     /// d'itérateur custom → voie `iter_values` (arrays/TA/
     /// strings — observablement identique, plus rapide).
-    pub(crate) fn forof_iterator(&mut self, v: Value) -> JsResult<Option<Value>> {
+    /// JS-C627 — env TDZ de tête `for-in`/`for-of` : les noms
+    /// liés de la `ForDeclaration` (`let`/`const`/`using`) sont
+    /// `Uninit` pendant l'éval de l'expr itérée
+    /// (`for (let x of [x])` → `ReferenceError`).
+    /// `names_table` est clé par pointeur d'AST et rate quand
+    /// le corps async a été ré-écrit par le lowering de
+    /// suspension — les noms sont donc déclarés **directement
+    /// depuis le motif** (idempotent sur les slots déjà câblés).
+    fn for_head_tdz_env(&self, env: &EnvRef, target: &ForTarget) -> EnvRef {
+        let tdz = Env::block_tdz(env.clone());
+        self.predeclare_slots(&tdz, std::ptr::from_ref(target) as usize);
+        let pat = match target {
+            ForTarget::Lexical { pat, .. } | ForTarget::Using { pat, .. } => Some(pat),
+            ForTarget::Var(_) | ForTarget::Expr(_) => None,
+        };
+        if let Some(p) = pat {
+            let mut names = Vec::new();
+            Self::lex_pat_names(p, false, &mut names);
+            for (n, _) in names {
+                Self::env_put_uninit(&tdz, &n);
+            }
+        }
+        tdz
+    }
+
+    /// `GetIterator` spec (JS-C627) — retourne le **record**
+    /// `(iterator, nextMethod)` : `next` lu **une fois** par
+    /// `Get` à la création (`iterator-next-reference` — relu
+    /// par pas, un `defineProperty` en cours de boucle
+    /// piégeait le 2e `next()`), non-callable → `TypeError`,
+    /// itérateur non-objet → `TypeError` (avant : `break`
+    /// silencieux).
+    pub(crate) fn forof_iterator(&mut self, v: Value) -> JsResult<Option<(Value, Value)>> {
         let Value::Obj(id) = v else { return Ok(None) };
         let Some(m) = self.get_prop(id, SYM_ITERATOR) else {
             return Ok(None);
@@ -1339,7 +1404,15 @@ impl Engine {
         if !self.is_callable(m.clone()) {
             return Ok(None);
         }
-        Ok(Some(self.call_value(m, v, &[])?))
+        let it = self.call_value(m, v, &[])?;
+        if !matches!(it, Value::Obj(_)) {
+            return Err(self.type_error("iterator is not an object"));
+        }
+        let next = self.get_prop_value(it.clone(), "next")?;
+        if !self.is_callable(next.clone()) {
+            return Err(self.type_error("iterator next is not callable"));
+        }
+        Ok(Some((it, next)))
     }
 
     /// `IteratorClose` (spec §7.4.6) — `GetMethod` : nullish
@@ -1356,7 +1429,12 @@ impl Engine {
             if !self.is_callable(rf.clone()) {
                 return Err(self.type_error("iterator return is not callable"));
             }
-            self.call_value(rf, it.clone(), &[])?;
+            // JS-C627 — résultat non-objet → `TypeError` (spec
+            // `IteratorClose` §7.4.6 ; masqué par l'appelant
+            // quand la complétion entrante est throw).
+            if !matches!(self.call_value(rf, it.clone(), &[])?, Value::Obj(_)) {
+                return Err(self.type_error("iterator result is not an object"));
+            }
         }
         Ok(())
     }

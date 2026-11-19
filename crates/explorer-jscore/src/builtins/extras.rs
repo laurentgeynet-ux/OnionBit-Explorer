@@ -117,7 +117,7 @@ pub(crate) fn rel_index(e: &mut Engine, v: Value, len: usize) -> JsResult<Option
 }
 
 pub(crate) fn array_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     // `with_elems` — un `rel_index` qui jette (valueOf hostile)
     // ne laisse pas le backing vidé (JS-C319).
     with_elems(e, id, |e, elems| {
@@ -204,7 +204,7 @@ pub(crate) fn flat_into(
 }
 
 pub(crate) fn array_flat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     let depth = match arg(args, 0) {
         Value::Undefined => 1,
         v => e.to_number(v)? as u32,
@@ -290,54 +290,43 @@ pub(crate) fn array_find_last_index(
     Ok(Value::Num(-1.0))
 }
 
-// Array iterators — snapshot `Iter` objects (same family as
-// Map/Set's; live-cursor semantics documented as deviation).
+// Array iterators — live cursors (JS-C627) : `length` relue et
+// `[[Get]]` réel par index à chaque `next()`, spec
+// `CreateArrayIterator` — les mutations pendant l'itération sont
+// observées (push/pop, écritures d'index, `arguments` mappé).
 pub(crate) fn array_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let elems = take_elems(e, id)?;
-    put_elems(e, id, elems.clone())?;
-    // L'itérateur produit `undefined` pour les trous (spec `Get`).
-    let vals: Vec<Value> = elems
-        .iter()
-        .map(super::super::value::Value::unhole)
-        .collect();
-    Ok(crate::collections::iter_obj(e, vals, e.protos.array_iter))
+    this_array(e, this.clone())?;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::ArrValues,
+        e.protos.array_iter,
+    ))
 }
 
 pub(crate) fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    // Lecture directe de la longueur — un `take` seul (sans
-    // `put`) vidait le backing des vrais tableaux, et `put`
-    // écrirait des indices fantômes sur les array-likes
-    // (JS-C319). La borne `length` suit `take_elems` (4 M).
-    let n = match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Array(v)) => v.len() as usize,
-        _ => match e.get_prop(id, "length") {
-            Some(v) => (e.to_number(v).unwrap_or(0.0).max(0.0) as usize).min(4_000_000),
-            None => 0,
-        },
-    };
-    Ok(crate::collections::iter_obj(
+    this_array(e, this.clone())?;
+    Ok(crate::collections::live_iter_obj(
         e,
-        (0..n).map(|i| Value::Num(i as f64)).collect(),
+        this,
+        crate::heap::LiveIterKind::ArrKeys,
         e.protos.array_iter,
     ))
 }
 
 pub(crate) fn array_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let elems = take_elems(e, id)?;
-    let mut items = Vec::with_capacity(elems.len());
-    for (i, v) in elems.iter().enumerate() {
-        items.push(e.new_array(vec![Value::Num(i as f64), v.unhole()]));
-    }
-    put_elems(e, id, elems)?;
-    Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
+    this_array(e, this.clone())?;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::ArrEntries,
+        e.protos.array_iter,
+    ))
 }
 
 // ES2023 non-mutating variants.
 pub(crate) fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     // `with_elems` — `rel_index` faillible ; hors-bornes rend un
     // `None` distinct de l'erreur pour garder le `RangeError`.
     let res = with_elems(e, id, |e, elems| {
@@ -363,7 +352,7 @@ pub(crate) fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 }
 
 pub(crate) fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     let elems = take_elems(e, id)?;
     let mut out_v: Vec<Value> = elems
         .iter()
@@ -382,7 +371,7 @@ pub(crate) fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> 
 /// conversion des args laisse l'array intact.
 pub(crate) fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let this_v = this.clone();
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     // `with_elems` — `to_number` des args peut jeter : le tableau
     // reste intact (JS-C319). Le refus `sealed` repose aussi le
     // backing inchangé (`elems` n'est réécrit qu'en fin de corps).
@@ -444,7 +433,7 @@ pub(crate) fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 }
 
 pub(crate) fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     // `with_elems` — `rel_index`/`to_number` faillibles avant le
     // put (JS-C319) ; `this` n'est jamais modifié (non-mutant).
     let out = with_elems(e, id, |e, elems| {
@@ -479,7 +468,7 @@ pub(crate) fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> J
 pub(crate) fn array_to_sorted(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     // Copy → sort via the shared comparator path → new array
     // (`sort` mutates `this`; `toSorted` must not).
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     let elems = take_elems(e, id)?;
     // Dense — `toSorted` relit les slots par `Get` (spec).
     let copy = e.new_array(

@@ -1933,27 +1933,40 @@ fn ta_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
     Ok(this)
 }
 
-/// `ta.keys()` — itérateur d'indices.
+/// `ta.keys()` — itérateur d'indices **live** (JS-C627 : la
+/// longueur est relue à chaque `next()` — resizable buffers).
 fn ta_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let (_, _, _, len) = ta_view(e, this)?;
-    let items = (0..len).map(|i| Value::Num(i as f64)).collect();
-    Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
+    ta_view(e, this.clone())?;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::TaKeys,
+        e.protos.array_iter,
+    ))
 }
 
-/// `ta.values()` / `[Symbol.iterator]` — itérateur d'éléments.
+/// `ta.values()` / `[Symbol.iterator]` — itérateur d'éléments
+/// **live** : buffer redimensionné/détaché → `TypeError` au pas
+/// suivant (spec `IsTypedArrayOutOfBounds`), croissance visitée.
 fn ta_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
-    Ok(crate::collections::iter_obj(e, vals, e.protos.array_iter))
+    ta_view(e, this.clone())?;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::TaValues,
+        e.protos.array_iter,
+    ))
 }
 
-/// `ta.entries()` — itérateur `[i, v]`.
+/// `ta.entries()` — itérateur `[i, v]` **live** (JS-C627).
 fn ta_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let (_, vals) = ta_vals(e, this)?;
-    let mut items = Vec::with_capacity(vals.len());
-    for (i, v) in vals.iter().enumerate() {
-        items.push(e.new_array(vec![Value::Num(i as f64), v.clone()]));
-    }
-    Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
+    ta_view(e, this.clone())?;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        this,
+        crate::heap::LiveIterKind::TaEntries,
+        e.protos.array_iter,
+    ))
 }
 
 // ------------------------------------------------------------------

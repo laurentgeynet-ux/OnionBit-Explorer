@@ -308,6 +308,7 @@ impl Engine {
         self.ops_left = self.op_limit.saturating_mul(crate::interp::BOOT_OPS_FACTOR);
         self.arm_eval_deadline_boot();
         let prev = std::mem::replace(&mut self.current_module, name.to_string());
+        self.module_syntax = None;
         // JS-C245 — garde d'entrée stacker, miroir exact de
         // `run_program` (eval.rs) : sans elle l'éval module
         // partait sur la pile ambiante du fil 32 Mio, déjà
@@ -323,7 +324,21 @@ impl Engine {
         let out = match r {
             Ok(v) => Ok(v),
             Err(Thrown(_v)) if self.deadline_hit => Err(Error::Deadline),
-            Err(Thrown(v)) => Err(Error::Uncaught(self.describe(v))),
+            Err(Thrown(v)) => {
+                // JS-C627 — une faute de parse instanciée en objet
+                // `SyntaxError` redevient `Error::Syntax` (le
+                // harnais distingue `phase:parse` ; reconnaissance
+                // par ObjId — `throw new SyntaxError` ordinaire
+                // reste `Uncaught`).
+                if let (Value::Obj(id), Some((sid, line, col, message))) =
+                    (&v, self.module_syntax.take())
+                {
+                    if *id == sid {
+                        return Err(Error::Syntax { line, col, message });
+                    }
+                }
+                Err(Error::Uncaught(self.describe(v)))
+            }
         };
         if std::env::var("DBG_DRIVE").is_ok() {
             eprintln!("[eval_mod] microtasks début");
@@ -549,11 +564,18 @@ impl Engine {
                 // « entry » », sans lui la source est introuvable
                 // (debug réel : erreur attribuée à landing-pages
                 // alors que le coupable était une dep `ns-*.js`).
-                Thrown(self.error_value(
+                let ev = self.error_value(
                     self.protos.syntax_error,
                     "SyntaxError",
                     &format!("{err} — «{spec}»"),
-                ))
+                );
+                // JS-C627 — trace de l'ObjId + position d'origine :
+                // `eval_module` reconvertit ce `Thrown` précis en
+                // `Error::Syntax` (négatifs `phase:parse` module).
+                if let (crate::Error::Syntax { line, col, message }, Value::Obj(id)) = (&err, &ev) {
+                    self.module_syntax = Some((*id, *line, *col, message.clone()));
+                }
+                Thrown(ev)
             })?;
         self.note_parse(tp);
         let env = Env::local(self.global_env.clone());
