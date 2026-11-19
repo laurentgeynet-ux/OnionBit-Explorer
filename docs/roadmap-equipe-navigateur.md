@@ -8242,6 +8242,22 @@ MCP = adaptateur, jamais la base.
   `DONE` libère le claim, commit ciblé du corpus.
   `SKILL.md` 412→111 lignes ; `vol-protocole.md` ne garde
   que signatures de mort + règles dures ; CLAIMS.md legacy.
+- [x] **Étape 318. Artefacts d'outillage vol : endpoint
+  `/styles`, flag viewport bloquant, scrollbar réf
+  stabilisée** (`explorer-api` route additive +
+  `scripts/geo_diff.mjs` + `scripts/ref_capture.mjs` +
+  skill `vol` §3). (1) `GET /api/tabs/{id}/styles` sert
+  `Session::styles_report` — le sidecar Étape 315 devient
+  joignable par le protocole daemon des vols (le skill
+  documente `/styles` → `geo_diff --styles`) ; (2)
+  `geo_diff` flag `patterns:[{axis:"viewport",
+  blocking:true}]` + console quand `eng.width` ≠
+  `ref.viewport` — l'écart de capture ne lit plus comme
+  des bugs layout ; (3) `ref_capture` pose
+  `Emulation.setScrollbarsHidden` — largeur de layout
+  ref = `vw` exact (fin du biais ~15 px scrollbar,
+  webmd 1351→1366). Refs antérieures à recapturer si le
+  biais gêne.
 - [x] **Étape 315. Attribution d'anomalies terrain : sidecar
   `--styles` + `geo_diff` enrichi (demande équipe vols)**
   (`explorer-layout` `style_dump` + `explorer-core`

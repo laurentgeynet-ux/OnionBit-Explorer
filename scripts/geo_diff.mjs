@@ -248,6 +248,18 @@ const pareto = Object.entries(tagAgg).sort((a, b) => b[1] - a[1]).slice(0, topN)
 // ligne globale, dy constant = décalage d'un ancêtre
 // commun. Signalé pour ne pas chasser un faux bug.
 const patterns = [];
+// Viewport divergent = mesure biaisée, pas un bug layout :
+// lobste vol897 à 1024 vs ref 1366 → tous les `dw`
+// fantômes. La ref porte `viewport:"WxH"` (ref_capture) ;
+// signalé bloquant pour court-circuiter la lecture.
+const refVpW = Number((ref.viewport || '').split('x')[0]);
+if (refVpW && eng.width && Math.abs(eng.width - refVpW) >= 4) {
+  patterns.push({
+    axis: 'viewport', blocking: true,
+    eng_w: eng.width, ref_w: refVpW,
+    delta: +(eng.width - refVpW).toFixed(1),
+  });
+}
 if (divergent.length >= 4) {
   for (const axis of ['dw', 'dh', 'dy', 'dx']) {
     const hist = {};
@@ -316,6 +328,7 @@ if (!measurable) {
     `geo : ${score}% divergents (${divergent.length}/${matched} appariés, ` +
     `${ok} ok, +${engOnly} moteur-seuls, +${refOnly} réf-seuls)` +
     `${moved ? ` — dont ${moved} déplacés (>${movedTol} px)` : ''}` +
+    `${patterns.some(p => p.blocking) ? ' — VIEWPORT divergent, mesure biaisée' : ''}` +
     `${refTruncated ? ' — ref tronquée (4000), score partiel' : ''}` +
     `${textDropped ? ` — ${textDropped} #text ignorés` : ''}`);
 }

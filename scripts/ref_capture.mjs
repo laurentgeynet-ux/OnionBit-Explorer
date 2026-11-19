@@ -180,6 +180,12 @@ async function main() {
     await cdp.send('Page.enable', {}, sessionId);
     await cdp.send('Emulation.setDeviceMetricsOverride',
       { width: vw, height: vh, deviceScaleFactor: 1, mobile: false }, sessionId);
+    // Scrollbar classique masquée : elle rogne ~15 px de
+    // largeur de layout (webmd capturé à 1351 au lieu de
+    // 1366) — largeur stable = `vw` exact, alignée sur le
+    // moteur qui ne soustrait pas de scrollbar.
+    await cdp.send('Emulation.setScrollbarsHidden',
+      { hidden: true }, sessionId);
 
     // Cookies pré-navigation (`--cookie nom=valeur@domaine`).
     for (const spec of cookieArgs) {

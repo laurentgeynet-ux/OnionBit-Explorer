@@ -269,6 +269,7 @@ fn router_impl(
         .route("/api/tabs/{id}/dom", get(dom_dump))
         .route("/api/tabs/{id}/layout", get(layout_dump))
         .route("/api/tabs/{id}/geometry", get(geometry))
+        .route("/api/tabs/{id}/styles", get(styles))
         .route("/api/tabs/{id}/mem", get(mem_report))
         .route("/api/tabs/{id}/navigate", post(navigate))
         .route("/api/tabs/{id}/reload", post(reload))
@@ -969,6 +970,20 @@ async fn geometry(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response
     match session.geometry_report(id) {
         Some(g) => Json(g).into_response(),
         None => (StatusCode::NOT_FOUND, "pas de géométrie").into_response(),
+    }
+}
+
+/// `GET /api/tabs/{id}/styles` → `StylesReport` JSON
+/// (étape 315 — `style_dump` consommé) : style calculé
+/// d'attribution + parent de boîte par nœud, sidecar de
+/// `geo_diff --styles` pour classer chaque divergent
+/// (`class`/`suspect`/`ancestors`). `404` onglet inconnu
+/// ou arbre détaché.
+async fn styles(State(st): State<ApiState>, Path(id): Path<TabId>) -> Response {
+    let session = st.session.lock().await;
+    match session.styles_report(id) {
+        Some(s) => Json(s).into_response(),
+        None => (StatusCode::NOT_FOUND, "pas de styles").into_response(),
     }
 }
 
