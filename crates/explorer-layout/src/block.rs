@@ -2789,7 +2789,9 @@ fn apply_layout_metadata(bx: &mut LayoutBox, st: &ComputedStyle) {
     let ov = |axis: &str| match st.get(axis) {
         Some("hidden") => Overflow::Hidden,
         Some("clip") => Overflow::Clip,
-        Some("auto") => Overflow::Auto,
+        // `overlay` = alias legacy d'`auto` (css-overflow-3
+        // §3 note — BCD-2).
+        Some("auto" | "overlay") => Overflow::Auto,
         Some("scroll") => Overflow::Scroll,
         _ => Overflow::Visible,
     };

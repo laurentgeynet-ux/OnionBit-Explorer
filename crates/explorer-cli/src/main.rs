@@ -1366,6 +1366,7 @@ const HARNESS_MAX_PX: u32 = 1 << 22;
 /// À distinguer du `<style>` embarqué (jamais collecté par
 /// `compute_tree` dans ce chemin) et de `style=` inline
 /// (rang inline > auteur — écraserait la déclaration).
+#[allow(clippy::too_many_lines)] // table de fixtures — croît avec la couverture.
 fn context_css(name: &str) -> &'static str {
     let n = name.trim_start_matches('-').trim_start_matches("webkit-");
     if n == "position-try-order" {
@@ -1377,16 +1378,61 @@ fn context_css(name: &str) -> &'static str {
     if n.starts_with("border") {
         // Logique (`border-block-*`/`border-inline-*`) : le
         // mapping physique arrive APRÈS la cascade — un ctx
-        // uniforme poserait la même prop physique au même
-        // rang et gagnerait à égalité. `-color`/`-width`
-        // exigent juste un `border-style` existant (autre
-        // nom de prop — pas de conflit) ; `-style` et le
-        // shorthand nu créent la bordure seuls → pas de ctx.
+        // posé sous le nom PHYSIQUE gagnerait à rang égal
+        // (`resolve_logical_props` : à rang égal le physique
+        // l'emporte). Poser le ctx sous les noms LOGIQUES
+        // inverse la donne : la sonde, déclarée après,
+        // écrase le ctx par ordre de source — `none` retire
+        // le style, `thin`/`medium`/`thick` changent la
+        // largeur posée (8px), `currentColor`/`transparent`
+        // se mesurent contre `navy`.
         if n.contains("-block") || n.contains("-inline") {
-            if n.ends_with("-style") || (!n.ends_with("-color") && !n.ends_with("-width")) {
-                ""
+            if n.ends_with("-style") {
+                // Un ctx vide rendait `none`/`hidden` inertes
+                // (retrait de rien). Un style posé les rend
+                // mesurables — l'identité ne coûte que la
+                // sonde du style ctx lui-même. Le shorthand
+                // d'axe `border-block-style:X` pose les deux
+                // côtés → ctx asymétrique, jamais d'identité.
+                let side = if n.contains("-start") {
+                    "start"
+                } else if n.contains("-end") {
+                    "end"
+                } else {
+                    ""
+                };
+                match (n.contains("-block"), side) {
+                    (true, "start") => {
+                        "border-block-start-style:solid;border-block-start-width:8px;border-block-start-color:navy"
+                    }
+                    (true, "end") => {
+                        "border-block-end-style:solid;border-block-end-width:8px;border-block-end-color:navy"
+                    }
+                    (false, "start") => {
+                        "border-inline-start-style:solid;border-inline-start-width:8px;border-inline-start-color:navy"
+                    }
+                    (false, "end") => {
+                        "border-inline-end-style:solid;border-inline-end-width:8px;border-inline-end-color:navy"
+                    }
+                    (true, _) => {
+                        "border-block-start-style:solid;border-block-end-style:double;border-block-start-width:8px;border-block-end-width:8px;border-block-start-color:navy;border-block-end-color:navy"
+                    }
+                    (false, _) => {
+                        "border-inline-start-style:solid;border-inline-end-style:double;border-inline-start-width:8px;border-inline-end-width:8px;border-inline-start-color:navy;border-inline-end-color:navy"
+                    }
+                }
+            } else if n.contains("-block") {
+                // Styles ASYMÉTRIQUES (BCD-2) : le shorthand
+                // `border-block:X` pose le même style des
+                // deux côtés — au moins un diffère toujours
+                // du sien, même `solid`/`double` produisent
+                // un delta (un ctx uniforme les rendait
+                // identiques). `double` plutôt qu'un style
+                // de la classe `dashed`/`dotted`, que la
+                // signature ne distingue pas.
+                "border-block-start-style:solid;border-block-end-style:double;border-block-start-width:8px;border-block-end-width:8px;border-block-start-color:navy;border-block-end-color:navy"
             } else {
-                "border-style:solid"
+                "border-inline-start-style:solid;border-inline-end-style:double;border-inline-start-width:8px;border-inline-end-width:8px;border-inline-start-color:navy;border-inline-end-color:navy"
             }
         } else {
             // `navy` ≠ `currentColor` (`color:red` hérité par
@@ -1535,6 +1581,37 @@ fn context_css(name: &str) -> &'static str {
         // ponctuation tombe en bord de ligne — largeur
         // bornée (étape 302).
         "width:80px"
+    } else if matches!(n, "min-width" | "min-inline-size") {
+        // Un `min-*` ne serre que si la boîte est plus
+        // étroite que le plancher — `margin-left` rétrécit
+        // la largeur utilisée SANS fixer `width`/`max-width`
+        // (`width:10px` ferait foi dans la mesure
+        // intrinsèque ; `max-width:5px` briderait la
+        // mesure elle-même, §5.1 — BCD-2).
+        "margin-left:790px"
+    } else if n == "max-width" {
+        // `none` n'est discriminable que contre une
+        // contrainte posée ; les sondes max/min/fit-content
+        // restent visibles (le cap 400px les borne toutes).
+        "max-width:400px"
+    } else if n == "max-height" {
+        // Idem sur l'axe bloc — contenu ~18px, cap 5px.
+        "max-height:5px"
+    } else if n == "margin-inline-end" {
+        // `auto` côté inline-end résout `margin-right` en
+        // LTR — puits de slack indiscernable de `0` (miss
+        // honnête). En `rtl` il résout `margin-left` :
+        // l'absorption déplace la boîte → observable.
+        "left:0;right:0;width:100px;direction:rtl"
+    } else if matches!(
+        n,
+        "margin-left" | "margin-right" | "margin-inline" | "margin-inline-start"
+    ) {
+        // La fixture marges est absolue+anchor : `auto`
+        // n'absorbe le slack que si les deux insets sont
+        // posés (§10.3.7) — `auto` sur axe bloc = 0 en
+        // flux normal (miss honnête).
+        "left:0;right:0;width:100px"
     } else {
         ""
     }
@@ -1815,14 +1892,33 @@ fn prop_paints_decl(decl: &str) -> bool {
         let mut eng = explorer_css::StyleEngine::new();
         eng.add_css(css, explorer_css::Origin::Author);
         let sm = eng.compute_tree(&dom, root, &explorer_css::StyleEnv::default());
-        let mut bx = explorer_layout::build_box_tree(&dom, root, &sm)?;
-        explorer_layout::layout_tree(&mut bx, 800.0, &ctx);
         let mut images = explorer_render::collect_data_images(&dom, &sm, HARNESS_MAX_PX);
         if has_svg {
             let (svgs, srcs) = explorer_render::collect_svg_styled(&dom, root, &sm, HARNESS_MAX_PX);
             images.svgs = svgs;
             images.svg_sources = srcs;
         }
+        // BCD-2 — `url_sizes` : les bitmaps `content:url(…)`
+        // de pseudo (R-308) et les remplacés `data:` donnent
+        // leur taille intrinsèque à la boîte — sans elles la
+        // boîte remplacée dégrade à 0 et ne peint rien (faux
+        // miss sur `content:url`/`content_replacement`/`image`
+        // alors que le moteur les peint en session).
+        #[allow(clippy::cast_precision_loss)] // bitmaps < 2^24 px par axe.
+        let url_sizes: std::collections::HashMap<String, (f32, f32)> = images
+            .content_images
+            .iter()
+            .map(|(u, img)| (u.clone(), (img.width as f32, img.height as f32)))
+            .collect();
+        #[allow(clippy::cast_precision_loss)] // bitmaps < 2^24 px par axe.
+        let sizes: std::collections::HashMap<explorer_dom::NodeId, (f32, f32)> = images
+            .replaced
+            .iter()
+            .map(|(n, img)| (*n, (img.width as f32, img.height as f32)))
+            .collect();
+        let mut bx =
+            explorer_layout::build_box_tree_sized_urls(&dom, root, &sm, &sizes, &url_sizes)?;
+        explorer_layout::layout_tree(&mut bx, 800.0, &ctx);
         let dl = explorer_render::build_display_list_full(&bx, 800.0, 600.0, 0.0, &images);
         explorer_render::rasterize(&dl, &SRC, 1.0).map(|f| f.pixels)
     };
@@ -3068,8 +3164,11 @@ const SUBFEATURE_PROBE: &[(&str, &str, &str)] = &[
         "side-relative_values",
         "left 10px top",
     ),
-    ("background-position-x", "side-relative_values", "x-start"),
-    ("background-position-y", "side-relative_values", "y-start"),
+    // `x-end`/`y-end` (BCD-2) : `x-start`/`y-start` = bord
+    // de début = position initiale → identité, la
+    // sous-feature n'aurait jamais mesuré rien d'autre.
+    ("background-position-x", "side-relative_values", "x-end"),
+    ("background-position-y", "side-relative_values", "y-end"),
     ("background-repeat", "2-value", "repeat space"),
     (
         "background-repeat",
@@ -4790,10 +4889,11 @@ mod tests {
         // signature → « cascade n'applique rien d'autre »
         // (le rendu relève des oracles geo/pixel).
         assert_eq!(computed_decl_verdict("letter-spacing:2px"), Some(false));
-        // Prop logique hors `resolve_logical_props` :
-        // stockée verbatim sans effet aval → miss calculé,
-        // cohérent avec le routé-inerte mesuré en geo.
-        assert_eq!(computed_decl_verdict("overflow-block:hidden"), Some(false));
+        // BCD-2 — `overflow-block` est désormais routé par
+        // `resolve_logical_props` (→ `overflow-y` en
+        // horizontal) : delta calculé comme les autres
+        // props logiques.
+        assert_eq!(computed_decl_verdict("overflow-block:hidden"), Some(true));
         // `na` de valeur conservé (CSS-wide).
         assert_eq!(computed_decl_verdict("color:inherit"), None);
     }

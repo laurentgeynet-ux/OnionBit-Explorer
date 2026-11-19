@@ -75,3 +75,60 @@ fn bare_border_logical_shorthand_route_physique() {
     assert_eq!(st.get("border-right-style"), Some("solid"));
     assert_eq!(st.get("border-right-color"), Some("blue"));
 }
+
+// BCD-2 — overflow flow-relative + valeurs logiques de
+// `float`/`clear`/`text-align` (css-logical-1 §4.1,
+// css-text-3 §8.1).
+
+#[test]
+fn overflow_block_route_y_horizontal() {
+    let st = style_of("p { overflow-block: hidden }");
+    assert_eq!(st.get("overflow-y"), Some("hidden"));
+    assert_eq!(st.get("overflow-x"), None);
+}
+
+#[test]
+fn overflow_inline_route_x_horizontal() {
+    let st = style_of("p { overflow-inline: scroll }");
+    assert_eq!(st.get("overflow-x"), Some("scroll"));
+}
+
+#[test]
+fn overflow_block_route_x_vertical() {
+    let st = style_of("p { writing-mode: vertical-rl; overflow-block: clip }");
+    assert_eq!(st.get("overflow-x"), Some("clip"));
+    assert_eq!(st.get("overflow-y"), None);
+}
+
+#[test]
+fn float_inline_start_resout_left_ltr() {
+    let st = style_of("p { float: inline-start }");
+    assert_eq!(st.get("float"), Some("left"));
+}
+
+#[test]
+fn float_inline_end_resout_right_ltr() {
+    let st = style_of("p { float: inline-end }");
+    assert_eq!(st.get("float"), Some("right"));
+}
+
+#[test]
+fn clear_inline_end_resout_left_rtl() {
+    let st = style_of("body { direction: rtl } p { clear: inline-end }");
+    assert_eq!(st.get("clear"), Some("left"));
+}
+
+#[test]
+fn text_align_match_parent_resout_direction_element() {
+    // Parent `start` (défaut) : `match-parent` résout dans
+    // la direction de L'ÉLÉMENT — rtl → right (css-text-3).
+    let st = style_of("body { direction: rtl } p { text-align: match-parent }");
+    assert_eq!(st.get("text-align"), Some("right"));
+}
+
+#[test]
+fn text_align_match_parent_ltr_gauche() {
+    let st = style_of("p { text-align: match-parent }");
+    assert_eq!(st.get("text-align"), Some("left"));
+}
+

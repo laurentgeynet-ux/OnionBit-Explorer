@@ -4812,3 +4812,54 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   (`css-align/blocks/` — 21 reftests prospectés via
   `wpt-scan` pour la suite). Verrous : `align_content_bloc_*`
   (block ×4).
+
+- [x] **BCD-2 — Props logiques routées-inertes : `overflow-block`/
+  `overflow-inline`, valeurs logiques `float`/`clear`/`text-align`,
+  ctx bordures logiques + harnais paintv `content:url`**
+  (`explorer-css`/`explorer-layout`/`explorer-cli`, piste jauge
+  BCD — worktree `pipeline/bcd-logical-props`, `css.values`
+  1166→1242/1751, 70,9 %). `logical_name` : `overflow-block`/
+  `overflow-inline` → `overflow-y`/`x` selon le writing-mode
+  **propre** (css-overflow-3 §4 — le layout consommait déjà
+  les physiques) ; `overlay` = alias legacy d'`auto`
+  (`apply_layout_metadata`, css-overflow-3 §3 note).
+  **Valeurs logiques résolues en cascade**
+  (`resolve_logical_props`, css-logical-1 §4.1) : `float`/
+  `clear:inline-start|end` → `left`/`right` selon `direction`
+  (modes verticaux : verbatim — le moteur ne flotte pas sur
+  l'axe bloc, verbatim honnête) ; `text-align:match-parent`
+  → alignement du parent résolu dans la direction de
+  l'élément (css-text-3 §8.1). **Ctx bordures logiques**
+  (main.rs) : posés sous les **noms logiques** (à rang égal
+  le physique déclaré dans le ctx gagnerait après la
+  résolution — la sonde logique déclarée après écrase par
+  ordre de source) et **asymétriques** (`solid`/`double` —
+  le shorthand d'axe pose les deux côtés → delta garanti ;
+  la signature ne distingue pas `dashed`/`dotted`, `double`
+  est la classe discriminante) ; `-style` ctx = un style
+  posé (`none`/`hidden` deviennent mesurables — l'identité
+  ne coûte que la sonde du style ctx). **Sizing/marges** :
+  `min-*` sous `margin-left:790px` (une contrainte
+  `width`/`max-width` propre briderait la mesure
+  intrinsèque, §5.1 — mesuré en session) ; `max-*` sous
+  contrainte posée (`none`/`stretch` discriminables) ;
+  marges absolues `left:0;right:0;width:100px` (`auto`
+  absorbe le slack, §10.3.7) ; `margin-inline-end` sous
+  `direction:rtl` (résout `margin-left` → observable). Sonde
+  `side-relative_values` : `x-end`/`y-end` (`x-start` =
+  bord de début = identité, n'aurait jamais mesuré).
+  **Harnais paintv** : `build_box_tree_sized_urls` alimenté
+  depuis `content_images`/`replaced` — les boîtes remplacées
+  de pseudo (`content:url`, R-308) dégradaient à 0 px sans
+  taille intrinsèque → `url`/`content_replacement`/`image`
+  retrouvés (+3, capacité réelle). **Misses honnêtes** :
+  intrinsèques axe bloc (`block-size`/`min-block-size`… —
+  exigent une mesure de hauteur au contenu, file), 
+  `margin-right:auto` (puits de slack ≡ 0 en LTR),
+  `text-align:match-parent` (≡ `inherit` sous parent
+  `start` — résolu en cascade, inobservable à l'oracle
+  géométrique), `content:gradient`, `anchor()`/`anchor-
+  size()` en marges. Verrous : `logical_borders` ×8
+  (overflow h/v, float/clear LTR+RTL, match-parent ×2) ;
+  `computedv_expansion_vs_inertie_verbatim` recalé
+  (`overflow-block` résolu, plus verbatim). Cliquet vert.

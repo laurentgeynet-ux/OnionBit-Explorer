@@ -7519,11 +7519,57 @@ fn resolve_logical_props(
             }
         }
     }
+    // Valeurs logiques (css-logical-1 §4.1, BCD-2) — les
+    // noms `float`/`clear` sont déjà physiques ; `inline-*`
+    // se résout en arête réelle selon (`own`, `direction`).
+    // Modes verticaux : `inline-start`/`end` tombe sur
+    // `top`/`bottom` — le moteur ne flotte pas sur l'axe
+    // bloc, la valeur reste verbatim (inerte, honnête).
+    for k in ["float", "clear"] {
+        let idx = match props.get(k).map(String::as_str) {
+            Some("inline-start") => 0usize,
+            Some("inline-end") => 1,
+            _ => continue,
+        };
+        let real = logical_edge(own, rtl, idx);
+        if matches!(real, "left" | "right") {
+            props.insert(k.to_string(), real.to_string());
+        }
+    }
+    // `text-align: match-parent` (css-text-3 §8.1, BCD-2) :
+    // hérite l'alignement du parent, `start`/`end` étant
+    // résolus dans la direction de **l'élément** (un enfant
+    // rtl d'un parent `start` s'aligne à droite).
+    if props
+        .get("text-align")
+        .is_some_and(|v| v.trim() == "match-parent")
+    {
+        let pv = parent.and_then(|p| p.get("text-align")).unwrap_or("start");
+        let resolved = match pv.trim() {
+            "start" => {
+                if rtl {
+                    "right"
+                } else {
+                    "left"
+                }
+            }
+            "end" => {
+                if rtl {
+                    "left"
+                } else {
+                    "right"
+                }
+            }
+            other => other,
+        };
+        props.insert("text-align".to_string(), resolved.to_string());
+    }
 }
 
 /// Nom logique → nom du repère de flux (R-183) — corps du
 /// mapping extrait de [`resolve_logical_props`]. `None` =
 /// nom non logique.
+#[allow(clippy::too_many_lines)] // table de correspondance — croît avec la couverture.
 fn logical_name(
     k: &str,
     own: crate::value::WritingMode,
@@ -7625,6 +7671,26 @@ fn logical_name(
             k.strip_suffix("block-size").unwrap_or_default(),
             if same_axes { "height" } else { "width" }
         )),
+        // css-overflow-3 §4 (BCD-2) : les overflows
+        // flow-relative correspondent à `overflow-x`/`y`
+        // selon le mode d'écriture **propre** — axe bloc =
+        // `y` en horizontal, `x` en vertical.
+        "overflow-block" => Some(
+            if own.is_vertical() {
+                "overflow-x"
+            } else {
+                "overflow-y"
+            }
+            .to_string(),
+        ),
+        "overflow-inline" => Some(
+            if own.is_vertical() {
+                "overflow-y"
+            } else {
+                "overflow-x"
+            }
+            .to_string(),
+        ),
         _ => None,
     }
 }
