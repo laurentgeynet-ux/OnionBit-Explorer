@@ -291,12 +291,14 @@ impl JsRegExp {
         Some(self.build_match(hay, &caps))
     }
 
-    /// `exec` driving `lastIndex`: `g`/`y` read and advance it —
-    /// the object-side bookkeeping lives in builtins.
+    /// `exec` driving `lastIndex`: `g`/`y` read it and spec
+    /// `RegExpBuiltinExec` writes back **endIndex** — jamais
+    /// bumpé sur match vide (l'avance est à la charge des
+    /// boucles appelantes : `exec_all`, `@@match`, `@@split`).
     pub fn exec_from(&self, hay: &str, last_index: usize) -> Option<(ExecMatch, usize)> {
         let m = self.exec(hay, last_index)?;
-        let new_last = if m.end > last_index { m.end } else { m.end + 1 };
-        Some((m, new_last))
+        let end = m.end;
+        Some((m, end))
     }
 
     /// All matches of a `g` regex from `start`, empty matches bumped

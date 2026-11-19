@@ -239,26 +239,177 @@ pub(crate) fn re_sym_search(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
     }
 }
 
-/// `rx[Symbol.split](str, limit)` — captures insérées entre les
-/// morceaux (délègue à `JsRegExp::split`).
-pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = e.to_js_jstr(arg(args, 0))?;
-    let limit = match arg(args, 1) {
-        Value::Undefined => usize::MAX,
-        v => e.to_number(v)? as usize,
-    };
-    let (re, _id) = as_regexp(e, this)?;
-    if limit == 0 {
-        return Ok(arr_of(e, Vec::new()));
+/// `RegExpExec(R, S)` (spec 22.2.7.1, JS-C617) : `exec`
+/// callable (lu par `Get` — observable) → `Call(exec, R, «S»)`,
+/// résultat non-objet non-null → `TypeError` ; non-callable →
+/// `RegExpBuiltinExec` — le slot `[[RegExpMatcher]]` est requis
+/// (un objet sans slot → `TypeError`).
+fn reg_exp_exec(e: &mut Engine, rx: Value, s: Value) -> JsResult<Value> {
+    let exec = e.get_prop_value(rx.clone(), "exec")?;
+    if e.is_callable(exec.clone()) {
+        let r = e.call_value(exec, rx, &[s])?;
+        if !e.is_spec_object(&r) && !matches!(r, Value::Null) {
+            return Err(e.type_error("RegExp exec result must be an Object or null"));
+        }
+        return Ok(r);
     }
-    let (hay, dec) = re.enc_hay(&s);
-    let vals: Vec<Value> = re
-        .split(&hay)
-        .into_iter()
-        .take(limit)
-        .map(|p| re_str_val(e, p, dec))
-        .collect();
-    Ok(arr_of(e, vals))
+    if matches!(rx, Value::Obj(id)
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::RegExp(_))))
+    {
+        return regexp_exec(e, rx, &[s]);
+    }
+    Err(e.type_error("not a RegExp"))
+}
+
+/// `%RegExp%` du realm courant — défaut `SpeciesConstructor`.
+fn regexp_intrinsic(e: &mut Engine) -> JsResult<Value> {
+    e.realm_global_own(e.cur_ctx, "RegExp")
+        .ok_or_else(|| e.type_error("missing %RegExp% intrinsic"))
+}
+
+/// `array[lengthA] = v` (`CreateDataPropertyOrThrow`) puis
+/// `lengthA += 1` — `true` quand `lengthA` atteint `lim`.
+fn emit_split(
+    e: &mut Engine,
+    aid: ObjId,
+    len_a: &mut usize,
+    lim: usize,
+    v: Value,
+) -> JsResult<bool> {
+    if !e.create_data_prop_spec_on(aid, &len_a.to_string(), v)? {
+        return Err(e.type_error("split: element is not creatable"));
+    }
+    *len_a += 1;
+    Ok(*len_a >= lim)
+}
+
+/// `rx[Symbol.split](str, limit)` — spec 22.2.6.14 (JS-C617) :
+/// `SpeciesConstructor` → `Construct(C, «rx, flags+y»)` → boucle
+/// `RegExpExec` à `lastIndex` **observable** (le `exec` d'un
+/// splitter custom peut le déplacer — `matchEnd` est relu après
+/// l'appel, pas inféré du match). Captures intercalées, `lim`
+/// borne `lengthA`. Avant : stub natif `JsRegExp::split` — ni
+/// species, ni flags, ni `lastIndex`, ni `exec` custom
+/// n'étaient observés.
+pub(crate) fn re_sym_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if !e.is_spec_object(&this) {
+        return Err(e.type_error("Symbol.split receiver is not an object"));
+    }
+    let s = e.to_js_jstr(arg(args, 0))?;
+    // `SpeciesConstructor(rx, %RegExp%)` : `constructor` puis
+    // `@@species` lus par `Get` (accesseurs observables).
+    let c = e.get_prop_value(this.clone(), "constructor")?;
+    let ctor = if matches!(c, Value::Undefined) {
+        regexp_intrinsic(e)?
+    } else {
+        if !e.is_spec_object(&c) {
+            return Err(e.type_error("constructor is not an object"));
+        }
+        match e.get_prop_value(c, crate::interp::SYM_SPECIES)? {
+            Value::Undefined | Value::Null => regexp_intrinsic(e)?,
+            sc if e.is_constructor(sc.clone()) => sc,
+            _ => return Err(e.type_error("@@species is not a constructor")),
+        }
+    };
+    let flags_v = e.get_prop_value(this.clone(), "flags")?;
+    let flags = e.to_js_string(flags_v)?;
+    // `unicodeMatching` — sert `AdvanceStringIndex` ; +1 char
+    // est correct des deux côtés dans notre domaine char.
+    let _unicode = flags.contains('u') || flags.contains('v');
+    let new_flags = if flags.contains('y') {
+        flags
+    } else {
+        format!("{flags}y")
+    };
+    let nf_v = e.str_val(new_flags);
+    let splitter = e.construct(ctor, &[this, nf_v])?;
+    let a = e.new_array(Vec::new());
+    let Value::Obj(aid) = a.clone() else {
+        return Ok(a);
+    };
+    let lim = match arg(args, 1) {
+        Value::Undefined => u32::MAX as usize,
+        v => to_uint32(e.to_number(v)?) as usize,
+    };
+    if lim == 0 {
+        return Ok(a);
+    }
+    // Domaine encodé quand `s` porte des `units` (lone
+    // surrogates) — même convention qu'`enc_hay` : les pièces
+    // émises se décodent via `re_str_val(e, _, dec)`.
+    let (hay_cow, dec): (std::borrow::Cow<'_, str>, bool) = if s.has_units() {
+        (
+            std::borrow::Cow::Owned(crate::regexp::re_encode(&s.units_view())),
+            true,
+        )
+    } else {
+        (std::borrow::Cow::Borrowed(s.as_str()), false)
+    };
+    let hay: Vec<char> = hay_cow.chars().collect();
+    let s_arg = Value::Str(s);
+    let size = hay.len();
+    let mut length_a = 0usize;
+    // Chaîne vide : un match → `[]`, sinon `[s]`.
+    if size == 0 {
+        let mr = reg_exp_exec(e, splitter, s_arg)?;
+        if !matches!(mr, Value::Null) {
+            return Ok(a);
+        }
+        let empty_v = re_str_val(e, "", dec);
+        emit_split(e, aid, &mut length_a, lim, empty_v)?;
+        return Ok(a);
+    }
+    let mut last_match_end = 0usize;
+    let mut search_index = 0usize;
+    while search_index < size {
+        // `Set(splitter, "lastIndex", 𝔽(q), true)` — observable.
+        e.set_prop_value(
+            splitter.clone(),
+            "lastIndex",
+            Value::Num(search_index as f64),
+        )?;
+        let mr = reg_exp_exec(e, splitter.clone(), s_arg.clone())?;
+        if matches!(mr, Value::Null) {
+            // `AdvanceStringIndex` : +1 char — en unicode les
+            // paires de surrogates sont déjà un char unique ;
+            // non-unicode sur l'astral avance d'un char au lieu
+            // d'un code unit (déviation cataloguée).
+            search_index += 1;
+            continue;
+        }
+        // `matchEnd = ToLength(Get(splitter,"lastIndex"))` —
+        // relu *après* `exec`, borné à `size`.
+        let end_v = e.get_prop_value(splitter.clone(), "lastIndex")?;
+        let match_end = (e.to_number(end_v)?.max(0.0) as usize).min(size);
+        if match_end == last_match_end {
+            search_index += 1;
+            continue;
+        }
+        let piece: String = hay[last_match_end..search_index].iter().collect();
+        let piece_v = re_str_val(e, &piece, dec);
+        if emit_split(e, aid, &mut length_a, lim, piece_v)? {
+            return Ok(a);
+        }
+        last_match_end = match_end;
+        // Captures : `LengthOfArrayLike(matchResult) - 1` puis
+        // `Get(matchResult, i)` — observable (un résultat custom
+        // peut mentir sur ses propres indexes).
+        let n_caps = {
+            let lv = e.get_prop_value(mr.clone(), "length")?;
+            (e.to_number(lv)?.max(0.0) as usize).saturating_sub(1)
+        };
+        for ci in 1..=n_caps {
+            let cap = e.get_prop_value(mr.clone(), &ci.to_string())?;
+            if emit_split(e, aid, &mut length_a, lim, cap)? {
+                return Ok(a);
+            }
+        }
+        search_index = last_match_end;
+    }
+    let piece: String = hay[last_match_end..size].iter().collect();
+    let piece_v = re_str_val(e, &piece, dec);
+    emit_split(e, aid, &mut length_a, lim, piece_v)?;
+    Ok(a)
 }
 
 /// `Error.captureStackTrace(obj, ctor?)` — extension V8 : pose la
