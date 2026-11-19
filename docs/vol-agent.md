@@ -3,6 +3,16 @@
 
 # Vol agent — conduire le navigateur par l'API
 
+> **Étape 317 — ce document est la référence post-mortem.**
+> La séquence de lancement/clôture est mécanisée par
+> `scripts/vol_start.ps1` (claim atomique `vol<N>/CLAIMED.json`
+> + build + daemon + Job Object) et `scripts/vol_close.ps1`
+> (shutdown → kill pidfile, GC registre, DONE, commit corpus) ;
+> l'aide-mémoire de mission est `.devin/skills/vol/SKILL.md`,
+> les règles dures sont dans `docs/vol-protocole.md`. Les §0-§1
+> ci-dessous décrivent le flux manuel sous-jacent — utile pour
+> comprendre un incident, plus pour le réciter.
+
 Procédure pour qu'une piste (PIPE, NAV, JS) joue un **vol humain
 sans humain** : les yeux = la frame PNG du moteur, les mains =
 l'API REST d'input, la télémétrie = `dom`/`layout`/`mem`/SSE.

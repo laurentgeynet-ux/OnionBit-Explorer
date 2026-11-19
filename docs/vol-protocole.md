@@ -1,179 +1,57 @@
-# Vol — protocole opérationnel (distillé)
+# Vol — protocole opérationnel
 
-> Version légère de `docs/vol-agent.md` (913 lignes — la
-> référence complète, ouverte en post-mortem). Ce fichier
-> porte la séquence de vol et les règles qui préviennent
-> les accidents ; le cas par cas renvoie « vol-agent §N ».
-> Terrain lu au décollage : `Explorer-data/vols/FILE.md`.
+> **Étape 317** : la séquence de vol est mécanisée — deux
+> commandes remplacent les checklists :
+>
+> ```powershell
+> pwsh -File scripts/vol_start.ps1 -Mission <TAG> -Cibles <liste>
+> #   alloc vol<N> atomique (claim = CLAIMED.json) → arbre propre
+> #   → build release → spawn daemon + joblimit → imprime port/pid
+> pwsh -File scripts/vol_close.ps1 -Vol <N>
+> #   shutdown→kill pidfile → GC registre daemons → DONE → commit
+> ```
+>
+> L'aide-mémoire de mission (endpoints, ordre des sondes,
+> interdits) = `.devin/skills/vol/SKILL.md` — source unique.
+> Ce fichier ne garde que les deux référentiels stables :
+> les **signatures de mort** et les **règles dures**.
 
-## 0. Checklist de lancement
-
-```powershell
-# 0.1 arbre propre + HEAD connu
-git status ; git rev-parse HEAD
-
-# 0.2 binaire contractuel — worktree de vol PERSISTANT
-# (jamais d'exe deviné dans un autre arbre — un daemon
-# spawné depuis l'exe d'un autre worktree s'annonce dans
-# SON registre ; le résolveur vit dans spawn_daemon.ps1,
-# preuve = exe.log).
-git worktree add --detach C:\OnionBit-Explorer-vol HEAD   # 1 fois
-git -C C:\OnionBit-Explorer-vol checkout <sha-du-vol>     # par vol
-Push-Location C:\OnionBit-Explorer-vol
-cargo build --release -p explorer-daemon   # attendre « Finished »
-Pop-Location
-
-# 0.3 daemon dédié — port 9385+ (jamais 9377 = humain),
-# profil déclaré, fenêtre cachée, canal `session` (défaut —
-# meurt avec la session, signature lisible ; `-Via wmi` =
-# détaché, parenté wmiprvse tuée par certaines politiques)
-$env:EXPLORER_VIEWPORT='1366x900'
-$env:EXPLORER_PROFILE='vol:vol<N>'
-$env:EXPLORER_MEM_DIAG='1'
-pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
-  -Repo C:\OnionBit-Explorer-vol `
-  -LogDir "Explorer-data\vols\vol<N>\logs"
-
-# 0.4 joblimit obligatoire — <pid> = « daemon PID <n> »,
-# JAMAIS le « cmd watchdog PID »
-pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
-
-# 0.5 artefacts — rien hors Explorer-data\vols\vol<N>\
-#   logs → vol<N>\logs\  (daemon + flight/death + watch)
-#   PNG  → vol<N>\captures\<cible>.png
-#   geom → vol<N>\captures\<cible>.geom.json (étape 288)
-#   rapport → vols\rapports\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md
-```
-
-## 0b. Variante — chasse §B-114 à cap relevé (solo)
-
-Vol de diagnostic exceptionnel : laisser la tempête se
-dérouler pour que les réservoirs nommés (étape 311)
-désignent le fuyard — **pas** un réglage de la station
-(~16 Gio : cap 8 Gio + build parallèle = crash mesuré).
-
-- **Solo strict** : aucun autre vol, aucun agent lourd,
-  et **rien de lourd pendant que le daemon vit** — le
-  build se fait avant le spawn (séquence 0.2→0.3
-  inchangée), ensuite pas même un `cargo check`.
-- `vol_joblimit -LimitMB 8192` (au lieu de 5 120) ;
-  `EXPLORER_RSS_SHED_MB=6144` — la dégradation reste
-  armée mais laisse la marge.
-- Sondes : `EXPLORER_ALLOC_TRACE=1` + `mem_diag` étape
-  311 (`dom_b`/`jrnl_b`/`muts_b`/`intern`/`bfc`/`bfc_b`).
-- Cibles : flipkart (drain `applies`, alloc fatale
-  1 229 400 B verbatim ×4), theverge (variante
-  `net_done`).
-- Verdict cherché : **quel compteur nommé** atteint la
-  zone fatale — pas « ça monte ».
-- Le joblimit du rapport (8 192) documente lui-même
-  l'écart à la baseline corpus 5 120 — retour à
-  5 120 dès la cause fixée.
-
-## 1. Séquence de vol
-
-```powershell
-# onglet VIDE puis nav explicite — {url} de POST /tabs n'est
-# jamais navigué (vol 625)
-curl -s -X POST http://127.0.0.1:9385/api/tabs        # → id
-curl -s -X POST http://127.0.0.1:9385/api/tabs/1/navigate `
-  -d '{"url":"https://site"}' -H "Content-Type: application/json"
-
-# yeux : frame → vignette, JAMAIS read le PNG brut
-# (2-6 Mo → crash session — vol 99 ; shrink_capture.ps1
-#  → _view_*.png ~300 Ko, lire uniquement la vignette)
-curl -s http://127.0.0.1:9385/api/tabs/1/frame -o f.png
-pwsh -File scripts/shrink_capture.ps1 f.png
-
-# premier réflexe bissection : /console AVANT le DOM
-curl -s http://127.0.0.1:9385/api/tabs/1/console
-# géométrie par cible : /api/tabs/1/geometry → .geom.json
-```
-
-## 2. Endpoints essentiels (carte complète : vol-agent §3)
-
-| Endpoint | Rôle |
-|---|---|
-| `GET /tabs/{id}/frame` `?x&y&w&h` | yeux (région zoomée) |
-| `POST /tabs/{id}/input` `click/scroll/key` | mains |
-| `GET /tabs/{id}/console` | erreurs persistantes (ring 512) |
-| `GET /tabs/{id}/dom` `/layout` `/mem` | télémétrie — **404 transitoire** = apply en cours, retenter |
-| `GET /tabs/{id}/geometry` | oracle `geo_diff` (étape 288) |
-| `GET /tabs/{id}/media` `…/segments?peek=` | média — `peek` lecture seule, JAMAIS `from` (vol 627) |
-| `GET /api/events` | SSE |
-| `POST /api/shutdown` | arrêt graceful (étape 296) |
-
-## 3. Règles dures
-
-- **Verdict = binaire frais** — `Finished` vu + `exe.log`
-  cité ; jamais sur WIP ni exe qui traîne.
-- **Arrêt = graceful d'abord** : `POST /api/shutdown` →
-  `taskkill /PID /F` en dernier recours seulement — jamais
-  `/IM` (daemons voisins d'autres sessions). PID depuis le
-  pidfile `daemon-<port>.pid` ou l'annonce, pas à main levée.
-- **Avant tout kill** : lire `Explorer-data\daemons\` —
-  vivacité = pid + image + **port lié sous ce pid** (284) ;
-  vérifier TOUS les registres (un par worktree : main, perf,
-  chaque worktree de vol).
-- **Job Object** : `vol_joblimit` dès le départ (il borne,
-  ne tue pas — innocenté §B-135). `vol_memwatch` = chasses
-  de fuite documentées seulement (sa signature = kill externe).
-- **Profil froid** pour tout constat consentement
-  (`consent_wall:soft|hard` — vol-agent §8).
-- **Un constat = mesure** (`doc_h`, console, frame jointe) —
-  jamais « ça a l'air ».
-- **Capture blanche ≠ verdict** — un `/frame` pris pendant la
-  fenêtre detach §B-134 ou avant l'hydratation montre blanc
-  alors que la page peint 2 s plus tard. Verdict « blanc /
-  non rendu / §B-141 » **exige la frame de fin de dwell** :
-  re-pull après settle (si `calls`/`sched.tally` bougent
-  encore, attendre la quiescence), et idéalement deux pulls
-  byte-identiques espacés (~3-5 s) comme convention
-  « stabilisé ». L'archive `<cible>.png` = la **dernière**
-  frame ; une capture précoce peut être jointe mais nommée
-  avec son offset (`<cible>.t+12s.png`).
-- **Vision (console EAP) = observateur actif** — chaque pull
-  `/frame` arme la pompe de rendu (~4/s) : un daemon observé
-  en continu fait des passes `paint.raster` qu'un daemon sondé
-  ne fait pas. Si la vision est attachée pendant une fenêtre
-  de mesure (§B-114 surtout — raster ~2 Gio/passe vu au 844),
-  noter « vision attachée t=… » au rapport.
-
-## 4. Signatures de mort (détail : vol-agent §7)
+## Signatures de mort (cas par cas : vol-agent.md §7)
 
 | Constat | Classe |
 |---|---|
-| sentinelle `panic:`/`rss_guard`/`console:*`/`shutdown:api` | nommée — lire la sentinelle |
-| `alive` + beats sains + `exit.log` présent | **kill sélectif** externe (calibration `taskkill /F` → `EXIT:1`) |
-| arbre entier mort (daemon+watchdog+frères) + `exit.log` ABSENT | **job-close** — session lanceuse fermée (canal `session` : contrat signé, pas mystère) |
+| sentinelle `panic:`/`rss_guard:`/`console:*`/`shutdown:api` | nommée — lire la sentinelle |
+| `alive` + beats sains + `exit.log` présent | **kill sélectif** externe (`taskkill /F` → `EXIT:1`) |
+| arbre entier mort + `exit.log` ABSENT | **job-close** — session lanceuse fermée (canal `session`) |
 | `alive` + beat figé sur balise | stack overflow/spin — `drain`/`host` nomment le site |
 | `alive` + `commit` au plafond | OOM/alloc-abort |
 | beats vivants, `drain` fixe, `calls` figé | wedge — `session.ping` EAP nomme le verbe tenu |
 
-## 5. Clôture de vol
+## Règles dures
 
-1. `git rev-parse main` relu (sha binaire vs commits post).
-2. Géométrie : `ref_capture --list` + `geo_diff` par paire
-   `*.geom.json` → ligne « x % divergents » au rapport
-   **obligatoire**, même quand elle dit `hors-mesure` ou
-   `non capté (mort §B-xxx)` — une géométrie absente non
-   notée = chaîne non jouée. Conventions du corpus :
-   - refs sous `captures/refs/<url>.ref.json` (produites
-     par `ref_capture.mjs`) — jamais `*.ref.geom.json`
-     à plat : invisible pour `--list`, non mutualisable ;
-   - archiver le diff : `geo_diff --out <site>.geodiff.json` ;
-   - un `.geom.json` vide/échoué s'écrit
-     `{"error":"pas de géométrie","captured":false}` —
-     jamais de texte brut dans un `.json` (casse tout
-     parse en masse).
-3. Rapport gabarit `rapports\_TEMPLATE.md` — en-tête
-   (binaire/PID/port/profil), constats avec ID §B ou
-   proposition nouvelle entrée, statuts `OUVERT→FIX LIVRÉ
-   →RÉSOLU` (fermé seulement par re-vol post-fix).
-4. **SYNTHESE.md** : ligne §A journal + compteur §B
-   (`vol N : site ×N`) ; **FILE.md** : ligne d'état mise à
-   jour. CLAIMS libérée.
-5. Daemon arrêté graceful (annonce retirée = preuve).
+- **Verdict = binaire frais** — `Finished` vu + `exe.log`
+  cité ; jamais sur WIP ni exe qui traîne (`vol_start`
+  refuse l'arbre sale sauf `-Force`).
+- **Arrêt = graceful d'abord** : `POST /api/shutdown` →
+  `taskkill /PID /F` en dernier recours — jamais `/IM`
+  (PID du pidfile `daemon-<port>.pid`, jamais à main levée).
+- **Avant tout kill** : lire `Explorer-data\daemons\` —
+  vivacité = pid + image + port lié sous ce pid (284). Le
+  corpus est **partagé par jonction** entre clones : un seul
+  registre physique, mais des daemons issus d'exes d'autres
+  arbres — vérifier le profil annoncé, pas seulement le pid.
+- **Job Object** : `vol_start` l'arme (il borne, ne tue pas —
+  innocenté §B-135). `vol_memwatch` = chasses de fuite
+  documentées seulement (sa signature = kill externe).
+- **Un constat = mesure** — jamais « ça a l'air ».
+- **Capture blanche ≠ verdict** — `/frame` de fin de dwell
+  exigée (deux pulls byte-identiques espacés ~3-5 s =
+  « stabilisé ») ; l'archive `<cible>.png` = la **dernière**
+  frame, les précoces sont nommées `<cible>.t+<n>s.png`.
+- **Vision = observateur actif** — chaque pull `/frame` arme
+  la pompe de rendu (~4/s) ; noter « vision attachée t=… »
+  pendant une fenêtre de mesure.
 
-Post-mortem, cas par cas, signatures complètes, consentement,
-MCP/EAP, gabarits : `docs/vol-agent.md`.
+Post-mortem, gabarits, consentement, MCP/EAP, détail des
+endpoints : `docs/vol-agent.md` (référence complète, ~900 l.).
+Corpus : `Explorer-data/vols/README.md` (structure, git local).

@@ -8227,6 +8227,21 @@ MCP = adaptateur, jamais la base.
   mesure inaugurale 83,7 % divergents, artefacts
   `Explorer-data/vols/vitrine/`. Verrou :
   `dir_transport_replays_youtube_flight`.
+- [x] **Étape 317. Protocole de vol mécanisé : `vol_start.ps1`
+  + `vol_close.ps1` — le dossier `vol<N>` EST le claim**
+  (`scripts/` + skill `vol` + `docs/vol-protocole.md` —
+  simplification opérateur après les anomalies des vols
+  897-903 : doubles claims « vol 903 », daemon mort déclaré
+  « sain », registre fantôme). `vol_start` : allocation
+  atomique `CLAIMED.json` (`CreateNew` exclusif — course
+  `max+1` impossible via la jonction corpus partagé), arbre
+  propre vérifié, build release, spawn daemon + Job Object,
+  journaux flight/death dirigés dans `vol<N>\logs` par env.
+  `vol_close` : shutdown graceful → kill pidfile en recours,
+  GC du registre `daemons/` (pid+image+port lié, étape 284),
+  `DONE` libère le claim, commit ciblé du corpus.
+  `SKILL.md` 412→111 lignes ; `vol-protocole.md` ne garde
+  que signatures de mort + règles dures ; CLAIMS.md legacy.
 - [x] **Étape 315. Attribution d'anomalies terrain : sidecar
   `--styles` + `geo_diff` enrichi (demande équipe vols)**
   (`explorer-layout` `style_dump` + `explorer-core`
