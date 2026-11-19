@@ -2585,14 +2585,28 @@ fn paint_item(
         }
         // R-108 — marqueur textuel : la fonte se résout ici
         // (la display list ne shape pas), run shapé puis peint.
+        // R-307 — `anchor_end` : `origin.x` = bord droit,
+        // l'avance réelle du run est soustraite (mesure
+        // glyphes — fin de l'estimation ~0,55 em/car).
         DisplayItem::MarkerText {
             origin,
+            anchor_end,
             text,
             font,
             color,
             size_px,
         } => paint_marker_text(
-            pixmap, *origin, text, font, *color, *size_px, dpi, fonts, gc, clip,
+            pixmap,
+            *origin,
+            *anchor_end,
+            text,
+            font,
+            *color,
+            *size_px,
+            dpi,
+            fonts,
+            gc,
+            clip,
         ),
         DisplayItem::BorderImage {
             rect,
@@ -2747,6 +2761,7 @@ fn paint_border_image(
 fn paint_marker_text(
     pixmap: &mut Pixmap,
     origin: (f32, f32),
+    anchor_end: bool,
     text: &str,
     font: &FontRequest,
     color: Color,
@@ -2762,9 +2777,18 @@ fn paint_marker_text(
     let Some(run) = explorer_layout::font::shape_face(&data, face, text, size_px, false) else {
         return;
     };
+    // R-307 — ancre `end` : `origin.x` désigne le bord
+    // droit du libellé (marqueur `outside` LTR — son bord
+    // end épouse le bord start du contenu, css-lists §3) ;
+    // l'avance réelle du run le replace à gauche.
+    let x = if anchor_end {
+        origin.0 - run.advance
+    } else {
+        origin.0
+    };
     paint_text(
         pixmap,
-        origin.0,
+        x,
         origin.1,
         &run,
         font,

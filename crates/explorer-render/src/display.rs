@@ -361,8 +361,15 @@ pub enum DisplayItem {
     /// la display list ne shape pas, le raster résout la fonte et
     /// shape la chaîne au paint.
     MarkerText {
-        /// Origine : x gauche, y de la baseline.
+        /// Origine : x du bord désigné par `anchor_end`
+        /// (gauche si `false`), y de la baseline.
         origin: (f32, f32),
+        /// R-307 — `true` : `origin.x` est le bord **droit**
+        /// du libellé — le raster soustrait l'avance réelle
+        /// du run shapé (mesure glyphes honnête au lieu de
+        /// l'estimation caractère × 0,55 em — Ahem = 1 em
+        /// par caractère, l'erreur était ~×2).
+        anchor_end: bool,
         /// Libellé (`"1."`, `"c."`, `"iv."`…).
         text: String,
         /// Requête fonte.
@@ -706,8 +713,13 @@ impl DisplayList {
                 DisplayItem::Marker { rect, kind, .. } => {
                     let _ = writeln!(out, "marker {kind:?} {rect:?}");
                 }
-                DisplayItem::MarkerText { origin, text, .. } => {
-                    let _ = writeln!(out, "marker-text {text:?} {origin:?}");
+                DisplayItem::MarkerText {
+                    origin,
+                    anchor_end,
+                    text,
+                    ..
+                } => {
+                    let _ = writeln!(out, "marker-text {text:?} {origin:?} end={anchor_end}");
                 }
                 DisplayItem::PushClip(r) => {
                     let _ = writeln!(out, "push-clip {r:?}");
@@ -1128,6 +1140,7 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
         (
             D::MarkerText {
                 origin: o1,
+                anchor_end: a1,
                 text: t1,
                 font: f1,
                 color: c1,
@@ -1135,12 +1148,13 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             },
             D::MarkerText {
                 origin: o2,
+                anchor_end: a2,
                 text: t2,
                 font: f2,
                 color: c2,
                 size_px: s2,
             },
-        ) => o1 == o2 && t1 == t2 && f1 == f2 && c1 == c2 && s1 == s2,
+        ) => o1 == o2 && a1 == a2 && t1 == t2 && f1 == f2 && c1 == c2 && s1 == s2,
         (D::PushClip(r1), D::PushClip(r2)) => r1 == r2,
         (D::PushClipPath { points: p1 }, D::PushClipPath { points: p2 }) => p1 == p2,
         (
@@ -3062,15 +3076,26 @@ fn emit_list_marker(
     let gap = (fs * 0.34).max(1.0);
     let baseline_y = first_line_baseline(bx, fs);
     let cy = baseline_y - fs * 0.3;
-    let content_x = content_rect(bx).x;
+    let crect = content_rect(bx);
     let inside = bx
         .style
         .get("list-style-position")
         .is_some_and(|p| p.trim() == "inside");
+    // R-307 — `direction:rtl` : le marqueur vit au bord
+    // **droit** du contenu (le `outside` épouse l'axe
+    // inline-start — à droite en rtl ; ref
+    // `outside-marker-rtl`, jusqu'ici vacuante car les
+    // deux côtés produisaient la même géométrie ltr).
+    let rtl = bx
+        .style
+        .get("direction")
+        .is_some_and(|d| d.trim().eq_ignore_ascii_case("rtl"));
     let cx = if inside {
-        content_x + d / 2.0
+        crect.x + d / 2.0
+    } else if rtl {
+        crect.x + crect.width + gap + d / 2.0
     } else {
-        content_x - gap - d / 2.0
+        crect.x - gap - d / 2.0
     };
     let color = bx.style.color("color").unwrap_or(Color::BLACK);
     items.push(DisplayItem::Marker {
@@ -3127,23 +3152,33 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
         )
     };
     let baseline_y = first_line_baseline(bx, fs);
-    let content_x = content_rect(bx).x;
+    let crect = content_rect(bx);
     let inside = bx
         .style
         .get("list-style-position")
         .is_some_and(|p| p.trim() == "inside");
-    // Largeur approchée (~0.55em/car — chiffres et lettres
-    // romaines) : la gouttière aligne le marqueur à droite ;
-    // `inside` le pose au début du contenu.
-    let est_w = text.chars().count() as f32 * fs * 0.55;
-    let x = if inside {
-        content_x
+    let rtl = bx
+        .style
+        .get("direction")
+        .is_some_and(|d| d.trim().eq_ignore_ascii_case("rtl"));
+    // R-307 — bord réel, pas d'estimation : `outside` aligne
+    // le bord end du marqueur sur le bord start du contenu
+    // (css-lists §3 — le libellé finit juste avant le
+    // contenu, ref `list-style-type-string-007` : `XXXÉ2`
+    // sans espace) ; `direction:rtl` miroire — le marqueur
+    // vit au bord **droit** du contenu (`2ÉXXX`). Le raster
+    // mesure l'avance shapée réelle (`anchor_end`).
+    let (x, anchor_end) = if inside {
+        (crect.x, false)
+    } else if rtl {
+        (crect.x + crect.width, false)
     } else {
-        content_x - (fs * 0.4).max(1.0) - est_w
+        (crect.x, true)
     };
     let color = mstyle.color("color").unwrap_or(Color::BLACK);
     items.push(DisplayItem::MarkerText {
         origin: (x + off.0, baseline_y + off.1),
+        anchor_end,
         text,
         font: font_request(mstyle),
         color,
@@ -5762,12 +5797,14 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         },
         D::MarkerText {
             origin,
+            anchor_end,
             text,
             font,
             color,
             size_px,
         } => D::MarkerText {
             origin: (origin.0 + d.0, origin.1 + d.1),
+            anchor_end: *anchor_end,
             text: text.clone(),
             font: font.clone(),
             color: *color,

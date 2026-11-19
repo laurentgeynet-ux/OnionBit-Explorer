@@ -7932,7 +7932,7 @@ h5 { font-size: 0.83em; font-weight: bold; margin-top: 1.67em; margin-bottom: 1.
 h6 { font-size: 0.67em; font-weight: bold; margin-top: 2.33em; margin-bottom: 2.33em }
 p { margin-top: 1em; margin-bottom: 1em }
 ul, ol, menu, dir, dl, dd { margin-top: 1em; margin-bottom: 1em }
-ul, ol, menu, dir { padding-left: 40px }
+ul, ol, menu, dir { padding-inline-start: 40px }
 dd { margin-left: 40px }
 blockquote { margin: 1em 40px }
 hr { border-top-width: 1px; border-style: inset }

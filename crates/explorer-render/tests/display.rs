@@ -2048,6 +2048,61 @@ fn counter_style_nomme_marqueur_outside() {
 }
 
 #[test]
+fn marker_texte_ancre_end_ltr_et_start_rtl() {
+    // R-307 — `outside` : le bord **end** du libellé épouse
+    // le bord start du contenu (mesure glyphes réelle côté
+    // raster via `anchor_end`, fin de l'estimation
+    // ~0,55 em/car — Ahem = 1 em/car, l'erreur était ~×2).
+    let (dom, bx, items) = dl(
+        "<ol><li id=i>a</li></ol>",
+        "body{margin:0} ol{padding-inline-start:60px} \
+         li{list-style-type:decimal}",
+    );
+    let li = find(&bx, by_id(&dom, "i")).expect("li");
+    // Le bloc anonyme épouse la zone contenu : son bord
+    // gauche est le `content_x` que vise le bord end.
+    let cx = li.children[0].rect.x;
+    let (origin, anchor) = items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::MarkerText {
+                origin, anchor_end, ..
+            } => Some((*origin, *anchor_end)),
+            _ => None,
+        })
+        .expect("MarkerText émis");
+    assert!(anchor, "ltr outside : ancre `end`");
+    assert!(
+        (origin.0 - cx).abs() < 1.0,
+        "bord end = bord contenu : {origin:?} vs cx={cx}"
+    );
+    // `direction:rtl` → marqueur au bord DROIT du contenu,
+    // ancre `start` (il croît vers la droite — spec
+    // inline-start, `outside-marker-rtl` enfin vérifiant).
+    let (dom2, bx2, items2) = dl(
+        "<ol style=\"direction:rtl\"><li id=i>a</li></ol>",
+        "body{margin:0} ol{padding-inline-start:60px} \
+         li{list-style-type:decimal}",
+    );
+    let li2 = find(&bx2, by_id(&dom2, "i")).expect("li rtl");
+    let right = li2.children[0].rect.x + li2.children[0].rect.width;
+    let (origin2, anchor2) = items2
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::MarkerText {
+                origin, anchor_end, ..
+            } => Some((*origin, *anchor_end)),
+            _ => None,
+        })
+        .expect("MarkerText émis (rtl)");
+    assert!(!anchor2, "rtl outside : ancre `start`");
+    assert!(
+        (origin2.0 - right).abs() < 1.0,
+        "bord start = bord droit contenu : {origin2:?} vs right={right}"
+    );
+}
+
+#[test]
 fn marker_list_style_string_litteral() {
     // R-112 — `list-style-type:"*"` : la chaîne EST le
     // marqueur (css-lists §3.3) — datatracker IETF peignait

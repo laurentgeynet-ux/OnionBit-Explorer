@@ -4774,3 +4774,22 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   background_bcd1`, `shorthand_mask_et_fit_content_bcd1`,
   `width_fit_content_fonction_bcd1` — `bcd_audit --fast`
   0 constat, cliquet vert.
+- [x] **R-307 — Marqueur texte `outside` : mesure glyphes
+  réelle, ancrage `end`/`start`, `direction: rtl` — WPT
+  202/203 (99 %)** (css + render + harnais WPT — débloque
+  le 3ᵉ des 4 échecs R-306 : `list-style-type-string-007`).
+  **`DisplayItem::MarkerText.anchor_end`** (additif) : ltr
+  → bord end du libellé au bord start du contenu, recul de
+  `run.advance` shapée au paint (fin de l'estimation
+  ~0,55 em/car, ~×2 sous Ahem) ; rtl → marqueur au bord
+  droit en ancre `start` (css-lists §4, côté inline-start).
+  Marqueurs géométriques sur le même côté logique.
+  **Feuille UA** : `padding-inline-start: 40px` (spec
+  HTML §10.3.10) remplace `padding-left` — en rtl le reste
+  physique 40 px + `padding-inline-start` auteur gonflait
+  le `ul` floatant à 190 px → retour à la ligne (le marqueur
+  n'y était pour rien). `outside-marker-rtl` désormais
+  vérifiant. **Mesure 202/203** — cliquet 201→202 ; seul
+  échec compté : `outside-marker-with-align-content`
+  (`align-content` bloc — file). Verrou :
+  `marker_texte_ancre_end_ltr_et_start_rtl` (display).
