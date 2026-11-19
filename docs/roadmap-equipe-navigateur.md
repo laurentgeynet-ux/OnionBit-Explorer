@@ -15071,9 +15071,103 @@ chaque gain rapporté contre les **deux** archétypes.
   soldés** : `[[DefineOwnProperty]]` index `≥ len` no-op et
   écriture élément via `[[Set]]` (setters proto déclenchés à
   tort) — `lang` `c17`/`c20` verts. **Reste** :
-  `Symbol.split` complet (JS-C616 — 32/88), symboles
-  well-known cross-realm (~26 modes), Proxy `defineProperty`/
-  `construct` (~20), brand-check privés (~15), `$262.agent`,
-  `ShadowRealm` ; structurels : attrs/accesseurs par élément
-  d'array et itérateur snapshot-vs-live (territoire C613
-  tranche 2).
+  `Symbol.split` complet (renuméroté **JS-C617** — C616
+  occupé par async iterators ; 32/88 → **soldé 88/88**),
+  symboles well-known cross-realm (~26 modes), Proxy
+  `defineProperty`/`construct` (~20), brand-check privés
+  (~15), `$262.agent`, `ShadowRealm` ; structurels : attrs/
+  accesseurs par élément d'array et itérateur
+  snapshot-vs-live (territoire C613 tranche 2).
+
+- [x] **JS-C616 — `for await`/`for-of` : sémantique
+  `AsyncFromSyncIterator` + `IteratorClose` unifié**
+  (`interp/{lazy,mod}.rs` + gate `tests/c616_async_iter.rs`
+  **10/10**). **`AsyncFromSyncIterator`** : `async_iterator`
+  rapporte `sync_iter` au repli `@@iterator` — `done` lu à
+  plat, c'est `result.value` qui est awaited (avant, l'await
+  armait l'objet résultat → `x` recevait
+  `[object Promise]`). **`issued`** : `true` pendant toute
+  la mécanique de pas (`next()`, lecture `done`/`value`,
+  armement) — abrupt **hors corps** → pas de close ;
+  `false` après le bind cible → abrupt du corps → close
+  (spec `ForIn/OfBodyEvaluation`). **Unwind unifié** :
+  `start_unwind`/`resume_unwind`/`Unwind{Done,Brk,Cont,
+  Throw,Ret}` remplacent `do_break`/`do_cont`/`run_finally`/
+  `unwinding` — toute complétion abrupte dépile frame par
+  frame ; le travail différé suspend : `try{finally}` →
+  marqueur `UnwindFin` (la complétion enregistrée dans
+  `unwind` reprend à sa sortie naturelle), `ForIter`/
+  `ForAwait` → `IteratorClose` (`iter.return()` — awaited
+  pour `for await`, spec `AsyncIteratorClose` : check-objet
+  à la livraison via `__awaitit` + flag de `unwind`).
+  **`fold_close`** : une abrupte du close se plie — throw
+  externe gardée, autres complétions remplacées (§7.4.6) ;
+  rejet d'un `return()` awaited plié à la reprise
+  (`resume Err` + `unwind=(u,true)`). **`for-of`** :
+  `FKind::ForIter` porte `iter` (`iter_values_iter` —
+  `Undefined` pour les chemins rapides arrays/TA/strings/
+  `for-in`, pas d'itérateur à fermer). **`Ret` unifié** :
+  `return`/`.return()` passent par la machine (`self.ret`
+  finalize à pile vide) — avant `stack.clear()` sautait
+  `finally` **et** close. **`finally` post-catch** via
+  marqueur `Try{None,fin}` sous le catch (avant : sauté
+  sur abrupt du catch). **Bugs préexistants soldés** :
+  `finally` jamais couru sur `break`/`continue`/`return`
+  traversant un `try` (`run_finally` poussait un `Seq`
+  re-dépilé par la boucle d'unwind). GC : `unwind` Throw
+  rootée, `ForIter.iter` tracé. Gates : c616 10/10,
+  lazy_gen/agen_queue/await_thenable/iter_lazy/c96_suspend/
+  c613/c615/c617/t262_realm verts, lib 54/54, hostile
+  12/12, `lang` mêmes 11 échecs préexistants, clippy/fmt/
+  doc propres. **Reste** : `continue` **labellé** vers une
+  boucle externe (les labels vivent sur le frame `Labeled`
+  — `is_loop` jamais vrai, déviation préexistante ; le gate
+  couvre `break` labellé à la place), mesure test262 du
+  cluster `iterator-close`/`for-await-of`.
+
+- [x] **JS-C617 — `RegExp.prototype[Symbol.split]` spec
+  complet : `SpeciesConstructor` → `Construct(C, «rx,
+  flags+y»)` → boucle `RegExpExec` dynamique à `lastIndex`
+  observable — sous-ensemble `Symbol.split` : 32 → **88/88
+  passes-mode (44 fichiers)** ; sous-ensemble régression
+  `RegExp/{exec,test,@@match,@@replace,@@search}` + `String/
+  {match,split,search,matchAll,replace,replaceAll}` (609
+  fichiers) : 798 → **816/1 206** (+18 = 9 fichiers
+  `String.prototype.split` regexp réparés, **0 régression
+  de fichier**)** (`builtins/species.rs`, `regexp.rs` +
+  gate `tests/c617_sym_split.rs` **12/12**).
+  **`SpeciesConstructor`** : `constructor` puis `@@species`
+  lus par `Get` (accesseurs observables, ordre spec) ;
+  `undefined`/`null`/`non-objet` → `%RegExp%` du realm
+  courant (`realm_global_own`), non-constructible →
+  `TypeError`. **`flags` lu par `Get` sur le receiver**,
+  `ToString` ; `y` ajouté si absent, conservé sinon ;
+  `u`/`v` pilotent `AdvanceStringIndex` (+1 char dans les
+  deux cas — le domaine char fait coïncider paires de
+  surrogates et chars). **`RegExpExec` dynamique**
+  (`reg_exp_exec`) : `exec` callable observé et appelé —
+  résultat non-objet non-`null` → `TypeError` ; non-callable
+  → `RegExpBuiltinExec` natif (slot `[[RegExpMatcher]]`
+  requis — un objet sans slot → `TypeError`). **Boucle
+  spec** : `Set(splitter,"lastIndex",q)` avant chaque exec
+  (observable, erreur propagée), `matchEnd` = `ToLength(Get(
+  lastIndex))` **relu après exec** (un exec custom peut le
+  déplacer), pièce `substring(lastMatchEnd, q)` — le point
+  de départ du scan, pas `match.index` — captures `Get(
+  matchResult, i)` intercalées (`undefined` comprises),
+  `limit` en `ToUint32` (`-1` → 2³²−1, `2³²` → 0, `NaN` → 0,
+  `2.9` → 2), `limit===0` → `[]`, chaîne vide → `[]`/`[""]`,
+  résultat via `CreateDataPropertyOrThrow` (`emit_split`).
+  **`exec_from` soldé spec** : `lastIndex = endIndex` —
+  le bump `+1` sur match vide (déviation legacy) est retiré,
+  l'avance appartient aux boucles appelantes (`exec_all` se
+  bump elle-même — `@@match`/`matchAll`/`replace` intacts) ;
+  c'est ce qui rend les pièces de `@@split` correctes sur
+  matches vides (`/(?:)/[Symbol.split]('ab')` → `['a','b']`).
+  Gates : c617 12/12, c613/c615 11/11, t262_realm 9/9, lib
+  54/54, hostile 12/12, `lang` mêmes 11 échecs préexistants,
+  clippy/fmt/doc propres. **Reste** : `@@match`/`@@replace`/
+  `@@search`/`matchAll`/`String.prototype.split` natifs —
+  ~170 fichiers d'échecs catalogués (même chantier que
+  C617 : passer de `exec_all` natif à la boucle spec
+  observable).

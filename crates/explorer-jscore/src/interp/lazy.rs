@@ -960,6 +960,10 @@ enum FKind {
     },
     /// `for (t of/in it)` — items matérialisés.
     ForIter {
+        /// L'itérateur — `IteratorClose` (`iter.return()`)
+        /// sur sortie abrupte (`Undefined` pour les chemins
+        /// rapides tableau/TypedArray — pas de `return`).
+        iter: Value,
         items: Vec<Value>,
         idx: usize,
         target: ForTarget,
@@ -968,17 +972,25 @@ enum FKind {
     /// (spec `ForIn/OfBodyEvaluation` async) : `issued` marque
     /// un `next()` émis en attente de sa promesse (le résultat
     /// `{value,done}` revient lié à `__awaitit` à la reprise).
+    /// `sync_iter` : venu du repli `@@iterator` — c'est alors
+    /// `result.value` qui est awaited (`AsyncFromSyncIterator`).
     ForAwait {
         iter: Value,
         next: Value,
         target: ForTarget,
         issued: bool,
+        sync_iter: bool,
     },
-    /// `try` — throw → catch si présent ; `finally` toujours.
+    /// `try` — throw → throw → catch si présent ; `finally`
+    /// toujours.
     Try {
         catch: Option<(Pat, Vec<Stmt>)>,
         finally: Option<Vec<Stmt>>,
     },
+    /// `finally` poussé en plein dépilement (`break`/
+    /// `continue`/`return` traversant un `try`) — marqueur :
+    /// à sa sortie naturelle, l'unwind enregistré reprend.
+    UnwindFin,
     /// `switch` porteur de suspensions — sa liste est le
     /// corps **aplatit** du case atteint jusqu'à la fin
     /// (fallthrough) ; un `break` non labellé s'y arrête.
@@ -992,6 +1004,18 @@ struct GFrame {
     env: EnvRef,
     labels: Vec<Rc<str>>,
     kind: FKind,
+}
+
+/// Complétion à reprendre après un travail différé de
+/// dépilement (`finally` drainé ou `iter.return()` awaited)
+/// — `Done` : l'unwind est fini, l'exécution continue.
+enum Unwind {
+    Done,
+    Brk(Option<Rc<str>>),
+    Cont(Option<Rc<str>>),
+    Throw(Value),
+    /// `return(v)` — la valeur est dans `self.ret`.
+    Ret,
 }
 
 /// Issue d'un statement dans le frame.
@@ -1019,8 +1043,6 @@ pub(crate) struct GExec {
     done: bool,
     ret: Value,
     emit: Value,
-    /// Throw en cours pendant un `finally` sans catch.
-    unwinding: Option<Value>,
     /// Complétion `return(v)` en vol (injectée par `.return()`) :
     /// les frames se dépilent — catch ignorée, `finally` court,
     /// `yield` dans un `finally` suspend à nouveau (spec
@@ -1039,6 +1061,12 @@ pub(crate) struct GExec {
     /// synchrone cassait `it.next().then` sur ~3 656 tests
     /// test262).
     agen: Option<AgenState>,
+    /// Unwind suspendu sur un travail différé (`finally`
+    /// poussé ou `IteratorClose` awaited) — JS-C616.
+    /// `bool` = un `iter.return()` awaited vient d'être
+    /// livré — vérifier que `__awaitit` est un objet
+    /// (spec `AsyncIteratorClose`).
+    unwind: Option<(Unwind, bool)>,
 }
 
 /// Espèce de requête `%AsyncGenerator%` en file.
@@ -1095,8 +1123,8 @@ impl GExec {
             done: false,
             ret: Value::Undefined,
             emit: Value::Undefined,
-            unwinding: None,
             ret_unwind: false,
+            unwind: None,
             outer: None,
             gen_obj: Value::Undefined,
             agen: None,
@@ -1208,7 +1236,14 @@ impl GExec {
         if let Some(r) = self.resume.take() {
             match r {
                 Ok(v) => self.liver(e, v)?,
-                Err(v) => self.throw_into(e, v)?,
+                Err(v) => match self.unwind.take() {
+                    // `iter.return()` awaited rejeté : la
+                    // réjection se plie dans la complétion en
+                    // vol — une throw externe garde la sienne
+                    // (`AsyncIteratorClose`, JS-C616).
+                    Some((u, true)) => self.resume_unwind(e, fold_close(u, v))?,
+                    _ => self.throw_into(e, v)?,
+                },
             }
         }
         loop {
@@ -1218,46 +1253,15 @@ impl GExec {
             // (op-limit jamais atteint). Chaque pas du driver
             // compte désormais.
             e.tick()?;
-            // `return(v)` en vol : dépiler jusqu'au prochain
-            // `finally` — la catch est sautée (un return n'est
-            // pas une throw), les `yield` du finally suspendront
-            // via le chemin `pending` ordinaire. Le finally est
-            // poussé en frame-marqueur `Try{None,None}` pour ne
-            // pas être re-dépilé par ce même test.
+            // `return(v)` en vol : dépiler la pile — catch
+            // ignorée, `finally` courus, itérateurs clos
+            // (spec `GeneratorResumeAbrupt`) ; les `yield` du
+            // finally suspendront via le chemin `pending`
+            // ordinaire, les suspends de close/finally via
+            // `UnwindFin`.
             if self.ret_unwind {
-                let dominated = matches!(
-                    self.stack.last().map(|f| &f.kind),
-                    Some(FKind::Try {
-                        catch: None,
-                        finally: None
-                    })
-                );
-                if !dominated {
-                    loop {
-                        let Some(f) = self.stack.pop() else {
-                            self.ret_unwind = false;
-                            self.done = true;
-                            self.settle_outer(e, Ok(self.ret.clone()));
-                            return Ok(iter_result(e, self.ret.clone(), true));
-                        };
-                        if let FKind::Try {
-                            finally: Some(fin), ..
-                        } = f.kind
-                        {
-                            self.stack.push(GFrame {
-                                list: Rc::new(fin),
-                                pc: 0,
-                                env: f.env,
-                                labels: Vec::new(),
-                                kind: FKind::Try {
-                                    catch: None,
-                                    finally: None,
-                                },
-                            });
-                            break;
-                        }
-                    }
-                }
+                self.ret_unwind = false;
+                self.start_unwind(e, Unwind::Ret)?;
             }
             // `yield*` en vidange : les items restants
             // s'émettent AVANT tout statement — sinon le pc
@@ -1300,17 +1304,16 @@ impl GExec {
                 }
                 Ok(GFlow::Susp) => {}
                 Ok(GFlow::Ret(v)) => {
-                    // `return` dans un `finally` remplace la
-                    // complétion `return(v)` en vol (spec).
+                    // `return` dépile comme toute complétion
+                    // abrupte : `finally` courus, itérateurs
+                    // clos — la boucle `drive` finalise à pile
+                    // vide (`self.ret`, JS-C616).
                     self.ret_unwind = false;
                     self.ret = v.clone();
-                    self.stack.clear();
-                    self.done = true;
-                    self.settle_outer(e, Ok(v));
-                    return Ok(iter_result(e, self.ret.clone(), true));
+                    self.start_unwind(e, Unwind::Ret)?;
                 }
-                Ok(GFlow::Brk(l)) => self.do_break(e, l.as_ref())?,
-                Ok(GFlow::Cont(l)) => self.do_cont(e, l.as_ref())?,
+                Ok(GFlow::Brk(l)) => self.start_unwind(e, Unwind::Brk(l))?,
+                Ok(GFlow::Cont(l)) => self.start_unwind(e, Unwind::Cont(l))?,
                 Err(Thrown(v)) => self.throw_into(e, v)?,
             }
             if self.pending.is_some() && self.drain_step(e)? {
@@ -1378,11 +1381,42 @@ impl GExec {
         Ok(())
     }
 
-    /// `break` — pop jusqu'à la boucle/le label porteur.
-    fn do_break(&mut self, e: &mut Engine, label: Option<&Rc<str>>) -> JsResult<()> {
+    /// Nouvelle complétion abrupte — remplace toute
+    /// complétion en réserve (un `break`/`throw`/`return`
+    /// dans un `finally` l'emporte, spec).
+    fn start_unwind(&mut self, e: &mut Engine, u: Unwind) -> JsResult<()> {
+        self.unwind = None;
+        self.resume_unwind(e, u)
+    }
+
+    /// Dépile les frames pour la complétion `u` — JS-C616.
+    /// Chaque frame porteur de travail différé suspend
+    /// l'unwind : `try{…}finally{…}` → `UnwindFin` poussé
+    /// (la complétion reprend à sa sortie naturelle) ;
+    /// `ForIter`/`ForAwait` → `IteratorClose` (`iter.return()`,
+    /// awaited pour `for await` — spec `AsyncIteratorClose`).
+    fn resume_unwind(&mut self, e: &mut Engine, u: Unwind) -> JsResult<()> {
+        let mut u = u;
         loop {
-            let Some(f) = self.stack.last() else {
+            // Travail différé terminé — l'exécution continue.
+            if matches!(u, Unwind::Done) {
                 return Ok(());
+            }
+            let Some(f) = self.stack.last() else {
+                return match u {
+                    Unwind::Throw(v) => {
+                        self.done = true;
+                        if crate::dbg_drive() {
+                            eprintln!("[uncaught] v={:?}", e.describe(v.clone()));
+                        }
+                        self.settle_outer(e, Err(v.clone()));
+                        Err(Thrown(v))
+                    }
+                    // `Ret`/`Brk`/`Cont` en fond de pile : la
+                    // boucle `drive` finalise à pile vide
+                    // (`self.ret` porte la valeur pour `Ret`).
+                    _ => Ok(()),
+                };
             };
             let is_loop = matches!(
                 f.kind,
@@ -1391,45 +1425,215 @@ impl GExec {
                     | FKind::ForIter { .. }
                     | FKind::ForAwait { .. }
             );
-            // `break` nu : boucle **ou switch** englobant
-            // (`switch` est la seule autre cible de `break`
-            // non labellé — spec `BreakableStatement`).
-            let hit = match &label {
-                Some(l) => f.labels.iter().any(|x| x == *l),
-                None => is_loop || matches!(f.kind, FKind::Switch),
+            let hit = match &u {
+                Unwind::Brk(l) => match l {
+                    Some(l) => f.labels.iter().any(|x| x == l),
+                    // `break` nu : boucle **ou switch**
+                    // englobant (spec `BreakableStatement`).
+                    None => is_loop || matches!(f.kind, FKind::Switch),
+                },
+                Unwind::Cont(l) => match l {
+                    Some(l) => is_loop && f.labels.iter().any(|x| x == l),
+                    None => is_loop,
+                },
+                _ => false,
             };
-            let f = self.stack.pop().unwrap();
-            self.run_finally(e, &f)?;
             if hit {
-                return Ok(());
+                if let Unwind::Cont(_) = u {
+                    // `continue` : la boucle n'est pas quittée
+                    // — elle re-teste/avance, pas de close.
+                    let f = self.stack.last_mut().unwrap();
+                    f.pc = f.list.len();
+                    return self.leave_frame(e);
+                }
+                // `break` : la boucle sort — son
+                // `IteratorClose` éventuel est dû avant de
+                // conclure (`u = Done` ci-dessus).
+                u = Unwind::Done;
+            }
+            let f = self.stack.pop().unwrap();
+            match f.kind {
+                FKind::Try {
+                    catch: Some((pat, cbody)),
+                    finally,
+                } if matches!(u, Unwind::Throw(_)) => {
+                    let Unwind::Throw(v) = &u else {
+                        continue;
+                    };
+                    let v = v.clone();
+                    // JS-C534 — canon resolver du bloc catch
+                    // (`cbody.as_ptr()`, convention `exec.rs`) :
+                    // le param + ses lexicals en `cells` denses.
+                    let cenv = Env::local(f.env.clone());
+                    e.predeclare_slots(&cenv, cbody.as_ptr() as usize);
+                    e.bind_pat(
+                        &cenv,
+                        self.this.clone(),
+                        &pat,
+                        v,
+                        BindMode::Lex { mutable: true },
+                    )?;
+                    // `finally` post-catch : marqueur
+                    // `Try{None, fin}` sous le catch — le bloc
+                    // court à la sortie du catch (normale via
+                    // `leave_frame`, abrupte via l'unwind).
+                    if finally.is_some() {
+                        self.stack.push(GFrame {
+                            list: Rc::new(Vec::new()),
+                            pc: 0,
+                            env: f.env.clone(),
+                            labels: Vec::new(),
+                            kind: FKind::Try {
+                                catch: None,
+                                finally,
+                            },
+                        });
+                    }
+                    self.stack.push(GFrame {
+                        list: Rc::new(cbody),
+                        pc: 0,
+                        env: cenv,
+                        labels: Vec::new(),
+                        kind: FKind::Seq,
+                    });
+                    return Ok(());
+                }
+                FKind::Try {
+                    finally: Some(fin), ..
+                } => {
+                    // `finally` traversé : suspendu — `UnwindFin`
+                    // court le bloc, la complétion reprend à sa
+                    // sortie naturelle (`leave_frame`).
+                    self.unwind = Some((u, false));
+                    self.stack.push(GFrame {
+                        list: Rc::new(fin),
+                        pc: 0,
+                        env: f.env,
+                        labels: Vec::new(),
+                        kind: FKind::UnwindFin,
+                    });
+                    return Ok(());
+                }
+                FKind::ForIter { iter, .. } => {
+                    // `for-of` : `IteratorClose` sync — les
+                    // chemins rapides (arrays/TA/strings/
+                    // `for-in`) portent `Undefined` (pas
+                    // d'itérateur à fermer).
+                    if !matches!(iter, Value::Undefined) {
+                        u = Self::close_iter_sync(e, &iter, u);
+                    }
+                }
+                // `issued` : abrupt hors corps (mécanique
+                // `next()`/`await` en vol) — pas de close
+                // (spec `ForIn/OfBodyEvaluation`).
+                FKind::ForAwait { iter, issued, .. } if !issued => {
+                    match self.close_iter_async(e, iter, f.env, u)? {
+                        Some(u2) => u = u2,
+                        // `return()` awaited : suspendu —
+                        // `unwind`/`UnwindFin` posés par
+                        // le helper.
+                        None => return Ok(()),
+                    }
+                }
+                _ => {}
             }
         }
     }
 
-    /// `continue` — pop jusqu'à la boucle, puis re-test.
-    fn do_cont(&mut self, e: &mut Engine, label: Option<&Rc<str>>) -> JsResult<()> {
-        loop {
-            let Some(f) = self.stack.last() else {
-                return Ok(());
-            };
-            let is_loop = matches!(
-                f.kind,
-                FKind::While { .. }
-                    | FKind::For { .. }
-                    | FKind::ForIter { .. }
-                    | FKind::ForAwait { .. }
-            );
-            let hit = match &label {
-                Some(l) => is_loop && f.labels.iter().any(|x| x == *l),
-                None => is_loop,
-            };
-            if hit {
-                let f = self.stack.last_mut().unwrap();
-                f.pc = f.list.len();
-                return self.leave_frame(e);
+    /// `IteratorClose` sync (`for-of`) : `it.return()` —
+    /// absent/non-callable → no-op ; abrupt ou résultat
+    /// non-objet → plié dans `u` ([`fold_close`] : une throw
+    /// externe garde sa valeur, spec §7.4.6).
+    fn close_iter_sync(e: &mut Engine, iter: &Value, u: Unwind) -> Unwind {
+        let ret = match e.get_prop_value(iter.clone(), "return") {
+            Ok(r) => r,
+            Err(Thrown(v)) => return fold_close(u, v),
+        };
+        if !e.is_callable(ret.clone()) {
+            return u;
+        }
+        let r = match e.call_value(ret, iter.clone(), &[]) {
+            Ok(r) => r,
+            Err(Thrown(v)) => return fold_close(u, v),
+        };
+        if !matches!(r, Value::Obj(_)) {
+            let Thrown(v) = e.type_error("iterator result is not an object");
+            return fold_close(u, v);
+        }
+        u
+    }
+
+    /// `AsyncIteratorClose` (`for await`) : `it.return()`
+    /// awaited — pendante → `UnwindFin` marqueur + `unwind`
+    /// porte la complétion et le check-objet à la livraison ;
+    /// rejetée ou résultat non-objet → plié dans `u`.
+    /// `Some(u')` = poursuivre l'unwind, `None` = suspendu.
+    fn close_iter_async(
+        &mut self,
+        e: &mut Engine,
+        iter: Value,
+        fenv: EnvRef,
+        u: Unwind,
+    ) -> JsResult<Option<Unwind>> {
+        let ret = match e.get_prop_value(iter.clone(), "return") {
+            Ok(r) => r,
+            Err(Thrown(v)) => return Ok(Some(fold_close(u, v))),
+        };
+        if !e.is_callable(ret.clone()) {
+            return Ok(Some(u));
+        }
+        let r = match e.call_value(ret, iter, &[]) {
+            Ok(r) => r,
+            Err(Thrown(v)) => return Ok(Some(fold_close(u, v))),
+        };
+        // `Await(innerResult)` — adoption thenable identique à
+        // `arm_await`, mais la réjection se plie au lieu de
+        // propager (`AsyncIteratorClose` — une throw externe
+        // garde la sienne).
+        let mut awaited = r.clone();
+        if matches!(r, Value::Obj(_)) && !e.is_promise(r.clone()) {
+            let wrapper = e.new_promise();
+            if !e.adopt_thenable(wrapper, r.clone()) {
+                e.settle_promise(wrapper, crate::promise::PromiseState::Fulfilled, r.clone());
             }
-            let f = self.stack.pop().unwrap();
-            self.run_finally(e, &f)?;
+            awaited = Value::Obj(wrapper);
+        }
+        let Value::Obj(pid) = awaited else {
+            // `return()` a rendu une valeur primitive —
+            // `TypeError` plié.
+            let Thrown(v) = e.type_error("iterator result is not an object");
+            return Ok(Some(fold_close(u, v)));
+        };
+        let st = e.heap.obj(pid).and_then(|o| match &o.kind {
+            ObjKind::Promise(p) => Some((p.state, p.result.clone())),
+            _ => None,
+        });
+        match st {
+            Some((crate::promise::PromiseState::Pending, _)) => {
+                // Suspendu : `liver` liera `__awaitit` dans
+                // l'env du `UnwindFin` ; `leave_frame` valide
+                // l'objet (le `bool` de `unwind`).
+                self.arm_promise(e, pid, Some("__awaitit".into()));
+                self.stack.push(GFrame {
+                    list: Rc::new(Vec::new()),
+                    pc: 0,
+                    env: Env::local(fenv),
+                    labels: Vec::new(),
+                    kind: FKind::UnwindFin,
+                });
+                self.unwind = Some((u, true));
+                Ok(None)
+            }
+            Some((crate::promise::PromiseState::Fulfilled, res)) => {
+                let mut u = u;
+                if !matches!(res, Value::Obj(_)) {
+                    let Thrown(v) = e.type_error("iterator result is not an object");
+                    u = fold_close(u, v);
+                }
+                Ok(Some(u))
+            }
+            Some((crate::promise::PromiseState::Rejected, res)) => Ok(Some(fold_close(u, res))),
+            None => Ok(Some(u)),
         }
     }
 
@@ -1453,7 +1657,8 @@ impl GExec {
     }
 
     /// Throw propagée : `try{…}catch` rattrape ; `finally`
-    /// sans catch court puis la throw repart (`unwinding`).
+    /// et `IteratorClose` suspendent puis la complétion
+    /// repart (`resume_unwind`, JS-C616).
     fn throw_into(&mut self, e: &mut Engine, v: Value) -> JsResult<()> {
         // La suspension courante est consommée par la throw —
         // sans ça la boucle réémettrait l'ancienne valeur.
@@ -1461,102 +1666,13 @@ impl GExec {
         // Une throw remplace un `return(v)` en vol (spec — la
         // nouvelle complétion abrupte l'emporte).
         self.ret_unwind = false;
-        loop {
-            if crate::dbg_drive() {
-                eprintln!(
-                    "[throw_into] stack={} kinds={:?}",
-                    self.stack.len(),
-                    self.stack
-                        .iter()
-                        .map(|f| std::mem::discriminant(&f.kind))
-                        .collect::<Vec<_>>()
-                );
-            }
-            let Some(f) = self.stack.pop() else {
-                self.done = true;
-                if crate::dbg_drive() {
-                    eprintln!("[uncaught] v={:?}", e.describe(v.clone()));
-                }
-                self.settle_outer(e, Err(v.clone()));
-                return Err(Thrown(v));
-            };
-            match f.kind {
-                FKind::Try {
-                    catch: Some((pat, catch_body)),
-                    finally,
-                } => {
-                    // JS-C534 — canon resolver du bloc catch
-                    // (`cbody.as_ptr()`, convention `exec.rs`) :
-                    // le param + ses lexicals en `cells` denses.
-                    let cenv = Env::local(f.env.clone());
-                    e.predeclare_slots(&cenv, catch_body.as_ptr() as usize);
-                    e.bind_pat(
-                        &cenv,
-                        self.this.clone(),
-                        &pat,
-                        v,
-                        BindMode::Lex { mutable: true },
-                    )?;
-                    if let Some(fin) = finally {
-                        self.stack.push(GFrame {
-                            list: Rc::new(fin),
-                            pc: 0,
-                            env: f.env.clone(),
-                            labels: Vec::new(),
-                            kind: FKind::Seq,
-                        });
-                    }
-                    self.stack.push(GFrame {
-                        list: Rc::new(catch_body),
-                        pc: 0,
-                        env: cenv,
-                        labels: Vec::new(),
-                        kind: FKind::Seq,
-                    });
-                    return Ok(());
-                }
-                FKind::Try {
-                    catch: None,
-                    finally: Some(fin),
-                } => {
-                    self.unwinding = Some(v);
-                    self.stack.push(GFrame {
-                        list: Rc::new(fin),
-                        pc: 0,
-                        env: f.env,
-                        labels: Vec::new(),
-                        kind: FKind::Seq,
-                    });
-                    return Ok(());
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// `finally` d'un frame sortant (break/continue).
-    fn run_finally(&mut self, _e: &mut Engine, f: &GFrame) -> JsResult<()> {
-        if let FKind::Try {
-            finally: Some(fin), ..
-        } = &f.kind
-        {
-            self.stack.push(GFrame {
-                list: Rc::new(fin.clone()),
-                pc: 0,
-                env: f.env.clone(),
-                labels: Vec::new(),
-                kind: FKind::Seq,
-            });
-        }
-        Ok(())
+        self.start_unwind(e, Unwind::Throw(v))
     }
 
     /// Fin de liste : boucles re-testent/re-bindent, `try`
-    /// court `finally`, `unwinding` repart.
+    /// court `finally`, `UnwindFin` reprend l'unwind
+    /// enregistré.
     fn leave_frame(&mut self, e: &mut Engine) -> JsResult<()> {
-        if let Some(v) = self.unwinding.take() {
-            return self.throw_into(e, v);
-        }
         let Some(f) = self.stack.last() else {
             return Ok(());
         };
@@ -1567,6 +1683,25 @@ impl GExec {
         // avancent) ; le tick la compte.
         e.tick()?;
         match &f.kind {
+            // `UnwindFin` — `finally` drainé ou `iter.return()`
+            // awaited livré : la complétion enregistrée reprend
+            // (`check` → `__awaitit` doit être un objet, spec
+            // `AsyncIteratorClose`).
+            FKind::UnwindFin => {
+                let env = f.env.clone();
+                self.stack.pop();
+                if let Some((u, check)) = self.unwind.take() {
+                    let mut u = u;
+                    if check {
+                        let r = e.env_get(&env, "__awaitit").unwrap_or(Value::Undefined);
+                        if !matches!(r, Value::Obj(_)) {
+                            let Thrown(v) = e.type_error("iterator result is not an object");
+                            u = fold_close(u, v);
+                        }
+                    }
+                    self.resume_unwind(e, u)?;
+                }
+            }
             FKind::Seq | FKind::Switch => {
                 self.stack.pop();
             }
@@ -1597,7 +1732,9 @@ impl GExec {
                     self.stack.pop();
                 }
             }
-            FKind::ForIter { items, idx, target } => {
+            FKind::ForIter {
+                items, idx, target, ..
+            } => {
                 let (env, items, idx, target) =
                     (f.env.clone(), items.clone(), *idx, target.clone());
                 if idx >= items.len() {
@@ -1624,53 +1761,86 @@ impl GExec {
                 next,
                 target,
                 issued,
+                sync_iter,
             } => {
-                let (env, it, next, target, issued) = (
+                let (env, it, next, target, issued, sync_iter) = (
                     f.env.clone(),
                     iter.clone(),
                     next.clone(),
                     target.clone(),
                     *issued,
+                    *sync_iter,
                 );
                 if !issued {
+                    // `issued=true` pendant toute la mécanique
+                    // de pas (`next()`, lecture `done`/`value`,
+                    // armement) — une erreur ici est abrupte
+                    // hors du corps : pas d'`IteratorClose`
+                    // (spec `ForIn/OfBodyEvaluation`).
+                    if let Some(fr) = self.stack.last_mut() {
+                        if let FKind::ForAwait { issued, .. } = &mut fr.kind {
+                            *issued = true;
+                        }
+                    }
                     let r = match e.call_value(next, it, &[]) {
                         Ok(v) => v,
                         Err(Thrown(v)) => return self.throw_into(e, v),
                     };
-                    let flow = self.arm_await(e, r, &env, Some("__awaitit".into()))?;
+                    let awaited = if sync_iter {
+                        // `AsyncFromSyncIterator` : `r` =
+                        // `{value,done}` sync — `done` lu à
+                        // plat, c'est `value` qui est awaited.
+                        let Value::Obj(id) = r else {
+                            let Thrown(v) = e.type_error("iterator result is not an object");
+                            return self.throw_into(e, v);
+                        };
+                        if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
+                            self.stack.pop();
+                            return Ok(());
+                        }
+                        match e.get_prop_value(Value::Obj(id), "value") {
+                            Ok(v) => v,
+                            Err(Thrown(v)) => return self.throw_into(e, v),
+                        }
+                    } else {
+                        r
+                    };
+                    let flow = self.arm_await(e, awaited, &env, Some("__awaitit".into()))?;
                     // `Susp` : rejet rattrapé — les frames sont
                     // remplacées (catch), ne pas consommer.
                     if self.pending.is_some() || matches!(flow, GFlow::Susp) {
-                        if self.pending.is_some() {
-                            if let Some(fr) = self.stack.last_mut() {
-                                if let FKind::ForAwait { issued, .. } = &mut fr.kind {
-                                    *issued = true;
-                                }
-                            }
-                        }
                         return Ok(());
                     }
                 }
-                // `__awaitit` = résultat `{value,done}` (lié
-                // inline ou par `liver` à la reprise).
+                // `__awaitit` : résultat `{value,done}` (async)
+                // ou valeur unwrapped (`sync_iter`) — lié
+                // inline ou par `liver` à la reprise.
                 let r = e.env_get(&env, "__awaitit").unwrap_or(Value::Undefined);
-                let Value::Obj(id) = r else {
-                    let Thrown(v) = e.type_error("iterator result is not an object");
-                    return self.throw_into(e, v);
+                let val = if sync_iter {
+                    r
+                } else {
+                    let Value::Obj(id) = r else {
+                        let Thrown(v) = e.type_error("iterator result is not an object");
+                        return self.throw_into(e, v);
+                    };
+                    if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
+                        self.stack.pop();
+                        return Ok(());
+                    }
+                    e.get_prop(id, "value").unwrap_or(Value::Undefined)
                 };
-                let done = e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d));
-                if done {
-                    self.stack.pop();
-                    return Ok(());
-                }
-                let val = e.get_prop(id, "value").unwrap_or(Value::Undefined);
-                if let Err(Thrown(v)) = self.bind_for_target(e, &env, &target, val) {
-                    return self.throw_into(e, v);
-                }
+                // Le binding de la cible fait partie du corps
+                // — ses erreurs déclenchent `IteratorClose` :
+                // `issued=false` avant le bind.
                 if let Some(fr) = self.stack.last_mut() {
                     if let FKind::ForAwait { issued, .. } = &mut fr.kind {
                         *issued = false;
                     }
+                }
+                if let Err(Thrown(v)) = self.bind_for_target(e, &env, &target, val) {
+                    return self.throw_into(e, v);
+                }
+                if let Some(fr) = self.stack.last_mut() {
                     fr.pc = 0;
                 }
             }
@@ -1727,24 +1897,7 @@ impl GExec {
             if let Some((state, result)) = st {
                 match state {
                     crate::promise::PromiseState::Pending => {
-                        // Réactions boundées `[gen_obj, outer]`
-                        // — `BoundNative` prépose bound aux args
-                        // → `async_resume_ok(gen, outer, v)`.
-                        let gen = self.gen_obj.clone();
-                        let next = e.new_promise();
-                        let ok_f = bound_resume(e, gen.clone(), self.outer, true);
-                        let err_f = bound_resume(e, gen, self.outer, false);
-                        if let Some(o) = e.heap.obj_mut(pid) {
-                            if let ObjKind::Promise(p) = &mut o.kind {
-                                p.reactions.push(crate::promise::Reaction {
-                                    on_fulfilled: ok_f,
-                                    on_rejected: err_f,
-                                    next: crate::promise::ThenSink::Native(next),
-                                });
-                            }
-                        }
-                        self.pending = Some(Pending::Await { into, prom: pid });
-                        return Ok(GFlow::Adv);
+                        return Ok(self.arm_promise(e, pid, into));
                     }
                     crate::promise::PromiseState::Fulfilled => {
                         if let Some(n) = into {
@@ -1766,6 +1919,30 @@ impl GExec {
             Engine::env_put(env, &n, v, true);
         }
         Ok(GFlow::Adv)
+    }
+
+    /// Réactions `async_resume` boundées `[gen_obj, outer]`
+    /// sur `pid` + `pending = Await{into}` armé — partagé par
+    /// `arm_await` et l'`iter.return()` awaited d'
+    /// `AsyncIteratorClose` (JS-C616).
+    fn arm_promise(&mut self, e: &mut Engine, pid: ObjId, into: Option<Rc<str>>) -> GFlow {
+        // `BoundNative` prépose bound aux args →
+        // `async_resume_ok(gen, outer, v)`.
+        let gen = self.gen_obj.clone();
+        let next = e.new_promise();
+        let ok_f = bound_resume(e, gen.clone(), self.outer, true);
+        let err_f = bound_resume(e, gen, self.outer, false);
+        if let Some(o) = e.heap.obj_mut(pid) {
+            if let ObjKind::Promise(p) = &mut o.kind {
+                p.reactions.push(crate::promise::Reaction {
+                    on_fulfilled: ok_f,
+                    on_rejected: err_f,
+                    next: crate::promise::ThenSink::Native(next),
+                });
+            }
+        }
+        self.pending = Some(Pending::Await { into, prom: pid });
+        GFlow::Adv
     }
 
     /// `await e` — évalue `e` puis [`Self::arm_await`].
@@ -2022,7 +2199,7 @@ impl GExec {
                 // de liste), `leave_frame` émet le premier
                 // `it.next()`.
                 if *is_await {
-                    let (it, next) = async_iterator(e, v)?;
+                    let (it, next, sync_iter) = async_iterator(e, v)?;
                     let list = Self::body_list(body);
                     self.stack.push(GFrame {
                         pc: list.len(),
@@ -2034,11 +2211,12 @@ impl GExec {
                             next,
                             target: target.clone(),
                             issued: false,
+                            sync_iter,
                         },
                     });
                     return Ok(GFlow::Adv);
                 }
-                let items = e.iter_values(v)?;
+                let (it_obj, items) = e.iter_values_iter(v)?;
                 if items.is_empty() {
                     return Ok(GFlow::Adv);
                 }
@@ -2050,6 +2228,7 @@ impl GExec {
                     env: benv,
                     labels: Vec::new(),
                     kind: FKind::ForIter {
+                        iter: it_obj,
                         items,
                         idx: 1,
                         target: target.clone(),
@@ -2079,6 +2258,9 @@ impl GExec {
                     env: benv,
                     labels: Vec::new(),
                     kind: FKind::ForIter {
+                        // `for-in` n'a pas d'itérateur à
+                        // fermer (protocole d'énumération).
+                        iter: Value::Undefined,
                         items,
                         idx: 1,
                         target: target.clone(),
@@ -2199,7 +2381,8 @@ impl GExec {
         pv(&self.emit, out);
         for f in &self.stack {
             crate::heap::trace_env(&f.env, out, visited);
-            if let FKind::ForIter { items, .. } = &f.kind {
+            if let FKind::ForIter { iter, items, .. } = &f.kind {
+                pv(iter, out);
                 for v in items {
                     pv(v, out);
                 }
@@ -2228,7 +2411,9 @@ impl GExec {
                 Ok(v) | Err(v) => pv(v, out),
             }
         }
-        if let Some(v) = &self.unwinding {
+        // Complétion en vol (`unwind`) : la throw portée est
+        // une racine tant qu'un `finally`/close est suspendu.
+        if let Some((Unwind::Throw(v), _)) = &self.unwind {
             pv(v, out);
         }
         // File `AsyncGeneratorEnqueue` : promesses en attente
@@ -2243,25 +2428,42 @@ impl GExec {
     }
 }
 
+/// `IteratorClose` : une abrupte du close (`return()` jetée/
+/// rejetée, résultat non-objet) se plie dans la complétion
+/// en vol — une throw externe garde sa valeur, les autres
+/// complétions sont remplacées (spec §7.4.6, JS-C616).
+fn fold_close(u: Unwind, v: Value) -> Unwind {
+    match u {
+        Unwind::Throw(_) => u,
+        _ => Unwind::Throw(v),
+    }
+}
+
 /// `for await` — itérateur asynchrone : `@@asyncIterator`
 /// d'abord, repli `@@iterator` (spec
 /// `CreateAsyncFromSyncIterator` — chaque `next()` est
 /// awaited, un itérateur sync se comporte à l'identique
 /// puisque ses `{value,done}` ne sont jamais des promesses
 /// pendantes). `(iter, next_method)` ou `TypeError`.
-fn async_iterator(e: &mut Engine, v: Value) -> JsResult<(Value, Value)> {
+fn async_iterator(e: &mut Engine, v: Value) -> JsResult<(Value, Value, bool)> {
     if let Value::Obj(id) = v {
-        for sym in [
+        for (i, sym) in [
             crate::interp::SYM_ASYNC_ITERATOR,
             crate::interp::SYM_ITERATOR,
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             if let Some(m) = e.get_prop(id, sym) {
                 if e.is_callable(m.clone()) {
                     let it = e.call_value(m, v, &[])?;
                     if let Value::Obj(iid) = it {
                         if let Some(next) = e.get_prop(iid, "next") {
                             if e.is_callable(next.clone()) {
-                                return Ok((it, next));
+                                // `i==1` : repli `@@iterator`
+                                // — `AsyncFromSyncIterator`,
+                                // `result.value` awaited.
+                                return Ok((it, next, i == 1));
                             }
                         }
                     }

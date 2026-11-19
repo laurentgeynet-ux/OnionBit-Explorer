@@ -7837,6 +7837,14 @@ impl Engine {
     /// `TypeError` when `v` is not iterable; propagates iterator
     /// callback exceptions. Op-bounded via `tick`.
     pub(crate) fn iter_values(&mut self, v: Value) -> JsResult<Vec<Value>> {
+        Ok(self.iter_values_iter(v)?.1)
+    }
+
+    /// `iter_values` + l'objet itérateur — requis pour
+    /// `IteratorClose` (`it.return()` sur sortie abrupte,
+    /// JS-C616). `Undefined` sur les chemins rapides
+    /// (tableaux/TypedArray — pas d'itérateur à fermer).
+    pub(crate) fn iter_values_iter(&mut self, v: Value) -> JsResult<(Value, Vec<Value>)> {
         crate::j17_tick(&crate::J17_ITER);
         match v {
             Value::Obj(id) => {
@@ -7880,7 +7888,7 @@ impl Engine {
                             }
                             out.push(self.get_prop_value(Value::Obj(rid), "value")?);
                         }
-                        return Ok(out);
+                        return Ok((it, out));
                     }
                 }
                 let (arr_len, ta_view) = match self.heap.obj(id).map(|o| &o.kind) {
@@ -7908,12 +7916,12 @@ impl Engine {
                     // un `Vec<Value>` hors compteur (§B-59).
                     self.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
                     if let Some(ObjKind::Array(elems)) = self.heap.obj(id).map(|o| &o.kind) {
-                        return Ok(elems.to_vec());
+                        return Ok((Value::Undefined, elems.to_vec()));
                     }
                     return Err(self.type_error("object is not iterable"));
                 }
                 if let Some((ta, bid, off, len)) = ta_view {
-                    return Ok(self.ta_elements(ta, bid, off, len));
+                    return Ok((Value::Undefined, self.ta_elements(ta, bid, off, len)));
                 }
                 Err(self.type_error("object is not iterable"))
             }
@@ -7925,11 +7933,13 @@ impl Engine {
                 self.alloc_guard(id.len().saturating_mul(160))?;
                 // Par code point : paire → astral, surrogate
                 // isolé préservé (spec `@@iterator`).
-                Ok(id
-                    .iter_code_points()
-                    .into_iter()
-                    .map(|u| self.str_val_units(u))
-                    .collect())
+                Ok((
+                    Value::Undefined,
+                    id.iter_code_points()
+                        .into_iter()
+                        .map(|u| self.str_val_units(u))
+                        .collect(),
+                ))
             }
             _ => Err(self.type_error("value is not iterable")),
         }
