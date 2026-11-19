@@ -15016,3 +15016,27 @@ chaque gain rapporté contre les **deux** archétypes.
   **Mesures** : filtre `built-ins/Array/length` 32 → **62/62**,
   cluster `Iterator.zip` → **164/164** (goulot confirmé),
   gate `c613_sparse` **11/11**, lib 54/54, hostile 12/12.
+
+- [x] **JS-C614 — early errors corps de `class`**
+  (`parser.rs` + `tests/c614_class.rs`). **`prescan_privates`
+  négatif** : `#x` à profondeur 1 = déclaration sauf si le
+  token précédent continue une expression — couvre
+  `static #x`, `* #g()`, `async *#h()`, frontières ASI
+  (`x\n#y`) ; sous-déclarer = faux « not defined » sur refs
+  `this.#x` (régression réparée avant commit), sur-déclarer
+  = inoffensif. **`check_class_members`** : ctor unique
+  (méthode simple non-statique seule), privés uniques hors
+  paire get/set (namespace statique+instance partagé),
+  `#constructor`/`static prototype` bannis ; `constructor`
+  réservé aux `MethodDefinition` non-statiques + champs —
+  `static get/async/*constructor` *licites*. **`super(`**
+  : `HasDirectSuper` banni hors ctor de classe dérivée —
+  méthodes, accesseurs, inits de champ, blocs `static`,
+  scan tokens traversant `function` et sautant `class`
+  imbriquées (`close_of`). **`super.#x`**, **`delete` de
+  référence privée** (`o.#x`, `o?.#x`), **`prop_key` sans
+  privé hors classe**, **ASI `get`/`set` + `*`**. Mesure :
+  `class/elements/syntax` 234 → **502/502** ; anti-régression
+  `statements|expressions/class` zéro échec signé C614
+  (résidus pré-existants : `*-escaped` lexer, labels
+  `arguments`). Gate **8/8**, lib 54/54, c611/c613 verts.

@@ -18,7 +18,7 @@ use crate::ast::{
 use crate::error::{Error, Result};
 use crate::lexer::{lex, lex_encoded, Kw, Tok, Token, TplPart, P};
 use std::cell::OnceCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// Parse avec strict hérité — `eval` direct dans du code strict :
@@ -546,10 +546,18 @@ impl Parser {
     /// 1 — les corps de méthode sont ignorés mais ne peuvent pas
     /// déclarer de noms privés ; les `#x` qui y figurent sont des
     /// *usages* de l'englobante.
+    ///
+    /// Un `#x` n'est une *déclaration* qu'en position de membre —
+    /// précédé de `{`/`;`/`}` (frontière de `ClassElement`), les
+    /// modifieurs `static`/`async`/`*`/`get`/`set` étant sautés.
+    /// `this.#x`, `o.#x`, `#x in o` sont des *références* : les
+    /// compter comme déclarations masquait `AllPrivateNamesValid`
+    /// (`class C extends class { x = this.#foo; } #foo;` passait —
+    /// JS-C614).
     fn prescan_privates(&self) -> HashSet<String> {
         let mut out = HashSet::new();
         let mut depth = 1u32;
-        for t in &self.toks[self.pos..] {
+        for (i, t) in self.toks[self.pos..].iter().enumerate() {
             match &t.tok {
                 Tok::P(P::LBrace) => depth += 1,
                 Tok::P(P::RBrace) => {
@@ -559,12 +567,241 @@ impl Parser {
                     }
                 }
                 Tok::Private(n) if depth == 1 => {
-                    out.insert(n.to_string());
+                    // `#x` n'est une *référence* (pas une
+                    // déclaration) que si le token précédent
+                    // continue une expression : `.`/`?.`
+                    // (`o.#x`), opérateur, `(`/`[`/`,`, ou un
+                    // mot-clé qui réclame un opérande
+                    // (`extends`, `delete`, `return`…). Tout
+                    // autre précédent — frontière `{`/`;`/`}`,
+                    // fin d'expression `)`/`]`/ident/littéral/
+                    // `++`, modifieur `static`/`get`/`async`… —
+                    // ouvre un membre, ASI compris (`x\n#y`,
+                    // `f\nstatic #y`).
+                    let declares = match self.toks.get(self.pos + i - 1).map(|t| &t.tok) {
+                        Some(Tok::P(p)) => matches!(
+                            p,
+                            // `*` n'appartient à cette liste que
+                            // comme modifieur de générateur :
+                            // `* #x` en profondeur de corps de
+                            // classe ne peut être qu'une
+                            // déclaration (`expr * #x` est fautif
+                            // de toute façon).
+                            P::Star
+                                | P::RParen
+                                | P::RBracket
+                                | P::RBrace
+                                | P::Semi
+                                | P::LBrace
+                                | P::Inc
+                                | P::Dec
+                        ),
+                        Some(Tok::Kw(k)) => {
+                            matches!(k, Kw::This | Kw::Super | Kw::True | Kw::False | Kw::Null)
+                        }
+                        _ => true,
+                    };
+                    if declares {
+                        out.insert(n.to_string());
+                    }
                 }
                 _ => {}
             }
         }
         out
+    }
+
+    /// `HasDirectSuper` sur la région `[i, end)` : `super (` est
+    /// relevé sauf à l'intérieur d'un corps de `class` imbriquée
+    /// (contexte `super` propre). Les corps `function` sont
+    /// parcourus — un `super(` y est fautif quoi qu'il arrive,
+    /// hors classes dérivées imbriquées (`skip_class_like`).
+    fn scan_super_region(&self, mut i: usize, end: usize) -> bool {
+        while i < end {
+            match &self.toks[i].tok {
+                Tok::Kw(Kw::Super)
+                    if matches!(
+                        self.toks.get(i + 1).map(|t| &t.tok),
+                        Some(Tok::P(P::LParen))
+                    ) =>
+                {
+                    return true;
+                }
+                Tok::Kw(Kw::Function) => {
+                    let (next, found) = self.scan_fn_region(i, end);
+                    if found {
+                        return true;
+                    }
+                    i = next;
+                    continue;
+                }
+                Tok::Kw(Kw::Class) => {
+                    let (next, found) = self.skip_class_like(i, end);
+                    if found {
+                        return true;
+                    }
+                    i = next;
+                    continue;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+        false
+    }
+
+    /// Parcourt `function …(params){body}` depuis `i` (jeton
+    /// `function`) : tout `super(` y est fautif (une fonction
+    /// n'a pas de super call propre) — rendu donc `found`.
+    /// Rend `(index après `}`, super_trouvé)` — `end` borne.
+    fn scan_fn_region(&self, i: usize, end: usize) -> (usize, bool) {
+        let mut j = i + 1;
+        while j < end && !matches!(self.toks[j].tok, Tok::P(P::LParen)) {
+            j += 1;
+        }
+        let rp = self.close_of.get(j).copied().unwrap_or(end);
+        let mut b = rp + 1;
+        while b < end && !matches!(self.toks[b].tok, Tok::P(P::LBrace)) {
+            b += 1;
+        }
+        let rb = self.close_of.get(b).copied().unwrap_or(end).min(end);
+        let found = self.scan_super_region(i + 1, rb);
+        ((rb + 1).min(end), found)
+    }
+
+    /// Saute `class …{…}` depuis `i` (jeton `class`) : l'héritage
+    /// est parcouru — un `super(` y lie le ctor englobant ; le
+    /// corps possède son propre contexte `super` → sauté via
+    /// `close_of`. Rend `(index après `}`, super_en_héritage)`.
+    fn skip_class_like(&self, i: usize, end: usize) -> (usize, bool) {
+        let mut j = i + 1;
+        let mut heritage = false;
+        while j < end {
+            match &self.toks[j].tok {
+                // `{` de corps : après un token qui peut fermer
+                // l'héritage, ou avant tout élément (`class {}`).
+                Tok::P(P::LBrace) if !heritage || self.expr_end_before(j) => {
+                    let close = self.close_of.get(j).copied().unwrap_or(end);
+                    return ((close + 1).min(end), false);
+                }
+                Tok::P(P::LBrace) => {
+                    // `{` littéral dans l'héritage — contenu
+                    // scanné (`super(` lie le ctor englobant).
+                    let close = self.close_of.get(j).copied().unwrap_or(end);
+                    if self.scan_super_region(j + 1, close.min(end)) {
+                        return (j, true);
+                    }
+                    j = close;
+                }
+                Tok::Kw(Kw::Super)
+                    if matches!(
+                        self.toks.get(j + 1).map(|t| &t.tok),
+                        Some(Tok::P(P::LParen))
+                    ) =>
+                {
+                    return (j, true);
+                }
+                Tok::Kw(Kw::Function) => {
+                    let (next, found) = self.scan_fn_region(j, end);
+                    if found {
+                        return (j, true);
+                    }
+                    j = next;
+                    continue;
+                }
+                Tok::Kw(Kw::Class) => {
+                    let (next, found) = self.skip_class_like(j, end);
+                    if found {
+                        return (j, true);
+                    }
+                    j = next;
+                    continue;
+                }
+                _ => {}
+            }
+            heritage = true;
+            j += 1;
+        }
+        (j.min(end), false)
+    }
+
+    /// Le token à `j-1` peut-il terminer une expression — le `{`
+    /// qui suit est alors un corps de classe, sinon un objet
+    /// littéral de l'héritage (`extends {a:1}`).
+    fn expr_end_before(&self, j: usize) -> bool {
+        matches!(
+            self.toks.get(j.wrapping_sub(1)).map(|t| &t.tok),
+            Some(
+                Tok::P(P::RBrace | P::RParen | P::RBracket)
+                    | Tok::Ident(_)
+                    | Tok::Num(_)
+                    | Tok::Str(_)
+                    | Tok::Tpl(_)
+                    | Tok::Regex { .. }
+                    | Tok::Private(_)
+                    | Tok::Kw(Kw::This | Kw::Super | Kw::True | Kw::False | Kw::Null | Kw::Class)
+            )
+        )
+    }
+
+    /// Early errors déclaratifs du corps de classe complet
+    /// (spec `ClassElement`/`ClassBody`) : `constructor` unique,
+    /// noms privés uniques — la paire `get`/`set` seule est
+    /// licite, statique et instance partagent le namespace —
+    /// `#constructor`/`prototype` statique/`constructor` hors
+    /// `ConstructorMethod` interdits (les clés calculées ne sont
+    /// pas des `PropName` → exemptées).
+    fn check_class_members(&self, members: &[ClassMember], seq: u32) -> Result<()> {
+        let mut ctor = false;
+        // nom privé → bits vus : 1=get, 2=set, 4=autre.
+        let mut privs: HashMap<Rc<str>, u8> = HashMap::new();
+        for m in members {
+            let PropKey::Name(n) = &m.key else { continue };
+            if n.starts_with('\u{f131}') {
+                if n.as_ref() == Self::priv_key(seq, "constructor") {
+                    return Err(self.err("`#constructor` is not a valid private name"));
+                }
+                let bit = match m.kind {
+                    ClassMemberKind::Getter => 1u8,
+                    ClassMemberKind::Setter => 2,
+                    _ => 4,
+                };
+                let seen = privs.get(n).copied().unwrap_or(0);
+                let both = seen | bit;
+                // Doublon dès qu'un second membre sort du couple
+                // {get,set} : get+set seule combinaison licite.
+                if seen != 0 && both != 3 {
+                    let pname = n.rsplit('.').next().unwrap_or(n);
+                    return Err(self.err(format!("duplicate private name `#{pname}`")));
+                }
+                privs.insert(n.clone(), both);
+                continue;
+            }
+            if m.static_ && &**n == "prototype" {
+                return Err(self.err("`static prototype` is not a valid class element name"));
+            }
+            if &**n == "constructor" {
+                // `constructor` n'est licite que comme
+                // `ConstructorMethod` (simple, instance) — ou
+                // n'importe quelle `MethodDefinition` *statique*
+                // (spec : les early errors `ClassElement` ne
+                // visent `constructor` que hors `static` ; un
+                // `static get constructor(){}` est valide).
+                // `FieldDefinition` le bannit même en statique.
+                let legal = m.kind == ClassMemberKind::Ctor
+                    || (m.static_ && m.kind != ClassMemberKind::Field);
+                if !legal {
+                    return Err(self.err("`constructor` is not a valid name here"));
+                }
+            }
+            if m.kind == ClassMemberKind::Ctor {
+                if ctor {
+                    return Err(self.err("duplicate constructor"));
+                }
+                ctor = true;
+            }
+        }
+        Ok(())
     }
 
     /// ASI: `;`, or `}` / `else` / EOF / line break act as terminators.
@@ -1708,7 +1945,7 @@ impl Parser {
                         self.expect_p(P::RBrace, "`}`")?;
                         break;
                     }
-                    let key = self.prop_key()?;
+                    let key = self.prop_key(false)?;
                     // `{a}` → `a: a`; `{a: p}` / `{a = d}` / `{a: p = d}`.
                     let mut sub = if self.eat_p(P::Colon) {
                         self.pattern()?
@@ -1764,7 +2001,7 @@ impl Parser {
     }
 
     /// Property key — `name`, `"s"`, `42`, keyword or `[computed]`.
-    fn prop_key(&mut self) -> Result<PropKey> {
+    fn prop_key(&mut self, allow_private: bool) -> Result<PropKey> {
         if self.eat_p(P::LBracket) {
             let e = self.expr(false)?;
             self.expect_p(P::RBracket, "`]`")?;
@@ -1788,6 +2025,12 @@ impl Parser {
                 crate::intern(kw_str(kw))
             }
             Tok::Private(n) => {
+                if !allow_private {
+                    // `#x` n'est un nom de propriété légal qu'en
+                    // `ClassElement` — `{#x: v}` / `({#x: p} = o)`
+                    // sont des erreurs de syntaxe (JS-C614).
+                    return Err(self.err("private name not allowed here"));
+                }
                 self.next();
                 crate::intern(&self.resolve_priv(&n)?)
             }
@@ -2581,6 +2824,25 @@ impl Parser {
             if self.strict && op == UnOp::Delete && matches!(e, Expr::Ident(_)) {
                 return Err(self.err("delete of unqualified identifier in strict mode"));
             }
+            // `delete o.#x` / `delete #x` — les éléments privés ne
+            // sont jamais supprimables (early error, tout mode —
+            // la clé sentinelle trahit la position privée).
+            if op == UnOp::Delete {
+                let priv_ref = match &e {
+                    Expr::Member(_, k) => k.starts_with('\u{f131}'),
+                    Expr::Str(s) => s.starts_with('\u{f131}'),
+                    Expr::Chain { steps, .. } => steps.iter().any(|s| match s {
+                        crate::ast::ChainStep::Member(k) | crate::ast::ChainStep::OptMember(k) => {
+                            k.starts_with('\u{f131}')
+                        }
+                        _ => false,
+                    }),
+                    _ => false,
+                };
+                if priv_ref {
+                    return Err(self.err("private fields can not be deleted"));
+                }
+            }
             return Ok(Expr::Unary(op, Box::new(e)));
         }
         self.postfix(no_in)
@@ -2826,6 +3088,11 @@ impl Parser {
                     return Ok(Expr::SuperCall(args));
                 }
                 if self.eat_p(P::Dot) {
+                    // `super.#x` — les références privées ne sont
+                    // jamais membres de `super` (early error spec).
+                    if matches!(self.peek(), Tok::Private(_)) {
+                        return Err(self.err("private name not allowed after `super.`"));
+                    }
                     let name = self.expect_prop_name()?;
                     return Ok(Expr::SuperMember(name));
                 }
@@ -2989,7 +3256,7 @@ impl Parser {
                         ClassMemberKind::Setter
                     });
                 }
-                let key = self.prop_key()?;
+                let key = self.prop_key(false)?;
                 match accessor {
                     Some(kind) => {
                         self.expect_p(P::LParen, "`(`")?;
@@ -3433,6 +3700,16 @@ impl Parser {
             // `static { … }` — bloc d'initialisation statique.
             if static_ && self.check_p(P::LBrace) {
                 self.next();
+                // `super(` dans un bloc statique → early error
+                // (un bloc n'est jamais un ctor dérivé).
+                let blk_close = self
+                    .close_of
+                    .get(self.pos - 1)
+                    .copied()
+                    .unwrap_or(self.toks.len());
+                if self.scan_super_region(self.pos - 1, (blk_close + 1).min(self.toks.len())) {
+                    return Err(self.err("`super()` call is only allowed in a derived constructor"));
+                }
                 let outer_strict = self.strict;
                 self.strict = true;
                 let body = match self.try_defer_body(self.pos - 1) {
@@ -3482,12 +3759,20 @@ impl Parser {
             let gen = self.eat_p(P::Star); // `*m(){}` / `async *m(){}`
                                            // `get k()`/`set k(v)` vs a plain `get`/`set` member.
             let mut kind = ClassMemberKind::Method;
+            // `get`/`set` ne sont des modifieurs que devant un
+            // *nom* de membre — `get\n*x(){}` est un champ `get`
+            // suivi d'un générateur (ASI), pas un accesseur.
             if matches!(self.peek(), Tok::Ident(s) if &**s == "get" || &**s == "set")
-                && !matches!(
+                && matches!(
                     self.toks.get(self.pos + 1).map(|t| &t.tok),
-                    Some(Tok::P(
-                        P::LParen | P::Assign | P::Colon | P::Semi | P::RBrace | P::Comma
-                    ))
+                    Some(
+                        Tok::Ident(_)
+                            | Tok::Kw(_)
+                            | Tok::Str(_)
+                            | Tok::Num(_)
+                            | Tok::Private(_)
+                            | Tok::P(P::LBracket)
+                    )
                 )
             {
                 kind = if matches!(self.peek(), Tok::Ident(s) if &**s == "get") {
@@ -3498,8 +3783,12 @@ impl Parser {
                     ClassMemberKind::Setter
                 };
             }
-            let key = self.prop_key()?;
-            if !static_ && kind == ClassMemberKind::Method {
+            let key = self.prop_key(true)?;
+            // `constructor` ne devient `ConstructorMethod` que
+            // sur une méthode *simple* non statique — `async`/
+            // `*`/get/set/`static` le gardent `Method` et le
+            // post-check le rejette (spec `ClassElement`).
+            if !static_ && !async_ && !gen && kind == ClassMemberKind::Method {
                 if let PropKey::Name(n) = &key {
                     if &**n == "constructor" {
                         kind = ClassMemberKind::Ctor;
@@ -3511,11 +3800,30 @@ impl Parser {
             // exécuté par le runtime à la construction.
             if !self.check_p(P::LParen) {
                 let init = if self.eat_p(P::Assign) {
-                    Some(self.assign(false)?)
+                    // `super(` dans un init de champ → early
+                    // error (un init n'est pas un ctor dérivé ;
+                    // `super.x` reste licite — HomeObject).
+                    let init_pos = self.pos;
+                    let e = self.assign(false)?;
+                    if self.scan_super_region(init_pos, self.pos) {
+                        return Err(
+                            self.err("`super()` call is only allowed in a derived constructor")
+                        );
+                    }
+                    Some(e)
                 } else {
                     None
                 };
-                self.eat_p(P::Semi);
+                // `FieldDefinition ;` — pas d'ASI intra-ligne :
+                // `;`, `}`, EOF ou saut de ligne exigé après le
+                // champ (spec — `x y` en ligne est fautif).
+                if !self.eat_p(P::Semi)
+                    && !self.at_eof()
+                    && !self.check_p(P::RBrace)
+                    && !self.cur().newline_before
+                {
+                    return Err(self.err("expected `;` after class field"));
+                }
                 let body = FnBody::Parsed(Rc::new(
                     init.map(|e| vec![Stmt::Return(Some(e))])
                         .unwrap_or_default(),
@@ -3541,9 +3849,25 @@ impl Parser {
                 });
                 continue;
             }
+            let params_pos = self.pos;
             self.expect_p(P::LParen, "`(`")?;
             let params = self.params()?;
             self.expect_p(P::LBrace, "`{`")?;
+            // `super(` n'existe que dans le ctor d'une classe
+            // *dérivée* — `HasDirectSuper` est une early error
+            // partout ailleurs : méthodes et accesseurs (toute
+            // classe), ctor sans `extends`. Scan tokens — couvre
+            // aussi le corps différé.
+            if (kind != ClassMemberKind::Ctor || super_.is_none()) && {
+                let close = self
+                    .close_of
+                    .get(self.pos - 1)
+                    .copied()
+                    .unwrap_or(self.toks.len());
+                self.scan_super_region(params_pos, (close + 1).min(self.toks.len()))
+            } {
+                return Err(self.err("`super()` call is only allowed in a derived constructor"));
+            }
             // Corps de classe : toujours strict, prologue scanné
             // pour les early errors.
             let outer_strict = self.strict;
@@ -3584,6 +3908,10 @@ impl Parser {
                 }),
             });
         }
+        // Early errors déclaratifs du corps complet : ctor
+        // unique, noms privés uniques (paire get/set seule),
+        // noms réservés (spec `ClassElement` — JS-C614).
+        self.check_class_members(&members, seq)?;
         self.expect_p(P::RBrace, "`}`")?;
         self.priv_scopes.pop();
         Ok(Rc::new(ClassLit {
