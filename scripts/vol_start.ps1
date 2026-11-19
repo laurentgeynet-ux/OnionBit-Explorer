@@ -33,13 +33,7 @@
        target/ LOCAL de l'arbre de build (config cargo par
        défaut : un target par arbre, plus de `CARGO_TARGET_DIR`
        partagé ni de sous-dossier <triple> ; sccache amortit
-       le premier build). Réutilisation : la campagne épingle
-       le sha de départ — le claim le plus récent dont l'exe
-       vit encore fournit le binaire via `spawn_daemon -Exe`,
-       quels que soient les commits d'entre-temps (moteur
-       compris : ils attendent la campagne suivante). Le
-       `vol_clean` du worktree donneur rompt l'épinglage →
-       rebuild au main courant. `EXPLORER_DATA` est épinglé au
+       le premier build). `EXPLORER_DATA` est épinglé au
        corpus du repo du script — `data_root()` du daemon ne
        dépend plus du lieu du worktree.
     4. Spawn : `spawn_daemon.ps1` (watchdog cmd caché, canal
@@ -65,7 +59,9 @@
 param(
   # Code mission majuscules (REVALID<n>, MONDE-INEDIT<n>…).
   [string]$Mission = 'VOL',
-  # Nom déclaré — défaut "agent<N>".
+  # Nom d'équipe déclaré — défaut "agent<N>". Un nom donné
+  # produit le worktree d'équipe <repo>-wt-<Agent> (créé au
+  # 1er décollage, REPRIS aux suivants — target chaud).
   [string]$Agent = '',
   # Cibles déclarées (coordination — lisible par les autres pistes).
   [string[]]$Cibles = @(),
@@ -202,43 +198,37 @@ Write-Claim @{ state = 'claimed' }
 # un arbre principal sale ne contamine plus le vol, et le nom
 # reconnaissable rend le ménage trivial (vol_clean.ps1).
 # target/ est local au worktree : provenance = chemin.
-$buildRepo = $refRepo; $wt = ''; $exeOverride = ''
+$buildRepo = $refRepo; $wt = ''
 if (-not $explicitRepo) {
   if ($NoBuild) {
     Stop-VolClaim '-NoBuild sans -Repo : le worktree frais n''a pas de binaire — passer -Repo <arbre buildé>'
   }
-  # Réutilisation : la campagne ÉPINGLE le sha de départ — le
-  # claim le plus récent dont l'exe existe encore fournit le
-  # binaire, sans comparer les diffs : les commits d'entre-
-  # temps (moteur compris) attendent la campagne suivante.
-  # L'exe vit dans le worktree donneur ; `vol_clean` du
-  # donneur = fin de l'épinglage → rebuild au main courant.
-  $reusedFrom = 0
-  foreach ($d in Get-ChildItem $vols -Directory -Filter 'vol*' | Sort-Object Name -Descending) {
-    $cj = Join-Path $d.FullName 'CLAIMED.json'
-    if (-not (Test-Path $cj)) { continue }
-    try { $j = Get-Content $cj -Raw | ConvertFrom-Json } catch { continue }
-    if ($j.exe -and $j.sha_main -and (Test-Path $j.exe)) {
-      $exeOverride = $j.exe; $reusedFrom = [int]$j.vol
-      $sha = $j.sha_main
-      break
+  $leaf = Split-Path -Leaf $refRepo
+  if ($Agent -ne '') {
+    # Équipe nommée → worktree d'équipe éphémère <repo>-wt-<Agent>
+    # : créé au 1er décollage puis REPRIS à chaque vol (target
+    # chaud — pas de rebuild). Le numéro de vol n'y figure pas :
+    # le lien vol→wt vit dans le claim. Checkout -f au sha
+    # courant : toujours le dernier commit, jamais d'édition.
+    $wt = Join-Path (Split-Path -Parent $refRepo) "$leaf-wt-$Agent"
+    if (Test-Path (Join-Path $wt '.git')) {
+      git -C $wt checkout -f --detach $sha 2>&1 | ForEach-Object { Write-Output $_ }
+      Write-Output "worktree d'équipe repris : $wt (checkout $sha)"
+    } else {
+      git -C $refRepo worktree add --detach $wt $sha 2>&1 | ForEach-Object { Write-Output $_ }
+      if ($LASTEXITCODE -ne 0) { Stop-VolClaim "worktree d'équipe $wt impossible" }
+      Write-Output "worktree d'équipe créé : $wt @ $sha"
     }
-  }
-  if ($exeOverride) {
-    Write-Claim @{ sha_main = $sha; reuse_from = $reusedFrom }
-    Write-Output "binaire réutilisé : $exeOverride (vol$reusedFrom — sha $sha épinglé, pas de rebuild)"
-    if ($head -ne $sha) { Write-Output "note : main est à $head — la campagne reste épinglée à $sha" }
   } else {
-    $leaf = Split-Path -Leaf $refRepo
     $wt = Join-Path (Split-Path -Parent $refRepo) "$leaf-vol$N-wt"
     git -C $refRepo worktree add --detach $wt $sha 2>&1 | ForEach-Object { Write-Output $_ }
     if ($LASTEXITCODE -ne 0) { Stop-VolClaim "worktree éphémère $wt impossible" }
-    $buildRepo = $wt
     Write-Output "worktree éphémère : $wt @ $sha"
   }
+  $buildRepo = $wt
 }
 Write-Claim @{ state = 'building'; worktree = $wt }
-if (-not $NoBuild -and -not $exeOverride) {
+if (-not $NoBuild) {
   Write-Output "build : cargo build --release -p explorer-daemon ($buildRepo)"
   Push-Location $buildRepo
   try { cargo build --release -p explorer-daemon } finally { Pop-Location }
@@ -310,9 +300,8 @@ for ($try = 1; $try -le 4 -and -not $spawned; $try++) {
   }
   Write-Claim @{ state = 'spawning'; port = $Port }
 
-  $exeArgs = if ($exeOverride) { @('-Exe', $exeOverride) } else { @() }
   $out = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'spawn_daemon.ps1') `
-    -Port $Port -Repo $buildRepo -LogDir $logdir @exeArgs 2>&1
+    -Port $Port -Repo $buildRepo -LogDir $logdir 2>&1
   $out | ForEach-Object { Write-Output $_ }
   $dpid = 0
   $m = $out | Select-String -Pattern 'daemon PID (\d+)' | Select-Object -First 1
