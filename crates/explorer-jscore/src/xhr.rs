@@ -2810,6 +2810,25 @@ impl Engine {
     fn install_abort(&mut self) {
         let g = self.global;
         let ac = self.native_fn("AbortController", abort_controller_ctor);
+        if let Value::Obj(cid) = ac {
+            // `AbortController.prototype` — `is_constructor`
+            // (JS-C609) n'arme `new` sur une native que si
+            // `prototype` est own ; sans lui `new
+            // AbortController()` jetait « not a constructor »
+            // (cliquet BCD api 3501→3496). `abort` sur le proto
+            // comme spec — l'instance garde son bound lié à son
+            // propre signal (ctor ci-dessous).
+            let p = self.new_object();
+            let f = self.native_fn("abort", controller_abort_method);
+            self.set_own(p, "abort", f, true);
+            self.set_own(p, "constructor", ac.clone(), false);
+            self.set_own_attrs(
+                cid,
+                "prototype",
+                Value::Obj(p),
+                crate::heap::PropAttrs::FIXED,
+            );
+        }
         self.set_own(g, "AbortController", ac, true);
         let asig = self.native_fn("AbortSignal", abort_signal_ctor);
         if let Value::Obj(cid) = asig {
@@ -3099,6 +3118,14 @@ fn abort_controller_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Va
     let f = e.bound_native("abort", controller_abort, vec![signal]);
     e.set_own(ctrl, "abort", f, false);
     Ok(Value::Obj(ctrl))
+}
+
+/// `AbortController.prototype.abort(reason?)` — variante
+/// `this`-based du bound d'instance : lit `this.signal` puis
+/// délègue à [`controller_abort`].
+fn controller_abort_method(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let sig = e.get_prop_value(t, "signal")?;
+    controller_abort(e, Value::Undefined, &[sig, arg(args, 0)])
 }
 
 /// `controller.abort(reason?)` — marque le signal (idempotent) et

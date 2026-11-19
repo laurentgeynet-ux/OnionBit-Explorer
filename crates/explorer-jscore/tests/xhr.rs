@@ -2043,6 +2043,38 @@ fn c194_abort_signal_timeout() {
     );
 }
 
+/// Régression cliquet BCD (api 3501→3496) : `install_abort`
+/// reposait `AbortController` en `native_fn` sans `prototype`
+/// own — `is_constructor` (JS-C609) refusait `new
+/// AbortController()` (« not a constructor »). Le ctor porte
+/// désormais `prototype` + `abort`/`constructor` spec.
+#[test]
+fn abort_controller_constructible() {
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "var c=new AbortController();\
+             ['signal' in c,'abort' in c,\
+              'prototype' in AbortController,\
+              'abort' in AbortController.prototype,\
+              AbortController.prototype.constructor===AbortController].join('|')"
+        ),
+        "true|true|true|true|true"
+    );
+    // `abort()` bound (instance) et `abort` du proto mènent au
+    // même basculement du signal.
+    assert_eq!(
+        describe(
+            &mut e,
+            "var f='';c.signal.onabort=function(){f='a'};\
+             AbortController.prototype.abort.call(c,'r');\
+             f+'|'+c.signal.aborted+'|'+c.signal.reason"
+        ),
+        "a|true|r"
+    );
+}
+
 /// §B-14 — coinbase vol 148 : `get is not a function (on
 /// IDBRequest)` + JS-C215 : les interfaces IDB partagent les
 /// protos **réels** des instances — `instanceof`,
