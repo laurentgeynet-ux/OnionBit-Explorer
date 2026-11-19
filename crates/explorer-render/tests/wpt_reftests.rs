@@ -28,7 +28,8 @@ use explorer_dom::{Dom, NodeId};
 use explorer_html::TreeBuilder;
 use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, FontRequest, FontSource};
 use explorer_render::{
-    build_display_list_full, decode_image, rasterize, Frame, ImageTable, PaintImages,
+    build_display_list_full, collect_data_images, decode_image, rasterize, Frame, ImageTable,
+    PaintImages,
 };
 
 /// Viewport reftest standard du WPT.
@@ -323,22 +324,28 @@ fn bg_url(raw: &str) -> Option<String> {
     )
 }
 
-/// `background-image` des éléments → bitmaps décodés,
-/// résolus relativement au fichier source.
+/// `background-image`/`list-style-image` des éléments →
+/// bitmaps décodés, résolus relativement au fichier source.
+/// Les `url(data:…)` sont couvertes en amont par
+/// [`collect_data_images`] — même contrat que la production,
+/// déséchappement CSS de la valeur calculée inclus.
 fn collect_backgrounds(dom: &Dom, styles: &explorer_css::StyleMap, file_dir: &Path) -> ImageTable {
     let mut out = ImageTable::new();
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.element(n).is_ok() {
-            if let Some(url) = styles
-                .get(n)
-                .and_then(|st| st.get("background-image"))
-                .and_then(bg_url)
-            {
-                if let Ok(bytes) = std::fs::read(file_dir.join(&url)) {
-                    if let Some(img) = decode_image(&bytes, IMG_MAX_PX) {
-                        out.insert(n, Arc::new(img));
-                    }
+            for prop in ["background-image", "list-style-image"] {
+                let Some(url) = styles.get(n).and_then(|st| st.get(prop)).and_then(bg_url) else {
+                    continue;
+                };
+                if url.starts_with("data:") {
+                    continue;
+                }
+                if let Some(img) = std::fs::read(file_dir.join(&url))
+                    .ok()
+                    .and_then(|bytes| decode_image(&bytes, IMG_MAX_PX))
+                {
+                    out.insert(n, Arc::new(img));
                 }
             }
         }
@@ -352,6 +359,7 @@ fn collect_backgrounds(dom: &Dom, styles: &explorer_css::StyleMap, file_dir: &Pa
 /// Pipeline complet : HTML → cascade (UA + `<style>`) →
 /// layout → display list → raster RGBA. `file_dir` = dossier
 /// du fichier source (résolution des `src`/`url()` d'images).
+#[allow(clippy::cast_precision_loss)] // pixels image ≪ 2^23
 fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
     let dom = TreeBuilder::parse(strip_xml_prolog(src));
     let mut eng = StyleEngine::new();
@@ -362,10 +370,37 @@ fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
         .into_iter()
         .flatten()
         .find(|&c| dom.element(c).is_ok())?;
-    let (sizes, replaced) = collect_images(&dom, file_dir);
+    let (mut sizes, mut replaced) = collect_images(&dom, file_dir);
+    // `data:` inline — mêmes tables que la session
+    // (`replaced` + leurs dimensions intrinsèques pour le
+    // sizing, `backgrounds` dont `list-style-image`, R-306).
+    let data_imgs = collect_data_images(&dom, &styles, IMG_MAX_PX);
+    for (n, img) in &data_imgs.replaced {
+        sizes
+            .entry(*n)
+            .or_insert((img.width as f32, img.height as f32));
+    }
+    replaced.extend(data_imgs.replaced);
+    let mut backgrounds = collect_backgrounds(&dom, &styles, file_dir);
+    backgrounds.extend(data_imgs.backgrounds);
+    // R-306 — dims des `list-style-image` décodées → canal
+    // `sizes` (même contrat que `image_sizes` en session) :
+    // la ligne fantôme du marqueur dimensionne le
+    // `list-item` même vide.
+    for (n, img) in &backgrounds {
+        if styles
+            .get(*n)
+            .and_then(|st| st.get("list-style-image"))
+            .is_some_and(|v| v.contains("url("))
+        {
+            sizes
+                .entry(*n)
+                .or_insert((img.width as f32, img.height as f32));
+        }
+    }
     let images = PaintImages {
         replaced,
-        backgrounds: collect_backgrounds(&dom, &styles, file_dir),
+        backgrounds,
         background_layers: std::collections::HashMap::new(),
         svgs: explorer_render::ImageTable::new(),
         masks: explorer_render::ImageTable::new(),

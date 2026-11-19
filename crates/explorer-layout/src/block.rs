@@ -2596,6 +2596,52 @@ fn layout_block_inner(
         }
     };
 
+    // R-306 — le marqueur `outside` participe à la première
+    // ligne de l'item (CSS2.1 §12.5.1) : un `list-item` sans
+    // aucune ligne dans tout son sous-arbre (vide, ou
+    // contenu purement bloc sans texte) voit la ligne du
+    // marqueur dimensionner sa hauteur — la fixture WPT
+    // `outside-marker-taller-than-content` en dépend (image
+    // 40 px → item 40 px). `inside` : la puce est déjà un
+    // run de texte injecté (R-180), rien à ajouter.
+    // `url()` **décodée** (`marker_image` renseigné) ou type
+    // ≠ none — un `url()` en échec retombe sur le type :
+    // `none` sans image ⇒ aucun marqueur ⇒ pas de ligne.
+    let marker_exists = (bx
+        .style
+        .get("list-style-image")
+        .is_some_and(|v| v.contains("url("))
+        && bx.marker_image.is_some())
+        || bx
+            .style
+            .get("list-style-type")
+            .is_none_or(|t| t.trim() != "none");
+    let cursor = if bx.kind == BoxKind::ListItem
+        && marker_exists
+        && bx
+            .style
+            .get("list-style-position")
+            .is_none_or(|p| p.trim() != "inside")
+        && !subtree_has_line(bx)
+    {
+        let lh = line_height(&bx.style, fs, ctx);
+        let mh = bx.marker_image.map_or(lh, |(_, h)| h).max(1.0);
+        let line_y = y + bt + pt;
+        bx.lines.push(crate::inline::LineBox {
+            rect: Rect {
+                x: content_x,
+                y: line_y,
+                width: 0.0,
+                height: mh,
+            },
+            fragments: Vec::new(),
+            baseline: mh,
+        });
+        cursor.max(line_y + mh)
+    } else {
+        cursor
+    };
+
     // R-274 — `container-type:size` : contain size sur
     // l'axe bloc — hauteur `auto` dimensionnée « comme
     // vide » (le contenu est posé mais ne fait pas croître
@@ -3558,6 +3604,7 @@ fn flow_children(
                 height_raised: false,
                 fc_root: false,
                 marker_ordinal: 0,
+                marker_image: None,
                 marker_style: None,
                 first_line: None,
                 first_letter: None,
@@ -4265,6 +4312,21 @@ pub(crate) fn layout_anon_block(
         height: 0.0,
     };
     crate::inline::layout_inline(bx, x, y, w, ctx, parent_fs, abs_cb, fl, cb_h)
+}
+
+/// R-306 — la boîte ou un descendant a-t-il produit une
+/// ligne ? Sert à la ligne fantôme du marqueur `outside`
+/// (`list-item` entièrement sans ligne). Itératif — un
+/// sous-arbre hostile profond ne déborde pas la pile.
+fn subtree_has_line(bx: &LayoutBox) -> bool {
+    let mut stack = vec![bx];
+    while let Some(b) = stack.pop() {
+        if !b.lines.is_empty() {
+            return true;
+        }
+        stack.extend(b.children.iter());
+    }
+    false
 }
 
 /// `line-height` en px : nombre → ×font-size, longueur →

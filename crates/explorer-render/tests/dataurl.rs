@@ -123,3 +123,35 @@ fn data_urls_bornees_par_max_px() {
     assert!(decode_data_url(big, 1).is_none());
     assert!(decode_data_url(big, 1_000_000).is_some());
 }
+
+/// R-306 : `list-style-image: url(data:…)` — le marqueur
+/// `outside` puise dans `backgrounds` sous le `NodeId` du
+/// `list-item` (contrat `emit_image_marker`). La prop est
+/// héritée : déclarée sur `ul`, la valeur calculée vit sur
+/// le `li` — la clé est le porteur calculé, pas le
+/// déclarant. La valeur sérialisée `url("…\"…\"")` exige
+/// le déséchappement CSS avant décodage (même cas que le
+/// `data:` SVG de R-52).
+#[test]
+fn collect_list_style_image_heritee() {
+    let svg = "data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\"><rect width=\"40\" height=\"40\" fill=\"green\"/></svg>";
+    let dom = TreeBuilder::parse("<html><body><ul><li></li></ul></body></html>");
+    let styles = styled(&dom, &format!("ul {{ list-style-image: url('{svg}') }}"));
+    let imgs = collect_data_images(&dom, &styles, 1_000_000);
+    let mut seen = false;
+    let mut q = vec![dom.document()];
+    while let Some(n) = q.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "li") {
+            let img = imgs
+                .backgrounds
+                .get(&n)
+                .expect("li porte l'image du marqueur");
+            assert_eq!((img.width, img.height), (40, 40));
+            seen = true;
+        }
+        if let Ok(c) = dom.children(n) {
+            q.extend(c);
+        }
+    }
+    assert!(seen);
+}

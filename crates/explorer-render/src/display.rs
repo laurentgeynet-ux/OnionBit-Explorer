@@ -2781,6 +2781,31 @@ fn parse_drop_shadow(st: &explorer_css::ComputedStyle, arg: &str) -> Option<Filt
     })
 }
 
+/// R-306 — baseline de la première ligne **in-flow** de la
+/// boîte (css-lists §3 : le marqueur `outside` s'aligne sur
+/// la première ligne du contenu de l'item). Ses lignes
+/// propres d'abord ; sinon descente dans les enfants dans
+/// l'ordre du flux — un `<li>` sans ligne propre voit son
+/// texte dans un bloc enfant (`<li><div>…`). Les boîtes
+/// `absolute`/`fixed` sont sautées (`LayoutBox::out_of_flow`).
+/// Repli : bord haut de la boîte + une font-size — le
+/// comportement antérieur, conservé pour les items sans
+/// aucune ligne.
+fn first_line_baseline(bx: &LayoutBox, fs: f32) -> f32 {
+    fn find(bx: &LayoutBox) -> Option<f32> {
+        if let Some(l) = bx.lines.first() {
+            return Some(l.rect.y + l.baseline);
+        }
+        bx.children
+            .iter()
+            .filter(|ch| !ch.out_of_flow())
+            .find_map(find)
+    }
+    find(bx).unwrap_or_else(|| {
+        bx.rect.y + border_side_w(&bx.style, "top") + prop_px(&bx.style, "padding-top", 0.0) + fs
+    })
+}
+
 /// R-168 — `list-style-image` : la bitmap est fetchée
 /// comme les `url()` CSS (clé `NodeId` → `backgrounds`)
 /// et peinte dans la gouttière à la place du marqueur —
@@ -2806,20 +2831,24 @@ fn emit_image_marker(
     let fs = font_size_of(&bx.style) as f32;
     let iw = img.width as f32;
     let ih = img.height as f32;
-    let baseline_y = bx
-        .lines
-        .first()
-        .map_or_else(|| bx.rect.y + fs, |l| l.rect.y + l.baseline);
-    let cy = baseline_y - fs * 0.3;
+    let baseline_y = first_line_baseline(bx, fs);
     let content_x = content_rect(bx).x;
     let inside = bx
         .style
         .get("list-style-position")
         .is_some_and(|p| p.trim() == "inside");
-    let cx = if inside {
-        content_x + iw / 2.0
+    // R-306 — l'image est un contenu remplacé : sa baseline
+    // est son bord bas (§10.8.1), posé sur la baseline de la
+    // ligne du marqueur. Bord droit à ~0.7em du contenu —
+    // mesuré navigateur (ref WPT `outside-marker-taller` :
+    // `margin-inline-end: 7px` à fs 10).
+    let (cx, cy) = if inside {
+        (content_x + iw / 2.0, baseline_y - ih / 2.0)
     } else {
-        content_x - fs * 0.34 - iw / 2.0
+        (
+            content_x - (fs * 0.7).max(1.0) - iw / 2.0,
+            baseline_y - ih / 2.0,
+        )
     };
     items.push(DisplayItem::Image {
         rect: Rect {
@@ -3031,15 +3060,7 @@ fn emit_list_marker(
     // les métriques des moteurs établis tournent autour.
     let d = (fs * 0.34).max(1.0);
     let gap = (fs * 0.34).max(1.0);
-    let baseline_y = bx.lines.first().map_or_else(
-        || {
-            bx.rect.y
-                + border_side_w(&bx.style, "top")
-                + prop_px(&bx.style, "padding-top", 0.0)
-                + fs
-        },
-        |l| l.rect.y + l.baseline,
-    );
+    let baseline_y = first_line_baseline(bx, fs);
     let cy = baseline_y - fs * 0.3;
     let content_x = content_rect(bx).x;
     let inside = bx
@@ -3102,15 +3123,7 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
             |cs| cs.label(bx.marker_ordinal),
         )
     };
-    let baseline_y = bx.lines.first().map_or_else(
-        || {
-            bx.rect.y
-                + border_side_w(&bx.style, "top")
-                + prop_px(&bx.style, "padding-top", 0.0)
-                + fs
-        },
-        |l| l.rect.y + l.baseline,
-    );
+    let baseline_y = first_line_baseline(bx, fs);
     let content_x = content_rect(bx).x;
     let inside = bx
         .style

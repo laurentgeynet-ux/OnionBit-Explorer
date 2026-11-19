@@ -3580,3 +3580,82 @@ fn field_sizing_content_mesure_au_contenu() {
         "cols/rows ignorés : {ta:?}"
     );
 }
+
+/// R-306 — la ligne du marqueur `outside` dimensionne un
+/// `list-item` vide (CSS2.1 §12.5.1 — le marqueur
+/// participe à la première ligne ; WPT
+/// `outside-marker-taller-than-content`) : hauteur de
+/// l'item = hauteur de l'image décodée du marqueur, portée
+/// par `sizes[node]` (même canal que les remplacés).
+#[test]
+fn list_item_vide_prend_la_hauteur_du_marqueur_image() {
+    let dom = TreeBuilder::parse("<html><body><ul><li></li></ul></body></html>");
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "body,ul { margin: 0 } ul { list-style-image: url(m.png) }",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let li = by_tag(&dom, "li");
+    let mut sizes = std::collections::HashMap::new();
+    // L'image 40×40 est « décodée » : la collecte amont a
+    // posé ses dims sous le nœud — `marker_image` voyage
+    // depuis le build (héritage `ul` → `li` de la prop).
+    sizes.insert(li, (40.0, 40.0));
+    let mut bx = build_box_tree_sized(&dom, root_el, &styles, &sizes).expect("arbre");
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let li_bx = find(&bx, li);
+    assert!(approx(li_bx.rect.height, 40.0), "h={:?}", li_bx.rect);
+    assert_eq!(li_bx.lines.len(), 1, "ligne fantôme du marqueur");
+    assert!(approx(li_bx.lines[0].baseline, 40.0));
+}
+
+/// R-306 — sans image (ou image non décodée), la ligne du
+/// marqueur vaut la `line-height` de l'item : un `<li>`
+/// vide fait une hauteur de ligne comme dans les moteurs
+/// de référence.
+#[test]
+fn list_item_vide_prend_une_hauteur_de_ligne() {
+    let (dom, bx) = laid(
+        "<html><body><ul><li></li></ul></body></html>",
+        "ul { font-size: 10px; line-height: 1 }",
+    );
+    let li_bx = find(&bx, by_tag(&dom, "li"));
+    assert!(approx(li_bx.rect.height, 10.0), "h={:?}", li_bx.rect);
+    assert_eq!(li_bx.lines.len(), 1);
+}
+
+/// R-306 — `list-style-type: none` ⇒ pas de marqueur ⇒
+/// pas de ligne fantôme : l'item vide reste à hauteur 0.
+#[test]
+fn list_item_vide_sans_marqueur_reste_plat() {
+    let (dom, bx) = laid(
+        "<html><body><ul><li></li></ul></body></html>",
+        "ul { list-style-type: none; font-size: 10px }",
+    );
+    let li_bx = find(&bx, by_tag(&dom, "li"));
+    assert!(approx(li_bx.rect.height, 0.0), "h={:?}", li_bx.rect);
+    assert!(li_bx.lines.is_empty());
+}
+
+/// R-306 — un `list-item` avec texte garde sa propre
+/// première ligne : la fantôme n'est jamais injectée en
+/// double.
+#[test]
+fn list_item_avec_texte_pas_de_ligne_fantome() {
+    let (dom, bx) = laid(
+        "<html><body><ul><li>abc</li></ul></body></html>",
+        "ul { font-size: 10px; line-height: 1 }",
+    );
+    let li_bx = find(&bx, by_tag(&dom, "li"));
+    // La ligne vit dans le bloc anonyme du texte — aucune
+    // fantôme n'a été poussée directement sur le `li`.
+    assert!(li_bx.lines.is_empty(), "pas de doublon fantôme");
+    assert!(approx(li_bx.rect.height, 10.0), "h={:?}", li_bx.rect);
+}

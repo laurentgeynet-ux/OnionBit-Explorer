@@ -194,6 +194,13 @@ pub struct LayoutBox {
     /// `list-style-type: <nom>` (R-221) — `None` pour les
     /// types natifs (`decimal`, `disc`…).
     pub counter: Option<explorer_css::CounterStyle>,
+    /// R-306 — dimensions intrinsèques de l'image
+    /// `list-style-image` décodée, lues dans `sizes[node]`
+    /// au build (canal partagé des contenus remplacés — un
+    /// `list-item` n'est jamais remplacé, l'entrée ne sert
+    /// qu'au marqueur). La ligne du marqueur `outside`
+    /// dimensionne l'item même vide (CSS2.1 §12.5.1).
+    pub marker_image: Option<(f32, f32)>,
     /// R-177 — style `::first-line` de la cascade — overlay
     /// §7.1 sur les fragments de la première ligne.
     pub first_line: Option<ComputedStyle>,
@@ -545,6 +552,7 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                     height_raised: false,
                     fc_root: false,
                     marker_ordinal: 0,
+                    marker_image: None,
                     marker_style: None,
                     first_line: None,
                     first_letter: None,
@@ -789,6 +797,12 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         counter: style
             .get("list-style-type")
             .and_then(|ty| explorer_css::CounterStyle::resolve(&styles.counter_styles, ty.trim())),
+        // R-306 — dims du marqueur image (contract `sizes` :
+        // dims intrinsèques du contenu remplacé OU du
+        // `list-style-image` du nœud).
+        marker_image: (kind == BoxKind::ListItem)
+            .then(|| sizes.get(&root).copied())
+            .flatten(),
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         may_escape: true,
     };
@@ -1006,6 +1020,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     height_raised: false,
                     fc_root: false,
                     marker_ordinal: 0,
+                    marker_image: None,
                     marker_style: None,
                     first_line: None,
                     first_letter: None,
@@ -1538,6 +1553,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         height_raised: false,
         fc_root: false,
         marker_ordinal: 0,
+        marker_image: None,
         marker_style: None,
         first_line: None,
         first_letter: None,
@@ -1774,6 +1790,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             height_raised: false,
             fc_root: false,
             marker_ordinal: 0,
+            marker_image: None,
             marker_style: None,
             first_line: None,
             first_letter: None,
@@ -1899,6 +1916,7 @@ fn object_box(
         height_raised: false,
         fc_root: false,
         marker_ordinal: 0,
+        marker_image: None,
         marker_style: None,
         first_line: None,
         first_letter: None,
@@ -2084,6 +2102,7 @@ fn leaf_box(
         height_raised: false,
         fc_root: false,
         marker_ordinal: 0,
+        marker_image: None,
         marker_style: None,
         first_line: None,
         first_letter: None,
@@ -2141,6 +2160,7 @@ fn control_box(
                     height_raised: false,
                     fc_root: false,
                     marker_ordinal: 0,
+                    marker_image: None,
                     marker_style: None,
                     first_line: None,
                     first_letter: None,

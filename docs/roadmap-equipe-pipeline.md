@@ -4674,3 +4674,37 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   indiscernable : aucun des deux fichiers n'ayant Ahem,
   les glyphes sont invisibles des deux côtés (limite
   harnais documentée, pas un trou moteur).
+
+- [x] **R-306 — Marqueur `outside` alimenté (`list-style-image`
+  `data:` servie) et dimensionnant (ligne fantôme)** (layout +
+  render + harnais WPT — plan d'action validé opérateur après
+  reconnaissance geo-diff).
+  **`collect_data_images` sert `list-style-image: url(data:…)`**
+  : la propriété n'était collectée nulle part —
+  `emit_image_marker` ne trouvait jamais de bitmap (code mort
+  amont, aussi en prod : `fetch_backgrounds` ignore la prop —
+  couture NAVIGATEUR journalisée). Clé = `NodeId` du porteur
+  calculé (`ul`→`li` hérité) ; le `url_arg` déséchappant
+  couvre la sérialisation `url("…\"…\"")`. **Ligne fantôme**
+  (`block.rs`) : `list-item` outside sans ligne dans tout son
+  sous-arbre → ligne de hauteur `marker_image` (dims via
+  `sizes[node]` — canal partagé documenté) sinon
+  `line-height` ; `none` sans image ⇒ pas de ligne. Un `<li>`
+  vide prend une hauteur de ligne comme les moteurs de
+  référence (CSS2.1 §12.5.1 — corrige la géométrie terrain).
+  **`first_line_baseline`** (`display.rs`) : baseline = lignes
+  propres sinon descente dans les enfants in-flow — partagée
+  par les trois émetteurs de marqueurs. **`emit_image_marker`**
+  : bord bas de l'image sur la baseline (baseline remplacée =
+  bord bas, §10.8.1), bord droit ≈0,7 em du contenu (mesuré
+  navigateur). **Harnais** : `data:` délégué à
+  `collect_data_images` (même contrat que la session — plus
+  d'extraction maison), `list-style-image` fichier collectée,
+  dims marqueur → `sizes`. **Mesure 199/203 stable** — les 4
+  échecs sont re-diagnostiqués : `taller-than-content` émet la
+  display list attendue mais sa ref exige `content: url()`
+  sur `::before` (R-308) ; `with-align-content` exige
+  `align-content` bloc (file) ; `string-007` et
+  `nested-marker-styling` restent R-307/R-308. Verrous :
+  `collect_list_style_image_heritee` (render/dataurl) +
+  `list_item_vide_*`/`_avec_texte_*` (layout/block ×4).

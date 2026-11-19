@@ -132,6 +132,20 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
                 }
             }
         }
+        // R-306 — `list-style-image: url(data:…)` : le
+        // marqueur puise dans `backgrounds` sous le `NodeId`
+        // de l'élément `list-item` (contrat
+        // `emit_image_marker`) — sans collecte la propriété
+        // était déclarée mais jamais servie, même en `data:`.
+        if let Some(url) = style
+            .get("list-style-image")
+            .and_then(url_arg)
+            .filter(|u| u.starts_with("data:"))
+        {
+            if let Some(img) = decode_data_url(&url, max_px) {
+                out.backgrounds.insert(node, Arc::new(img));
+            }
+        }
         // R-52 — motif « icône colorée » : `mask-image` +
         // `background-color` (Codex/Primer/Material). Le mask
         // est quasi-systématiquement un `data:` SVG inline ;

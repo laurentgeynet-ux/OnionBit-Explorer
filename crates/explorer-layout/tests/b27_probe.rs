@@ -78,6 +78,7 @@ fn widest(b: &LayoutBox, acc: &mut Vec<LayoutBox>) {
         height_raised: b.height_raised,
         fc_root: b.fc_root,
         marker_ordinal: b.marker_ordinal,
+        marker_image: None,
         marker_style: None,
         first_line: None,
         first_letter: None,
