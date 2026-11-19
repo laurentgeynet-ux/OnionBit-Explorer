@@ -4708,3 +4708,41 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   `nested-marker-styling` restent R-307/R-308. Verrous :
   `collect_list_style_image_heritee` (render/dataurl) +
   `list_item_vide_*`/`_avec_texte_*` (layout/block ×4).
+- [x] **R-308 — Contenu généré avancé : `content: url()` sur
+  `::before`/`::after`, `display:list-item` sur pseudo,
+  `::marker{content}` + slots chaînés — WPT 201/203**
+  (css + layout + render + harnais WPT — débloque 2 des 4
+  échecs R-306 : `nested-marker-styling`,
+  `outside-marker-taller-than-content`).
+  **`content:url(...)` → boîte remplacée** (css-content §3.3) :
+  `pure_content_url` (UTF-8 safe, déséchappe via
+  `unescape_str` — la sérialisation `url("…\"…\"")` portait
+  des `\` littéraux → clé introuvable) ; `LayoutBox.content_url`,
+  bitmap dans `PaintImages::content_images` (url-keyed — un
+  pseudo n'a pas de `NodeId`, précédent `masks_url` R-86),
+  dims via le param `url_sizes` de
+  **`build_box_tree_sized_urls`** (additif). `unescape_str`
+  pub dans `explorer-css` (déménagée de `dataurl.rs` — même
+  clé des deux côtés). **`display:list-item` sur pseudo** :
+  `pseudo_box` → `BoxKind::ListItem` ; le texte pseudo des
+  kinds bloc est enveloppé `AnonymousBlock` (R-21 — un `Text`
+  nu sous bloc ne peint pas) et `inject_inside_markers` pose
+  la puce dans le premier anonyme — le marqueur inside des
+  pseudo-éléments peint enfin. **`::marker` chaîné** :
+  `selector_pseudo_element` vise le **dernier** pseudo du
+  composé (avant : le premier — `div::before::marker` routait
+  en `::before`) + `selector_marker_parent` porte le médian ;
+  `SelEntry.marker_parent` + slots `PseudoStyles` distinguent
+  `*::marker` / `*::before::marker` / `*::after::marker` ;
+  `StyleMap::marker_of(node, which)`. **`::marker{content}`**
+  : `LayoutBox.marker_content` substitue le libellé dans
+  `inject_inside_markers` **et** `emit_text_marker`, sans
+  espace suffixe (css-lists §3). **Mesure 201/203 (99 %)** —
+  cliquet 199→201 ; échecs honnêtes restants : `string-007`
+  (mesure glyphes/ancrage/rtl — R-307), `with-align-content`
+  (`align-content` bloc — file). Verrous :
+  `pseudo_content_url_boite_remplacee`,
+  `pseudo_display_list_item_porte_un_marqueur`,
+  `pseudo_marker_content_substitution` (layout/block).
+  Demande NAV journalisée : fetch `content:url(http…)` →
+  `content_images` + `url_sizes`.

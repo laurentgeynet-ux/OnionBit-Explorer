@@ -26,7 +26,7 @@ use std::sync::{Arc, LazyLock};
 use explorer_css::{Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, NodeId};
 use explorer_html::TreeBuilder;
-use explorer_layout::{build_box_tree_sized, layout_tree, BlockCtx, FontRequest, FontSource};
+use explorer_layout::{build_box_tree_sized_urls, layout_tree, BlockCtx, FontRequest, FontSource};
 use explorer_render::{
     build_display_list_full, collect_data_images, decode_image, rasterize, Frame, ImageTable,
     PaintImages,
@@ -42,7 +42,7 @@ const VIEW_H: f32 = 600.0;
 /// comptés sont des trous moteur documentés (marqueur outside
 /// alignement/image, `::marker` styling, strings rtl) —
 /// à monter à chaque progrès moteur.
-const WPT_BASELINE: usize = 199;
+const WPT_BASELINE: usize = 201;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».
@@ -398,6 +398,16 @@ fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
                 .or_insert((img.width as f32, img.height as f32));
         }
     }
+    // R-308 — `content:url(data:)` de pseudo : dims →
+    // `url_sizes` (canal `build_box_tree_sized_urls`),
+    // bitmaps → `content_images`.
+    let mut url_sizes: std::collections::HashMap<String, (f32, f32)> =
+        std::collections::HashMap::new();
+    for (u, img) in &data_imgs.content_images {
+        url_sizes
+            .entry(u.clone())
+            .or_insert((img.width as f32, img.height as f32));
+    }
     let images = PaintImages {
         replaced,
         backgrounds,
@@ -408,8 +418,9 @@ fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
         canvases: explorer_render::CanvasTable::new(),
         svg_sources: std::collections::HashMap::new(),
         borders_url: std::collections::HashMap::new(),
+        content_images: data_imgs.content_images,
     };
-    let mut bx = build_box_tree_sized(&dom, root, &styles, &sizes)?;
+    let mut bx = build_box_tree_sized_urls(&dom, root, &styles, &sizes, &url_sizes)?;
     layout_tree(&mut bx, VIEW_W, &ctx());
     if std::env::var("WPT_DUMP").is_ok_and(|f| tag.contains(&f)) {
         eprintln!("--- {tag}\n{}", bx.dump(&dom));

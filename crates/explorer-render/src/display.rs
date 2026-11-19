@@ -3103,11 +3103,14 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     if !fs.is_finite() || fs <= 0.0 {
         return;
     }
-    // `<string>` (css-lists §3.3 — R-112) : le marqueur est
-    // la chaîne **elle-même** (`list-style-type:"- "` →
-    // `- `), pas un compteur — mesuré terrain :
-    // `ul{list-style-type:"*"}` de l'IETF.
-    let text = if let Some(s) = ty
+    // R-308 — `::marker{content}` substitue le libellé
+    // (chaîne résolue au build, `marker_content`) — prioritaire
+    // sur le type, `<string>` inclus (css-lists §3 +
+    // css-content §4 : le content du marqueur remplace le
+    // compteur généré).
+    let text = if let Some(mc) = &bx.marker_content {
+        mc.clone()
+    } else if let Some(s) = ty
         .strip_prefix('"')
         .and_then(|v| v.strip_suffix('"'))
         .or_else(|| ty.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
@@ -5839,24 +5842,35 @@ fn paint_replaced(
     off: (f32, f32),
     images: &crate::PaintImages,
 ) {
-    if let Some(img) = bx.node.and_then(|n| {
-        images
-            .replaced
-            .get(&n)
-            .or_else(|| images.svgs.get(&n))
-            .cloned()
-            .or_else(|| {
-                // `<canvas>` : op-list rejouée vers un bitmap à
-                // la taille intrinsèque de l'élément (attributs
-                // width/height — défaut spec 300×150).
-                images.canvases.get(&n).and_then(|ops| {
-                    let (w, h) = bx.intrinsic.unwrap_or((300.0, 150.0));
-                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    crate::canvas::raster_ops(ops, w.max(0.0) as u32, h.max(0.0) as u32)
-                        .map(std::sync::Arc::new)
+    if let Some(img) = bx
+        .node
+        .and_then(|n| {
+            images
+                .replaced
+                .get(&n)
+                .or_else(|| images.svgs.get(&n))
+                .cloned()
+                .or_else(|| {
+                    // `<canvas>` : op-list rejouée vers un bitmap à
+                    // la taille intrinsèque de l'élément (attributs
+                    // width/height — défaut spec 300×150).
+                    images.canvases.get(&n).and_then(|ops| {
+                        let (w, h) = bx.intrinsic.unwrap_or((300.0, 150.0));
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        crate::canvas::raster_ops(ops, w.max(0.0) as u32, h.max(0.0) as u32)
+                            .map(std::sync::Arc::new)
+                    })
                 })
-            })
-    }) {
+        })
+        .or_else(|| {
+            // R-308 — `content:url(...)` de pseudo : la boîte
+            // n'a pas de `NodeId`, la bitmap est indexée par le
+            // texte url (canal `masks_url` étendu).
+            bx.content_url
+                .as_ref()
+                .and_then(|u| images.content_images.get(u).cloned())
+        })
+    {
         // Le contenu remplacé se place dans la **content
         // box** — padding et bordures restent autour
         // (§10.3.2 — Acid2 : l'œil 96×24 étiré à 131 sinon,

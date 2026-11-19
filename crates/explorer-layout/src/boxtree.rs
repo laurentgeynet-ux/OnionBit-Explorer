@@ -201,6 +201,19 @@ pub struct LayoutBox {
     /// qu'au marqueur). La ligne du marqueur `outside`
     /// dimensionne l'item même vide (CSS2.1 §12.5.1).
     pub marker_image: Option<(f32, f32)>,
+    /// R-308 — libellé du marqueur **substitué** par
+    /// `::marker{content:"…"}` (css-lists §3, css-content §4) :
+    /// résolu au build (chaînes/`attr()`/`counter()` via le
+    /// même `pseudo_content` que `::before`). `None` = libellé
+    /// du type (`disc`, ordinal, `counter-style`).
+    pub marker_content: Option<String>,
+    /// R-308 — `url(...)` d'un `content:url(...)` générant une
+    /// boîte **remplacée** sur pseudo (`::before`/`::after`,
+    /// css-content §3.3) : la bitmap vit dans
+    /// `PaintImages::content_images` clé par ce texte (la boîte
+    /// n'a pas de `NodeId` — canal `masks_url` étendu) ;
+    /// `intrinsic` porte ses dimensions.
+    pub content_url: Option<String>,
     /// R-177 — style `::first-line` de la cascade — overlay
     /// §7.1 sur les fragments de la première ligne.
     pub first_line: Option<ComputedStyle>,
@@ -457,6 +470,26 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     styles: &StyleMap,
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
 ) -> Option<LayoutBox> {
+    build_box_tree_sized_urls(dom, root, styles, sizes, &std::collections::HashMap::new())
+}
+
+/// R-308 — [`build_box_tree_sized`] + `url_sizes` :
+/// dimensions intrinsèques des ressources **clées par
+/// `url(...)`** (`content:url(...)` de `::before`/`::after`
+/// — la boîte générée n'a pas de `NodeId`, son image est
+/// indexée par le texte url du style calculé, canal
+/// `content_images` de `PaintImages`). Une url absente →
+/// boîte remplacée sans `intrinsic` (dégradation image
+/// cassée, gabarit CSS éventuel).
+#[must_use]
+#[allow(clippy::too_many_lines, clippy::implicit_hasher)]
+pub fn build_box_tree_sized_urls<S: ::std::hash::BuildHasher>(
+    dom: &Dom,
+    root: NodeId,
+    styles: &StyleMap,
+    sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
+    url_sizes: &std::collections::HashMap<String, (f32, f32)>,
+) -> Option<LayoutBox> {
     // R-169 — env `counter-reset`/`counter-increment`
     // pré-calculé sur l'ordre du document (une passe) et
     // porté par le worker récursif.
@@ -464,7 +497,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // R-276 — profondeur `quotes` document-ordre (même
     // patron que `envs` : pré-passe, portée par le worker).
     let qdepth = compute_quote_depths(dom, dom.document(), styles);
-    let mut bx = build_box_tree_env(dom, root, styles, sizes, &envs, &qdepth);
+    let mut bx = build_box_tree_env(dom, root, styles, sizes, &envs, &qdepth, url_sizes);
     // R-177 — la racine n'est pas couverte par `child_boxes` :
     // ses pseudos `::marker`/`::first-line`/`::first-letter`
     // se figent ici, puis les `first-*` des éléments se prêtent
@@ -472,6 +505,15 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     // formatée — `layout_inline` ne voit que lui).
     if let Some(b) = &mut bx {
         b.marker_style = styles.pseudo(root, PseudoElement::Marker).cloned();
+        if let Some(ms) = &b.marker_style {
+            b.marker_content = marker_content_of(
+                ms,
+                dom,
+                root,
+                envs.get(&root),
+                qdepth.get(&root).map_or(0, |d| d.0),
+            );
+        }
         // R-221 — `list-style-type: <nom>` nommé : le
         // `@counter-style` correspondant voyage avec la
         // boîte pour la génération de marqueur. R-303 —
@@ -509,8 +551,11 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
             .is_some_and(|p| p.trim() == "inside")
     {
         let ty = bx.style.get("list-style-type").map_or("disc", str::trim);
-        if ty != "none" {
-            let glyph = match ty {
+        // R-308 — `::marker{content}` substitue le libellé
+        // (les chaînes littérales `list-style-type:"…"` restent
+        // une valeur de type, `marker_content` les double).
+        if ty != "none" || bx.marker_content.is_some() {
+            let glyph = bx.marker_content.clone().unwrap_or_else(|| match ty {
                 "disc" => "\u{2022}".to_string(),
                 "circle" => "\u{25e6}".to_string(),
                 "square" => "\u{25aa}".to_string(),
@@ -529,40 +574,61 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                         },
                         str::to_string,
                     ),
-            };
+            });
             let mstyle = bx.marker_style.clone().unwrap_or_else(|| bx.style.clone());
-            bx.children.insert(
-                0,
-                LayoutBox {
-                    kind: BoxKind::Text,
-                    node: bx.node,
-                    style: mstyle,
-                    text: Some(format!("{glyph} ")),
-                    children: Vec::new(),
-                    lines: Vec::new(),
-                    rect: Rect::default(),
-                    position: Position::Static,
-                    float: Float::None,
-                    overflow: Overflow::Visible,
-                    overflow_x: Overflow::Visible,
-                    z_index: 0,
-                    intrinsic: None,
-                    control_checked: false,
-                    slot: BoxSlot::default(),
-                    height_raised: false,
-                    fc_root: false,
-                    marker_ordinal: 0,
-                    marker_image: None,
-                    marker_style: None,
-                    first_line: None,
-                    first_letter: None,
-                    quirks_mode: false,
-                    is_body: false,
-                    counter: None,
-                    flow_mode: explorer_css::value::WritingMode::HorizontalTb,
-                    may_escape: true,
-                },
-            );
+            // `::marker{content}` : le libellé est le contenu
+            // exact (aucune espace automatique — css-lists §3) ;
+            // types natifs : « libellé + espace » historique.
+            let run_text = if bx.marker_content.is_some() {
+                glyph
+            } else {
+                format!("{glyph} ")
+            };
+            // R-308 — un `Text` nu en enfant de bloc ne peint
+            // pas (R-21) : la puce rejoint le **premier**
+            // `AnonymousBlock` (même ligne que le contenu —
+            // ref `nested-marker-styling`) ou en ouvre un.
+            let marker_box = LayoutBox {
+                kind: BoxKind::Text,
+                node: bx.node,
+                style: mstyle,
+                text: Some(run_text),
+                children: Vec::new(),
+                lines: Vec::new(),
+                rect: Rect::default(),
+                position: Position::Static,
+                float: Float::None,
+                overflow: Overflow::Visible,
+                overflow_x: Overflow::Visible,
+                z_index: 0,
+                intrinsic: None,
+                control_checked: false,
+                slot: BoxSlot::default(),
+                height_raised: false,
+                fc_root: false,
+                marker_ordinal: 0,
+                marker_image: None,
+                marker_content: None,
+                content_url: None,
+                marker_style: None,
+                first_line: None,
+                first_letter: None,
+                quirks_mode: false,
+                is_body: false,
+                counter: None,
+                flow_mode: explorer_css::value::WritingMode::HorizontalTb,
+                may_escape: true,
+            };
+            if matches!(
+                bx.children.first().map(|c| &c.kind),
+                Some(BoxKind::AnonymousBlock)
+            ) {
+                bx.children[0].children.insert(0, marker_box);
+            } else {
+                let mut anon = leaf_box_anon(BoxKind::AnonymousBlock, bx.style.clone());
+                anon.children = vec![marker_box];
+                bx.children.insert(0, anon);
+            }
         }
     }
     for c in &mut bx.children {
@@ -608,6 +674,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
     qdepth: &HashMap<NodeId, (i32, i32)>,
+    url_sizes: &std::collections::HashMap<String, (f32, f32)>,
 ) -> Option<LayoutBox> {
     let style = styles.get(root)?.clone();
     if style.get("display") == Some("none") {
@@ -736,7 +803,9 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
     // `<object>` (R-13c) : élément **remplacé** si sa ressource
     // est résolue, sinon ses **enfants se substituent**.
     if dom.tag_name(root).is_ok_and(|t| t == "object") {
-        return Some(object_box(dom, root, &style, styles, sizes, envs, qdepth));
+        return Some(object_box(
+            dom, root, &style, styles, sizes, envs, qdepth, url_sizes,
+        ));
     }
     // Contrôles de formulaire (étape 38) : `input`/`select` —
     // la valeur peinte est synthétisée en enfant `Text` (la
@@ -803,10 +872,12 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         marker_image: (kind == BoxKind::ListItem)
             .then(|| sizes.get(&root).copied())
             .flatten(),
+        marker_content: None,
+        content_url: None,
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         may_escape: true,
     };
-    let children = child_boxes(dom, root, styles, &style, sizes, envs, qdepth);
+    let children = child_boxes(dom, root, styles, &style, sizes, envs, qdepth, url_sizes);
     b.children = wrap_children(children, &style, kind);
     Some(b)
 }
@@ -870,7 +941,7 @@ fn box_kind_of(style: &ComputedStyle) -> BoxKind {
 /// Borne : la boîte `<slot>` suit son `display` calculé
 /// (inline par défaut — `display:contents` UA non porté,
 /// le découpage en-ligne/autour-de-bloc est celui de R-17).
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn child_boxes<S: ::std::hash::BuildHasher>(
     dom: &Dom,
     parent: NodeId,
@@ -879,6 +950,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
     qdepth: &HashMap<NodeId, (i32, i32)>,
+    url_sizes: &std::collections::HashMap<String, (f32, f32)>,
 ) -> Vec<LayoutBox> {
     let is_slot = dom
         .tag_name(parent)
@@ -909,6 +981,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         PseudoElement::Before,
         envs.get(&parent),
         qdepth.get(&parent).map_or(0, |d| d.0),
+        url_sizes,
     ) {
         out.push(b);
     }
@@ -952,6 +1025,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                         sizes,
                         envs,
                         qdepth,
+                        url_sizes,
                     )
                 });
                 out.extend(inner);
@@ -961,7 +1035,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
             // (R-24 : `host-nest3000` ne doit plus tuer le
             // worker).
             if let Some(mut b) = explorer_common::deep(|| {
-                build_box_tree_env(dom, child, styles, sizes, envs, qdepth)
+                build_box_tree_env(dom, child, styles, sizes, envs, qdepth, url_sizes)
             }) {
                 // `<br>` : saut de ligne forcé — texte sentinelle
                 // U+2028 LINE SEPARATOR, que l'itemisation UAX #14
@@ -1021,6 +1095,8 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     fc_root: false,
                     marker_ordinal: 0,
                     marker_image: None,
+                    marker_content: None,
+                    content_url: None,
                     marker_style: None,
                     first_line: None,
                     first_letter: None,
@@ -1041,6 +1117,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         PseudoElement::After,
         envs.get(&parent),
         qdepth.get(&parent).map_or(0, |d| d.1),
+        url_sizes,
     ) {
         out.push(b);
     }
@@ -1049,6 +1126,10 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     for b in &mut out {
         if let Some(n) = b.node {
             b.marker_style = styles.pseudo(n, PseudoElement::Marker).cloned();
+            if let Some(ms) = &b.marker_style {
+                b.marker_content =
+                    marker_content_of(ms, dom, n, envs.get(&n), qdepth.get(&n).map_or(0, |d| d.0));
+            }
             b.first_line = styles.pseudo(n, PseudoElement::FirstLine).cloned();
             b.first_letter = styles.pseudo(n, PseudoElement::FirstLetter).cloned();
         }
@@ -1200,24 +1281,89 @@ fn pseudo_box(
     which: explorer_css::PseudoElement,
     env: Option<&HashMap<String, i32>>,
     depth: i32,
+    url_sizes: &std::collections::HashMap<String, (f32, f32)>,
 ) -> Option<LayoutBox> {
     let st = styles.pseudo(node, which)?;
-    let text = pseudo_content(st.get("content")?, dom, node, env, depth, st)?;
+    let raw = st.get("content")?;
     let kind = box_kind_of(st);
     let mut bx = leaf_box_anon(kind, st.clone());
-    if !text.is_empty() {
-        let t = leaf_box_anon(BoxKind::Text, st.clone());
-        let mut t = t;
-        t.text = Some(text);
-        // Texte nu dans un bloc : enveloppe anonyme (R-21) ;
-        // dans un inline, le flux le collecte directement.
-        bx.children = if kind == BoxKind::Block {
-            wrap_anonymous(vec![t], st)
-        } else {
-            vec![t]
-        };
+    if let Some(url) = pure_content_url(raw) {
+        // R-308 — `content:url(...)` : le pseudo devient une
+        // boîte **remplacée** (css-content §3.3) — `intrinsic`
+        // depuis le canal `url_sizes` (dims de la bitmap
+        // décodée), la bitmap elle-même est peinte via
+        // `PaintImages::content_images[url]` à l'émission.
+        bx.intrinsic = url_sizes.get(&url).copied();
+        bx.content_url = Some(url);
+    } else {
+        let text = pseudo_content(raw, dom, node, env, depth, st)?;
+        if !text.is_empty() {
+            let mut t = leaf_box_anon(BoxKind::Text, st.clone());
+            t.text = Some(text);
+            // Texte nu dans un conteneur de niveau bloc :
+            // enveloppe anonyme (R-21 — sans elle la boîte
+            // n'entre jamais en `lines` et ne peint pas ;
+            // `display:list-item` sur pseudo en dépend, R-308) ;
+            // dans un inline, le flux le collecte directement.
+            bx.children = if kind == BoxKind::Inline {
+                vec![t]
+            } else {
+                wrap_anonymous(vec![t], st)
+            };
+        }
+    }
+    // R-308 — `display:list-item` sur pseudo : son marqueur est
+    // stylé par `*::before::marker`/`*::after::marker`
+    // (css-pseudo §7.1.1 — slots `before_marker`/`after_marker`,
+    // disjoints du `::marker` de l'élément).
+    if kind == BoxKind::ListItem {
+        bx.marker_style = styles.marker_of(node, which).cloned();
+        if let Some(ms) = &bx.marker_style {
+            bx.marker_content = marker_content_of(ms, dom, node, env, depth);
+        }
     }
     Some(bx)
+}
+
+/// R-308 — `::marker{content:"…"}` → libellé de marqueur
+/// substitué, résolu comme `pseudo_content` (chaînes,
+/// `attr()`, `counter()`, guillemets). `None` : `content`
+/// absent/`none`/`url()` — un marqueur **image** est une
+/// borne documentée, le libellé du type est conservé.
+fn marker_content_of(
+    ms: &ComputedStyle,
+    dom: &Dom,
+    node: NodeId,
+    env: Option<&HashMap<String, i32>>,
+    depth: i32,
+) -> Option<String> {
+    ms.get("content")
+        .filter(|c| pure_content_url(c).is_none())
+        .and_then(|c| pseudo_content(c, dom, node, env, depth, ms))
+}
+
+/// `content` réduit à un unique `url(...)` → texte de l'url
+/// (css-content §3.3 : le pseudo devient un contenu remplacé).
+/// `/ "alt"` trailing (alt-text) accepté — l'alternative
+/// n'est pas peinte, comme pour le texte (R-80).
+fn pure_content_url(raw: &str) -> Option<String> {
+    const P: usize = 4; // len("url(")
+    let t = raw.trim();
+    if t.len() <= P || !t.as_bytes()[..P].eq_ignore_ascii_case(b"url(") {
+        return None;
+    }
+    let inner_end = t[P..].find(')')? + P;
+    let rest = t[inner_end + 1..].trim();
+    if !(rest.is_empty() || rest.starts_with('/')) {
+        return None;
+    }
+    let inner = t[P..inner_end].trim().trim_matches('"').trim_matches('\'');
+    // La valeur calculée sérialise `url("…")` en échappant
+    // les `"` internes — la clé doit être la forme
+    // déséchappée, identique à `url_arg`/`content_url`
+    // côté render (mêmes tables `content_images`/`url_sizes`).
+    let url = explorer_css::unescape_str(inner);
+    (!url.is_empty()).then_some(url)
 }
 
 /// `content` → texte généré : concatène les chaînes
@@ -1554,6 +1700,8 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         fc_root: false,
         marker_ordinal: 0,
         marker_image: None,
+        marker_content: None,
+        content_url: None,
         marker_style: None,
         first_line: None,
         first_letter: None,
@@ -1791,6 +1939,8 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             fc_root: false,
             marker_ordinal: 0,
             marker_image: None,
+            marker_content: None,
+            content_url: None,
             marker_style: None,
             first_line: None,
             first_letter: None,
@@ -1887,6 +2037,7 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
 /// la cascade de `<object>` imbriqués descend jusqu'au
 /// premier rendable — Acid2 en chaîne trois). Le conteneur
 /// de repli est transparent (pas de fond/bordure propre).
+#[allow(clippy::too_many_arguments)]
 fn object_box(
     dom: &Dom,
     root: NodeId,
@@ -1895,6 +2046,7 @@ fn object_box(
     sizes: &std::collections::HashMap<NodeId, (f32, f32), impl ::std::hash::BuildHasher>,
     envs: &HashMap<NodeId, HashMap<String, i32>>,
     qdepth: &HashMap<NodeId, (i32, i32)>,
+    url_sizes: &std::collections::HashMap<String, (f32, f32)>,
 ) -> LayoutBox {
     let kind = box_kind_of(style);
     let mut b = LayoutBox {
@@ -1917,6 +2069,8 @@ fn object_box(
         fc_root: false,
         marker_ordinal: 0,
         marker_image: None,
+        marker_content: None,
+        content_url: None,
         marker_style: None,
         first_line: None,
         first_letter: None,
@@ -1929,7 +2083,7 @@ fn object_box(
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
     if b.intrinsic.is_none() {
-        let children = child_boxes(dom, root, styles, style, sizes, envs, qdepth);
+        let children = child_boxes(dom, root, styles, style, sizes, envs, qdepth, url_sizes);
         b.children = wrap_children(children, style, kind);
     }
     b
@@ -2103,6 +2257,8 @@ fn leaf_box(
         fc_root: false,
         marker_ordinal: 0,
         marker_image: None,
+        marker_content: None,
+        content_url: None,
         marker_style: None,
         first_line: None,
         first_letter: None,
@@ -2161,6 +2317,8 @@ fn control_box(
                     fc_root: false,
                     marker_ordinal: 0,
                     marker_image: None,
+                    marker_content: None,
+                    content_url: None,
                     marker_style: None,
                     first_line: None,
                     first_letter: None,

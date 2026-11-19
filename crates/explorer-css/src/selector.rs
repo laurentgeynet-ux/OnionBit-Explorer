@@ -2063,10 +2063,48 @@ fn is_pseudo_element(s: &SimpleSelector) -> bool {
 /// Pseudo-élément du composé final de `sel`, le cas échéant
 /// (le parseur garantit qu'il n'apparaît que là) — la cascade
 /// s'en sert pour diriger les déclarations vers le pseudo-style.
+/// Sur une chaîne `::before::marker` (css-pseudo §7.1.1), le
+/// sujet de la règle est le **dernier** pseudo-élément —
+/// `Marker`, pas `Before` (R-308).
 #[must_use]
 pub fn selector_pseudo_element(sel: &ComplexSelector) -> Option<PseudoElement> {
-    sel.parts.last()?.0.simples.iter().find_map(|s| match s {
-        SimpleSelector::PseudoElement(p) => Some(*p),
-        _ => None,
-    })
+    sel.parts
+        .last()?
+        .0
+        .simples
+        .iter()
+        .rev()
+        .find_map(|s| match s {
+            SimpleSelector::PseudoElement(p) => Some(*p),
+            _ => None,
+        })
+}
+
+/// Pseudo-élément « parent » d'un `::marker` enchaîné
+/// (`div::before::marker` → `Some(Before)` — R-308) : un
+/// `::marker` précédé de `::before`/`::after` dans le même
+/// composé cible le marqueur **de la boîte générée**, pas le
+/// marqueur de l'élément. `None` pour `::marker` direct ou
+/// toute autre chaîne.
+#[must_use]
+pub fn selector_marker_parent(sel: &ComplexSelector) -> Option<PseudoElement> {
+    let mut parent = None;
+    let mut it = sel
+        .parts
+        .last()?
+        .0
+        .simples
+        .iter()
+        .rev()
+        .filter_map(|s| match s {
+            SimpleSelector::PseudoElement(p) => Some(*p),
+            _ => None,
+        });
+    if it.next() != Some(PseudoElement::Marker) {
+        return None;
+    }
+    if let Some(p @ (PseudoElement::Before | PseudoElement::After)) = it.next() {
+        parent = Some(p);
+    }
+    parent
 }

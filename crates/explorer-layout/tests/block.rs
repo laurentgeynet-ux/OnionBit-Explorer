@@ -3068,9 +3068,10 @@ fn table_cell_va_hors_quatuor_retombe_sur_baseline() {
 }
 
 /// R-180 — `list-style-position:inside` : la puce devient un
-/// `Text` « glyphe + espace » en tête des enfants du
-/// `list-item` — la ligne s'indente comme si c'était le
-/// premier mot (le paint externe est désactivé côté display).
+/// `Text` « glyphe + espace » en tête du premier bloc anonyme
+/// du `list-item` (R-308 — un `Text` nu sous bloc ne peint
+/// pas : la puce vit dans l'`AnonymousBlock`, même ligne que
+/// le contenu — le paint externe est désactivé côté display).
 #[test]
 fn list_style_position_inside_indente_la_ligne() {
     let (dom, bx) = laid(
@@ -3078,11 +3079,17 @@ fn list_style_position_inside_indente_la_ligne() {
         "li{list-style-position:inside;list-style-type:decimal}",
     );
     let li = find(&bx, by_id(&dom, "i"));
-    let first = &li.children[0];
+    let first = li
+        .children
+        .iter()
+        .flat_map(|c| std::iter::once(c).chain(c.children.iter()))
+        .find(|c| c.text.is_some());
     assert!(
-        first.text.as_deref().is_some_and(|t| t.starts_with('1')),
+        first
+            .and_then(|c| c.text.as_deref())
+            .is_some_and(|t| t.starts_with('1')),
         "puce « 1. » en tête : {:?}",
-        first.text
+        first.map(|c| &c.text)
     );
     // La ligne du contenu commence après la puce injectée.
     let line = li
@@ -3099,6 +3106,151 @@ fn list_style_position_inside_indente_la_ligne() {
     assert!(
         li2.children[0].text.is_none(),
         "outside : pas de puce en ligne"
+    );
+}
+
+/// R-308 — `display:list-item` sur `::before` : la boîte
+/// pseudo devient un `ListItem` à part entière (marqueur
+/// généré, contenu dans un bloc anonyme peint).
+#[test]
+fn pseudo_display_list_item_porte_un_marqueur() {
+    let (dom, bx) = laid(
+        "<div id=d>x</div>",
+        "div::before{content:\"av\";display:list-item;\
+         list-style-position:inside;list-style-type:decimal}",
+    );
+    let d = find(&bx, by_id(&dom, "d"));
+    let pseudo = d
+        .children
+        .iter()
+        .find(|c| c.kind == BoxKind::ListItem)
+        .expect("::before → ListItem");
+    // Le libellé « 1. » est injecté dans le bloc anonyme.
+    let mut texts = Vec::new();
+    let mut stack = vec![pseudo];
+    while let Some(c) = stack.pop() {
+        if let Some(t) = &c.text {
+            texts.push(t.as_str());
+        }
+        stack.extend(c.children.iter());
+    }
+    assert!(
+        texts.iter().any(|t| t.starts_with('1')),
+        "marqueur « 1. » présent : {texts:?}"
+    );
+    assert!(texts.contains(&"av"), "contenu : {texts:?}");
+}
+
+/// R-308 — `div::before::marker{content}` : le pseudo
+/// médian discrimine le slot (`::marker` de `::before` ≠
+/// `::marker` de `::after` ≠ `::marker` de l'élément).
+#[test]
+fn pseudo_marker_content_substitution() {
+    let (dom, bx) = laid(
+        "<div id=d>x</div>",
+        "div::before{content:\"av\";display:list-item;\
+         list-style-position:inside} \
+         div::before::marker{content:\"M-avant\"}",
+    );
+    let d = find(&bx, by_id(&dom, "d"));
+    let pseudo = d
+        .children
+        .iter()
+        .find(|c| c.kind == BoxKind::ListItem)
+        .expect("::before → ListItem");
+    assert_eq!(
+        pseudo.marker_content.as_deref(),
+        Some("M-avant"),
+        "libellé ::marker substitué"
+    );
+    let mut texts = Vec::new();
+    let mut stack = vec![pseudo];
+    while let Some(c) = stack.pop() {
+        if let Some(t) = &c.text {
+            texts.push(t.as_str());
+        }
+        stack.extend(c.children.iter());
+    }
+    assert!(
+        texts.contains(&"M-avant"),
+        "marqueur « M-avant » injecté : {texts:?}"
+    );
+    // Aucune espace automatique derrière un libellé
+    // `content` explicite (css-lists §3).
+    assert!(
+        !texts.contains(&"M-avant "),
+        "pas d'espace suffixe : {texts:?}"
+    );
+}
+
+/// R-308 — `content:url(...)` sur `::before` : boîte
+/// remplacée clée par url (pas de `NodeId`), `intrinsic`
+/// alimenté par le canal `url_sizes` de
+/// `build_box_tree_sized_urls`.
+#[test]
+fn pseudo_content_url_boite_remplacee() {
+    let url = "data:image/png;base64,AAAA";
+    let html = "<div id=d>x</div>";
+    let css = format!("div::before{{content:url(\"{url}\")}}");
+    let dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(&css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root = dom.document_element().expect("racine");
+    let url_sizes = std::collections::HashMap::from([(url.to_string(), (40.0, 40.0))]);
+    let mut bx = explorer_layout::build_box_tree_sized_urls(
+        &dom,
+        root,
+        &styles,
+        &std::collections::HashMap::new(),
+        &url_sizes,
+    )
+    .expect("arbre");
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let d = find(&bx, by_id(&dom, "d"));
+    let mut stack = vec![d];
+    let mut pseudo = None;
+    while let Some(c) = stack.pop() {
+        if c.content_url.is_some() {
+            pseudo = Some(c);
+            break;
+        }
+        stack.extend(c.children.iter());
+    }
+    let pseudo = pseudo.expect("::before remplacé");
+    assert_eq!(pseudo.content_url.as_deref(), Some(url));
+    assert_eq!(pseudo.intrinsic, Some((40.0, 40.0)));
+    assert!(pseudo.text.is_none() && pseudo.children.is_empty());
+    // Les `"` internes d'un `data:` svg sérialisé arrivent
+    // échappés — la clé reste la forme déséchappée.
+    let svg = "data:image/svg+xml,<svg xmlns=\"http://x\"></svg>";
+    let css2 = format!("div::before{{content:url('{svg}')}}");
+    let mut eng2 = StyleEngine::new();
+    eng2.add_css(&css2, Origin::Author);
+    let styles2 = eng2.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let bx2 = explorer_layout::build_box_tree_sized_urls(
+        &dom,
+        root,
+        &styles2,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+    )
+    .expect("arbre2");
+    let d2 = find(&bx2, by_id(&dom, "d"));
+    let mut stack = vec![d2];
+    let mut p2 = None;
+    while let Some(c) = stack.pop() {
+        if c.content_url.is_some() {
+            p2 = Some(c);
+            break;
+        }
+        stack.extend(c.children.iter());
+    }
+    assert_eq!(
+        p2.expect("::before remplacé (svg)").content_url.as_deref(),
+        Some(svg),
+        "url déséchappée"
     );
 }
 

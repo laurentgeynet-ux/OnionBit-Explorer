@@ -194,6 +194,15 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
                         out.masks_url.insert(url, Arc::new(img));
                     }
                 }
+                // R-308 — `content:url(data:…)` : le pseudo
+                // devient une boîte remplacée ; bitmap indexée
+                // par le texte url (`content_images`, même
+                // motif « sans NodeId » que `masks_url`).
+                if let Some(url) = content_url(ps).filter(|u| u.starts_with("data:")) {
+                    if let Some(img) = decode_data_url(&url, max_px) {
+                        out.content_images.insert(url, Arc::new(img));
+                    }
+                }
             }
         }
     }
@@ -220,6 +229,21 @@ pub(crate) fn mask_url(style: &explorer_css::ComputedStyle) -> Option<String> {
     None
 }
 
+/// R-308 — premier `url(...)` d'une valeur `content`
+/// (`url(x)`, `url(x) "texte"` mixte…) → url déballée, clé
+/// de [`crate::PaintImages::content_images`]. Le `url_arg`
+/// strict exige que la valeur *soit* un `url(…)` ; ici le
+/// token est cherché dans la liste `content`.
+pub(crate) fn content_url(style: &explorer_css::ComputedStyle) -> Option<String> {
+    let raw = style.get("content")?;
+    let start = raw.find("url(")?;
+    let rest = &raw[start + 4..];
+    let end = rest.find(')')?;
+    let inner = rest[..end].trim().trim_matches(|c| c == '"' || c == '\'');
+    let url = css_unescape(inner);
+    (!url.is_empty()).then_some(url)
+}
+
 /// `url(<x>)` → `<x>` déballé : guillemets optionnels ôtés,
 /// puis échappements CSS résolus (`\"`→`"`, `\'`→`'`,
 /// `\\`→`\`, `\XXXX`→codepoint) — la valeur calculée
@@ -233,40 +257,13 @@ pub(crate) fn url_arg(value: &str) -> Option<String> {
     Some(css_unescape(inner))
 }
 
-/// Échappements CSS chaîne/url : `\`+autre → l'autre char ;
-/// `\`+1-6 hexdigits (+espaces absorbés) → codepoint si
-/// valide. Tolérant : un `\` orphelin en fin disparaît.
+/// Échappements CSS chaîne/url — délègue à
+/// [`explorer_css::unescape_str`] (R-308 : la même clé doit
+/// être calculée côté layout — `pure_content_url` — pour
+/// que `content_url`/`url_sizes` tombent sur le même
+/// identifiant).
 fn css_unescape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut it = s.chars().peekable();
-    while let Some(c) = it.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        let mut hex = String::new();
-        while hex.len() < 6 && it.peek().is_some_and(char::is_ascii_hexdigit) {
-            hex.push(it.next().unwrap_or_default());
-        }
-        if hex.is_empty() {
-            if let Some(p) = it.next() {
-                out.push(p);
-            }
-        } else {
-            // Espaces absorbés après une séquence hex.
-            if it.peek().is_some_and(char::is_ascii_whitespace) {
-                it.next();
-            }
-            if let Some(ch) = u32::from_str_radix(&hex, 16)
-                .ok()
-                .and_then(char::from_u32)
-                .filter(|ch| *ch != '\0')
-            {
-                out.push(ch);
-            }
-        }
-    }
-    out
+    explorer_css::unescape_str(s)
 }
 
 /// `%XX` → octet, in-place sur le reste.

@@ -1601,6 +1601,11 @@ struct SelEntry {
     /// Pseudo-élément du composé final, `None` = règle
     /// d'élément.
     pseudo: Option<crate::PseudoElement>,
+    /// R-308 — `::before`/`::after` précédant un `::marker`
+    /// final (`div::before::marker`) : le style cible le
+    /// marqueur de la boîte générée, pas celui de l'élément.
+    /// `None` pour `::marker` direct et tout le reste.
+    marker_parent: Option<crate::PseudoElement>,
 }
 
 /// Index des sélecteurs par **clé du composé le plus à
@@ -1672,6 +1677,7 @@ impl SelectorIndex {
                     rule: u32::try_from(ri).unwrap_or(u32::MAX),
                     selector: u32::try_from(si).unwrap_or(u32::MAX),
                     pseudo: crate::selector::selector_pseudo_element(sel),
+                    marker_parent: crate::selector::selector_marker_parent(sel),
                 };
                 match entry.pseudo {
                     Some(crate::PseudoElement::Before) => idx.has_before = true,
@@ -2936,6 +2942,13 @@ pub struct PseudoStyles {
     pub first_letter: Option<ComputedStyle>,
     /// `::marker` — marqueur de liste.
     pub marker: Option<ComputedStyle>,
+    /// R-308 — `::before::marker` : marqueur de la boîte
+    /// générée `::before` (`display:list-item` sur pseudo —
+    /// css-pseudo §7.1.1). Distinct de `marker` : les deux
+    /// peuvent coexister sur le même élément.
+    pub before_marker: Option<ComputedStyle>,
+    /// R-308 — `::after::marker` (idem).
+    pub after_marker: Option<ComputedStyle>,
     /// `::selection` — routé, consommateur peinture en attente.
     pub selection: Option<ComputedStyle>,
     /// `::backdrop` — routé, consommateur `<dialog>`/fullscreen
@@ -2985,6 +2998,21 @@ impl StyleMap {
             crate::PseudoElement::Selection => p.selection.as_ref(),
             crate::PseudoElement::Backdrop => p.backdrop.as_ref(),
             crate::PseudoElement::Other => None,
+        }
+    }
+
+    /// Style calculé du `::marker` **de la boîte pseudo**
+    /// `of` (`Before`/`After` → `before_marker`/`after_marker`
+    /// — R-308) ; `Marker` lui-même ou tout autre → slot
+    /// `marker` de l'élément. `None` si aucune règle ne cible
+    /// ce marqueur.
+    #[must_use]
+    pub fn marker_of(&self, node: NodeId, of: crate::PseudoElement) -> Option<&ComputedStyle> {
+        let p = self.pseudos.get(&node)?;
+        match of {
+            crate::PseudoElement::Before => p.before_marker.as_ref(),
+            crate::PseudoElement::After => p.after_marker.as_ref(),
+            _ => p.marker.as_ref(),
         }
     }
 
@@ -3669,6 +3697,7 @@ impl StyleEngine {
             env,
             parent.as_ref(),
             None,
+            None,
             state,
             &mut mcache,
             &AncestorFilter::of_ancestors(dom, node),
@@ -3734,6 +3763,7 @@ impl StyleEngine {
             env,
             parent,
             pseudo,
+            None,
             state,
             &mut mcache,
             &AncestorFilter::of_ancestors(dom, node),
@@ -3762,6 +3792,7 @@ impl StyleEngine {
             dom,
             doc_el,
             env,
+            None,
             None,
             None,
             state,
@@ -4450,7 +4481,7 @@ impl StyleEngine {
     ) {
         fr_probe(|p| p.visited += 1);
         let style = self.compute_with_parent(
-            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers, None,
+            dom, node, env, parent, None, None, state, mcache, anc, *root_fs, containers, None,
         );
         if dom.document_element() == Some(node) {
             *root_fs = style
@@ -4461,47 +4492,64 @@ impl StyleEngine {
         if dom.element(node).is_ok() {
             // Même politique de pseudo-éléments que
             // `compute_subtree` (R-13/R-177).
-            let mut pseudo_style =
-                |pe: crate::PseudoElement, need_content: bool| -> Option<ComputedStyle> {
-                    if !self.has_pseudo_rules(dom, pe) {
-                        return None;
-                    }
-                    let s = self.compute_with_parent(
-                        dom,
-                        node,
-                        env,
-                        Some(&style),
-                        Some(pe),
-                        state,
-                        mcache,
-                        anc,
-                        *root_fs,
-                        containers,
-                        None,
-                    );
-                    let keep = if need_content {
-                        s.get("content").is_some()
-                    } else {
-                        s.iter().next().is_some()
-                    };
-                    keep.then_some(s)
+            let mut pseudo_style = |pe: crate::PseudoElement,
+                                    need_content: bool,
+                                    marker_of: Option<crate::PseudoElement>|
+             -> Option<ComputedStyle> {
+                if !self.has_pseudo_rules(dom, pe) {
+                    return None;
+                }
+                let s = self.compute_with_parent(
+                    dom,
+                    node,
+                    env,
+                    Some(&style),
+                    Some(pe),
+                    marker_of,
+                    state,
+                    mcache,
+                    anc,
+                    *root_fs,
+                    containers,
+                    None,
+                );
+                let keep = if need_content {
+                    s.get("content").is_some()
+                } else {
+                    s.iter().next().is_some()
                 };
-            let before = pseudo_style(crate::PseudoElement::Before, true);
-            let after = pseudo_style(crate::PseudoElement::After, true);
+                keep.then_some(s)
+            };
+            let before = pseudo_style(crate::PseudoElement::Before, true, None);
+            let after = pseudo_style(crate::PseudoElement::After, true, None);
             let ps = PseudoStyles {
                 before,
                 after,
-                first_line: pseudo_style(crate::PseudoElement::FirstLine, false),
-                first_letter: pseudo_style(crate::PseudoElement::FirstLetter, false),
-                marker: pseudo_style(crate::PseudoElement::Marker, false),
-                selection: pseudo_style(crate::PseudoElement::Selection, false),
-                backdrop: pseudo_style(crate::PseudoElement::Backdrop, false),
+                first_line: pseudo_style(crate::PseudoElement::FirstLine, false, None),
+                first_letter: pseudo_style(crate::PseudoElement::FirstLetter, false, None),
+                marker: pseudo_style(crate::PseudoElement::Marker, false, None),
+                // R-308 — marqueurs des boîtes générées
+                // (`::before::marker`/`::after::marker`).
+                before_marker: pseudo_style(
+                    crate::PseudoElement::Marker,
+                    false,
+                    Some(crate::PseudoElement::Before),
+                ),
+                after_marker: pseudo_style(
+                    crate::PseudoElement::Marker,
+                    false,
+                    Some(crate::PseudoElement::After),
+                ),
+                selection: pseudo_style(crate::PseudoElement::Selection, false, None),
+                backdrop: pseudo_style(crate::PseudoElement::Backdrop, false, None),
             };
             if ps.before.is_some()
                 || ps.after.is_some()
                 || ps.first_line.is_some()
                 || ps.first_letter.is_some()
                 || ps.marker.is_some()
+                || ps.before_marker.is_some()
+                || ps.after_marker.is_some()
                 || ps.selection.is_some()
                 || ps.backdrop.is_some()
             {
@@ -4872,7 +4920,7 @@ impl StyleEngine {
         containers: Option<&HashMap<NodeId, ContainerMeasure>>,
     ) {
         let style = self.compute_with_parent(
-            dom, node, env, parent, None, state, mcache, anc, *root_fs, containers, None,
+            dom, node, env, parent, None, None, state, mcache, anc, *root_fs, containers, None,
         );
         // L'élément racine vient d'être calculé : sa font-size
         // devient la base `rem` de tout le document (la marche
@@ -4893,47 +4941,62 @@ impl StyleEngine {
             // (R-13 — une règle sans `content` ne génère rien) ;
             // les pseudos R-177 (`first-line`, `marker`…)
             // gardent tout style produit.
-            let mut pseudo_style =
-                |pe: crate::PseudoElement, need_content: bool| -> Option<ComputedStyle> {
-                    if !self.has_pseudo_rules(dom, pe) {
-                        return None;
-                    }
-                    let s = self.compute_with_parent(
-                        dom,
-                        node,
-                        env,
-                        Some(&style),
-                        Some(pe),
-                        state,
-                        mcache,
-                        anc,
-                        *root_fs,
-                        containers,
-                        None,
-                    );
-                    let keep = if need_content {
-                        s.get("content").is_some()
-                    } else {
-                        s.iter().next().is_some()
-                    };
-                    keep.then_some(s)
+            let mut pseudo_style = |pe: crate::PseudoElement,
+                                    need_content: bool,
+                                    marker_of: Option<crate::PseudoElement>|
+             -> Option<ComputedStyle> {
+                if !self.has_pseudo_rules(dom, pe) {
+                    return None;
+                }
+                let s = self.compute_with_parent(
+                    dom,
+                    node,
+                    env,
+                    Some(&style),
+                    Some(pe),
+                    marker_of,
+                    state,
+                    mcache,
+                    anc,
+                    *root_fs,
+                    containers,
+                    None,
+                );
+                let keep = if need_content {
+                    s.get("content").is_some()
+                } else {
+                    s.iter().next().is_some()
                 };
-            let before = pseudo_style(crate::PseudoElement::Before, true);
-            let after = pseudo_style(crate::PseudoElement::After, true);
+                keep.then_some(s)
+            };
+            let before = pseudo_style(crate::PseudoElement::Before, true, None);
+            let after = pseudo_style(crate::PseudoElement::After, true, None);
             let ps = PseudoStyles {
                 before,
                 after,
-                first_line: pseudo_style(crate::PseudoElement::FirstLine, false),
-                first_letter: pseudo_style(crate::PseudoElement::FirstLetter, false),
-                marker: pseudo_style(crate::PseudoElement::Marker, false),
-                selection: pseudo_style(crate::PseudoElement::Selection, false),
-                backdrop: pseudo_style(crate::PseudoElement::Backdrop, false),
+                first_line: pseudo_style(crate::PseudoElement::FirstLine, false, None),
+                first_letter: pseudo_style(crate::PseudoElement::FirstLetter, false, None),
+                marker: pseudo_style(crate::PseudoElement::Marker, false, None),
+                before_marker: pseudo_style(
+                    crate::PseudoElement::Marker,
+                    false,
+                    Some(crate::PseudoElement::Before),
+                ),
+                after_marker: pseudo_style(
+                    crate::PseudoElement::Marker,
+                    false,
+                    Some(crate::PseudoElement::After),
+                ),
+                selection: pseudo_style(crate::PseudoElement::Selection, false, None),
+                backdrop: pseudo_style(crate::PseudoElement::Backdrop, false, None),
             };
             if ps.before.is_some()
                 || ps.after.is_some()
                 || ps.first_line.is_some()
                 || ps.first_letter.is_some()
                 || ps.marker.is_some()
+                || ps.before_marker.is_some()
+                || ps.after_marker.is_some()
                 || ps.selection.is_some()
                 || ps.backdrop.is_some()
             {
@@ -5037,6 +5100,7 @@ impl StyleEngine {
         env: &StyleEnv,
         parent: Option<&ComputedStyle>,
         pseudo: Option<crate::PseudoElement>,
+        marker_of: Option<crate::PseudoElement>,
         state: &dyn Fn(&str) -> bool,
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
@@ -5049,6 +5113,10 @@ impl StyleEngine {
         if dom.element(node).is_err() {
             return ComputedStyle::default();
         }
+        // R-308 — `marker_of` : `Some(pe)` ne retient que les
+        // règles `*::pe::marker` (marqueur de la boîte `pe`) —
+        // `Some(Marker)` + `marker_of=Some(Before)` calcule
+        // `::before::marker`. `None` = slots habituels.
         // `rem` : initiale sur le `font-size` de `:root` — et
         // seulement lui (ses pseudos `::before`/`::after`
         // résolvent déjà contre `root_fs`, comme tout
@@ -5096,6 +5164,7 @@ impl StyleEngine {
             node,
             env,
             pseudo,
+            marker_of,
             state,
             mcache,
             anc,
@@ -6032,6 +6101,7 @@ impl StyleEngine {
         node: NodeId,
         env: &StyleEnv,
         pseudo: Option<crate::PseudoElement>,
+        marker_of: Option<crate::PseudoElement>,
         state: &dyn Fn(&str) -> bool,
         mcache: &mut MatchCache,
         anc: &AncestorFilter,
@@ -6062,6 +6132,14 @@ impl StyleEngine {
                 return;
             }
             if e.pseudo != pseudo {
+                self.trace_gated(&mut rec, quirks, e, GateKind::Pseudo);
+                return;
+            }
+            // R-308 — chaîne `::before|after::marker` : la règle
+            // ne vit que dans le slot du marqueur de sa boîte
+            // parente ; `marker_of=None` exclut les chaînes du
+            // slot `marker` de l'élément.
+            if e.marker_parent != marker_of {
                 self.trace_gated(&mut rec, quirks, e, GateKind::Pseudo);
                 return;
             }
@@ -7316,6 +7394,7 @@ fn parent_computed(
         parent,
         env,
         grand.as_ref(),
+        None,
         None,
         state,
         mcache,

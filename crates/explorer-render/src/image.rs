@@ -82,6 +82,12 @@ pub struct PaintImages {
     /// `border-image-source` brut → bitmap — même canal
     /// `url()`→`Arc<DecodedImage>` que `masks_url` (R-248).
     pub borders_url: HashMap<String, Arc<DecodedImage>>,
+    /// `content:url(...)` de `::before`/`::after` → bitmap —
+    /// clé = texte url déballé (les boîtes pseudo n'ont pas
+    /// de `NodeId`, R-308). Les dimensions intrinsèques de la
+    /// boîte remplacée viennent du canal `url_sizes` de
+    /// [`explorer_layout::build_box_tree_sized_urls`].
+    pub content_images: HashMap<String, Arc<DecodedImage>>,
     /// `<canvas>` : op-list 2D enregistrée par `explorer-jscore`
     /// (`NodeId` → `Vec<CanvasOp>` — R-11, contrat
     /// [`crate::canvas`]) ; rejouée vers un bitmap au moment
@@ -102,6 +108,7 @@ impl PaintImages {
             masks: ImageTable::new(),
             masks_url: HashMap::new(),
             borders_url: HashMap::new(),
+            content_images: HashMap::new(),
             canvases: crate::canvas::CanvasTable::new(),
         }
     }

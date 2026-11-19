@@ -54,4 +54,4 @@ pub use selector::{
     PseudoClass, PseudoElement, SimpleSelector, Specificity,
 };
 pub use token::Token;
-pub use tokenizer::tokenize;
+pub use tokenizer::{tokenize, unescape_str};

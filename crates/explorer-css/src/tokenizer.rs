@@ -17,6 +17,47 @@ use crate::token::Token;
 /// de `Vec<Token>` au pire — borne mémoire conservée.
 const MAX_TOKENS: usize = 1024 * 1024;
 
+/// Échappements CSS chaîne/url (CSS Syntax §4.3.7) :
+/// `\`+autre → le char ; `\`+1-6 hexdigits (+ un whitespace
+/// absorbé) → le codepoint si valide (`U+FFFD` ignoré ici :
+/// `\0`/hors-range ne produisent rien — R-308, partagé avec
+/// les canaux `url()` de layout/render qui comparent des clés
+/// sur la forme **déséchappée**). Tolérant : un `\` orphelin
+/// en fin disparaît.
+#[must_use]
+pub fn unescape_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let mut hex = String::new();
+        while hex.len() < 6 && it.peek().is_some_and(char::is_ascii_hexdigit) {
+            hex.push(it.next().unwrap_or_default());
+        }
+        if hex.is_empty() {
+            if let Some(p) = it.next() {
+                out.push(p);
+            }
+        } else {
+            // Espaces absorbés après une séquence hex.
+            if it.peek().is_some_and(char::is_ascii_whitespace) {
+                it.next();
+            }
+            if let Some(ch) = u32::from_str_radix(&hex, 16)
+                .ok()
+                .and_then(char::from_u32)
+                .filter(|ch| *ch != '\0')
+            {
+                out.push(ch);
+            }
+        }
+    }
+    out
+}
+
 /// Tokenize tout le flux — retourne sans `Eof` final (le parser
 /// traite la fin par épuisement).
 #[must_use]

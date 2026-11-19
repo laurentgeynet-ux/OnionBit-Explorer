@@ -3605,6 +3605,8 @@ fn flow_children(
                 fc_root: false,
                 marker_ordinal: 0,
                 marker_image: None,
+                marker_content: None,
+                content_url: None,
                 marker_style: None,
                 first_line: None,
                 first_letter: None,
