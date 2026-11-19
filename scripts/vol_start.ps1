@@ -96,13 +96,18 @@ $explicitRepo = $Repo -ne ''
 $refRepo = if ($explicitRepo) { (Resolve-Path $Repo).Path } else { $scriptRepo }
 
 # --- claims vivants (CLAIMED.json sans DONE) : coordination ---
-$usedPorts = @{}
+$usedPorts = @{}; $taken = @{}
 foreach ($d in Get-ChildItem $vols -Directory -ErrorAction SilentlyContinue) {
   $cj = Join-Path $d.FullName 'CLAIMED.json'
   if ((Test-Path $cj) -and -not (Test-Path (Join-Path $d.FullName 'DONE'))) {
     try {
       $j = Get-Content $cj -Raw | ConvertFrom-Json
       if ($j.port) { $usedPorts[[int]$j.port] = $true }
+      # Cibles déclarées des vols ouverts = territoire pris —
+      # affichées aplaties, sans mission ni numéro (frontière,
+      # pas appât). Permet la diversité entre équipes sans
+      # réintroduire la tentation « finir la mission d'autrui ».
+      foreach ($c in @($j.cibles)) { if ($c) { $taken[[string]$c] = $true } }
       # Règle opérateur : les claims d'autrui ne concernent pas
       # le départ — seuls les >2 h (zombies présumés, session
       # morte) sont affichés. Les ports sont collectés pour
@@ -114,6 +119,10 @@ foreach ($d in Get-ChildItem $vols -Directory -ErrorAction SilentlyContinue) {
       }
     } catch { }
   }
+}
+if ($taken.Count) {
+  Write-Output ("cibles prises : {0}  (vols ouverts — en choisir d'autres)" -f `
+    (($taken.Keys | Sort-Object) -join ', '))
 }
 
 # --- sha de référence + arbre (mode expert seul : propre) ---
