@@ -210,9 +210,12 @@ if (-not $explicitRepo) {
     $cj = Join-Path $d.FullName 'CLAIMED.json'
     if (-not (Test-Path $cj)) { continue }
     try { $j = Get-Content $cj -Raw | ConvertFrom-Json } catch { continue }
-    if ($j.sha_main -eq $sha -and $j.exe -and (Test-Path $j.exe)) {
-      $exeOverride = $j.exe; break
-    }
+    if (-not ($j.exe -and $j.sha_main -and (Test-Path $j.exe))) { continue }
+    # Binaire-équivalent ≠ commit-identique : un commit
+    # scripts/docs change `rev-parse main` sans toucher le
+    # moteur. On compare les CHEMINES qui produisent l'exe.
+    git -C $refRepo diff --quiet $j.sha_main $sha -- crates/ Cargo.toml Cargo.lock
+    if ($LASTEXITCODE -eq 0) { $exeOverride = $j.exe; break }
   }
   if ($exeOverride) {
     Write-Output "binaire réutilisé : $exeOverride (sha $sha déjà buildé — pas de rebuild)"
