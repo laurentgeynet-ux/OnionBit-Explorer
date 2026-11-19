@@ -56,7 +56,7 @@ param(
     [string]$Viewport = '1366x900',
     [int]$Max = 0,
     [ValidateSet('cli', 'daemon')][string]$Mode = 'cli',
-    [ValidateSet('debug', 'release')][string]$Profile = 'release',
+    [ValidateSet('debug', 'release')][Alias('Profile')][string]$BuildProfile = 'release',
     [switch]$SkipBuild,
     [switch]$WithRef,
     [switch]$Diff,
@@ -147,15 +147,15 @@ Write-Output "Corpus : $($sites.Count) sites -> $OutDir"
 # --- Binaires -------------------------------------------------------------
 if (-not $SkipBuild) {
     $relArgs = @()
-    if ($Profile -eq 'release') { $relArgs = @('--release') }
-    Write-Output "Construction d'explorer-cli ($Profile)…"
+    if ($BuildProfile -eq 'release') { $relArgs = @('--release') }
+    Write-Output "Construction d'explorer-cli ($BuildProfile)…"
     & cargo build -p explorer-cli @relArgs 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'cargo build -p explorer-cli a échoué'
         exit 1
     }
     if ($Mode -eq 'daemon') {
-        Write-Output "Construction d'explorer-daemon ($Profile)…"
+        Write-Output "Construction d'explorer-daemon ($BuildProfile)…"
         & cargo build -p explorer-daemon @relArgs 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Error 'cargo build -p explorer-daemon a échoué'
@@ -171,8 +171,8 @@ function Find-Bin([string]$name) {
     @(
         $(if ($triple) {
             Join-Path $meta.target_directory `
-                "$triple\$Profile\$name.exe" }),
-        (Join-Path $meta.target_directory "$Profile\$name.exe"),
+                "$triple\$BuildProfile\$name.exe" }),
+        (Join-Path $meta.target_directory "$BuildProfile\$name.exe"),
         $(if ($triple) {
             Join-Path $meta.target_directory `
                 "$triple\debug\$name.exe" }),
@@ -515,7 +515,7 @@ Remove-Item "$OutDir\_corpus.txt" -ErrorAction SilentlyContinue
 # --- index.json + report.html ---------------------------------------------
 $index = [ordered]@{
     run = $run; generated = (Get-Date).ToString('o')
-    viewport = $Viewport; mode = $Mode; profile = $Profile
+    viewport = $Viewport; mode = $Mode; profile = $BuildProfile
     ok = $ok; fail = $fail
     sites = $records
 }
@@ -607,7 +607,7 @@ resort();
 # contenir `$` — `-replace` l'interpréterait).
 $html = $html.Replace('__RUN__', $run).Replace('__OK__', "$ok").
     Replace('__N__', "$($sites.Count)").
-    Replace('__MODE__', "$Mode/$Profile").
+    Replace('__MODE__', "$Mode/$BuildProfile").
     Replace('__VIEWPORT__', $Viewport).Replace('__DATA__', $dataJson)
 $htmlPath = Join-Path $OutDir 'report.html'
 Set-Content -Path $htmlPath -Value $html -Encoding utf8

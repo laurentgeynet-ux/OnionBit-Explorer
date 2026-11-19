@@ -22,7 +22,7 @@
 param(
     [string]$ListFile = '',
     [int]$Max = 0,
-    [ValidateSet('debug', 'release')][string]$Profile = 'release'
+    [ValidateSet('debug', 'release')][Alias('Profile')][string]$BuildProfile = 'release'
 )
 
 $ErrorActionPreference = 'Continue'
@@ -61,9 +61,9 @@ if ($Max -gt 0) { $sites = $sites | Select-Object -First $Max }
 # Release par défaut (convention site_harvest) : le debug
 # est 10-20× plus lent, les shots mesurent les conditions
 # réelles du moteur.
-Write-Output "Construction d'explorer-cli ($Profile)…"
+Write-Output "Construction d'explorer-cli ($BuildProfile)…"
 $relArgs = @()
-if ($Profile -eq 'release') { $relArgs = @('--release') }
+if ($BuildProfile -eq 'release') { $relArgs = @('--release') }
 cargo build -p explorer-cli @relArgs 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { Write-Error 'cargo build -p explorer-cli a échoué'; exit 1 }
 
@@ -72,8 +72,8 @@ $triple = ''
 $v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
 if ($v) { $triple = $v.Matches[0].Groups[1].Value }
 $cli = @(
-    $(if ($triple) { Join-Path $meta.target_directory "$triple\$Profile\explorer-cli.exe" }),
-    (Join-Path $meta.target_directory "$Profile\explorer-cli.exe"),
+    $(if ($triple) { Join-Path $meta.target_directory "$triple\$BuildProfile\explorer-cli.exe" }),
+    (Join-Path $meta.target_directory "$BuildProfile\explorer-cli.exe"),
     $(if ($triple) { Join-Path $meta.target_directory "$triple\debug\explorer-cli.exe" }),
     (Join-Path $meta.target_directory 'debug\explorer-cli.exe')
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
