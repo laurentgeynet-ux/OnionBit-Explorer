@@ -1861,15 +1861,21 @@ fn split_piece(bx: &LayoutBox, seg: &mut Vec<LayoutBox>) -> LayoutBox {
     p
 }
 
-/// `true` pour un enfant de niveau bloc **en flux** — il
-/// échappe au flux en-ligne (un flottant ou un positionné
-/// reste à sa place dans la boîte inline). `position`/`float`
-/// se lisent sur le style calculé : les champs de `LayoutBox`
-/// ne sont renseignés qu'au layout (`apply_layout_metadata`).
+/// `true` pour un enfant de niveau bloc qui échappe au flux
+/// en-ligne — bloc en flux **ou flottant** : un flottant
+/// niché dans un `display:inline` doit rejoindre le BFC
+/// englobant pour être posé par `place_float` (son `float`,
+/// `clear`, `width` sont sinon ignorés — le collecteur
+/// en-ligne aplatirait son contenu en items texte, signature
+/// csszengarden `.supporting{display:inline}` → sections
+/// flottantes à 66 % rendues en-ligne, `.main` effondré).
+/// Seuls les positionnés `absolute`/`fixed` restent à leur
+/// place dans la boîte inline (résolus par
+/// `resolve_absolutes`). `position`/`float` se lisent sur le
+/// style calculé : les champs de `LayoutBox` ne sont
+/// renseignés qu'au layout (`apply_layout_metadata`).
 fn is_inflow_block(c: &LayoutBox) -> bool {
-    !c.out_of_flow()
-        && !matches!(c.style.get("float"), Some("left" | "right"))
-        && !c.kind.is_inline_level()
+    !c.out_of_flow() && !c.kind.is_inline_level()
 }
 
 /// Suite entièrement blanche — un morceau de scission qui ne

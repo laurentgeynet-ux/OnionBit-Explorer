@@ -3937,3 +3937,59 @@ fn align_content_force_contexte_independant() {
     let c = find(&bx, by_tag(&dom, "div"));
     assert!(c.fc_root, "align-content ≠ normal → IFC");
 }
+
+// ── R-311 : un flottant niché dans un `display:inline`
+// rejoint le BFC englobant (hissage §9.2.1.1) — auparavant
+// `is_inflow_block` les excluait : le flottant restait dans
+// la boîte inline, `collect_child` aplatissait son contenu
+// en items texte et `float`/`width`/`clear` étaient ignorés.
+// Terrain : csszengarden `.supporting{display:inline}` —
+// les sections `float:left;width:66%;clear:left` rendaient
+// en-ligne (~100 px chacune), `.main` effondré à 16 px
+// (doc 2 464 px vs ref 3 235).
+
+#[test]
+fn flottant_dans_inline_est_hisse_au_bfc() {
+    let html = concat!(
+        "<!doctype html><div class=\"wrap\">",
+        "<div class=\"main\">",
+        "<div id=\"s1\">section one text</div>",
+        "<div id=\"s2\">section two text</div>",
+        "</div></div>"
+    );
+    let (dom, bx) = laid(
+        html,
+        ".main{display:inline} .main div{float:left;clear:left;width:50%;padding:10px}",
+    );
+    // `.main` ne porte plus ses enfants en-ligne : les deux
+    // flottants sont hissés au niveau du `.wrap` (BFC).
+    let s1 = find(&bx, by_tag_id(&dom, "s1"));
+    let s2 = find(&bx, by_tag_id(&dom, "s2"));
+    // `width:50%` résolu sur le bloc conteneur (800) +
+    // padding — plus un fragment texte ~60 px en ligne.
+    assert!(
+        s1.rect.width > 300.0,
+        "s1.width={} — le flottant doit être posé, pas aplati",
+        s1.rect.width
+    );
+    // `clear:left` : les deux flottants s'empilent.
+    assert!(
+        s2.rect.y >= s1.rect.y + s1.rect.height - 0.5,
+        "s2.y={} sous s1.bottom={}",
+        s2.rect.y,
+        s1.rect.y + s1.rect.height
+    );
+}
+
+fn by_tag_id(dom: &Dom, id: &str) -> NodeId {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.attribute_str(n, "id").is_ok_and(|v| v == Some(id)) {
+            return n;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    panic!("#{id} absent")
+}

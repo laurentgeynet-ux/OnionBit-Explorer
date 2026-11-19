@@ -4885,3 +4885,30 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   mount, **pas** pipeline. Verrou :
   `ua_liste_nichee_sans_marge` (cascade — `ul`/`ol`/`dl`
   sous `li` → 0, hors `li` → 1em conservé).
+
+- [x] **R-311 — Flottants nichés dans `display:inline` hissés
+  au BFC englobant (§9.2.1.1 étendue) — anomalie terrain
+  csszengarden soldée** (`explorer-layout`, pilotage
+  vol/geodiff). **Signature** : `div#zen-supporting.main`
+  eng h=16 px vs ref 2 925 — doc 2 464 vs 3 235 (−771).
+  Le design 214 applique `@media(min-width:1132px)
+  { nav,.supporting{display:inline} .supporting
+  div{float:left;clear:left;width:66%} }`. **Cause** :
+  `is_inflow_block` excluait les flottants du split
+  block-in-inline — ils restaient dans la boîte inline où
+  `collect_child` aplatissait leur contenu en items texte :
+  `float`/`clear`/`width` jamais consommés (repro : 3
+  sections 66 % rendaient ~100 px côte à côte sur une
+  ligne). **Fix** : les flottants sont hissés comme les
+  blocs en flux — `place_float` les pose alors avec leur
+  ancre source (approximation : le texte amont/aval se
+  scinde en deux lignes au lieu d'enrober sur la même —
+  documentée, très supérieure à l'aplatissement).
+  `absolute`/`fixed` restent in situ (resolve_absolutes).
+  **Mesure (binaire frais)** : zengarden doc 2 464→3 351
+  vs ref 3 235 (+3,6 %), `.main` sort de la liste des
+  divergents ; repro mini : sections 829 px empilées
+  (50 %+padding, clear honoré). Suites : layout 100 %,
+  WPT cliquet 203/203, smoke 7 sites sans régression
+  (lobste.rs R-310 tient : stories 57 vs 59). Verrou :
+  `flottant_dans_inline_est_hisse_au_bfc` (block.rs).

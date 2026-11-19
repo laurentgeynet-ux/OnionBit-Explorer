@@ -87,6 +87,12 @@ fn style_dump_style_calcule_et_parent() {
     // Étape 315 : chaque nœud producteur rapporte son style
     // calculé réduit aux props d'attribution + son plus
     // proche ancêtre de boîte — le sidecar de `geo_diff`.
+    fn prop<'a>(e: &'a explorer_layout::StyleEntry, k: &str) -> Option<&'a str> {
+        e.computed
+            .iter()
+            .find(|(n, _)| *n == k)
+            .map(|(_, v)| v.as_str())
+    }
     let (dom, bx) = laid(
         "<body><div id=p style='display:flex; gap:4px'><span>x</span></div></body>",
         "div { line-height: 2 } span { font-size: 22px }",
@@ -96,12 +102,6 @@ fn style_dump_style_calcule_et_parent() {
     let span = by_tag(&dom, "span");
     let ed = d.iter().find(|e| e.node == div).expect("div");
     let es = d.iter().find(|e| e.node == span).expect("span");
-    fn prop<'a>(e: &'a explorer_layout::StyleEntry, k: &str) -> Option<&'a str> {
-        e.computed
-            .iter()
-            .find(|(n, _)| *n == k)
-            .map(|(_, v)| v.as_str())
-    }
     // Props d'attribution présentes quand déclarées.
     assert_eq!(prop(ed, "display"), Some("flex"));
     assert_eq!(prop(ed, "line-height"), Some("2"));
