@@ -3993,3 +3993,40 @@ fn by_tag_id(dom: &Dom, id: &str) -> NodeId {
     }
     panic!("#{id} absent")
 }
+
+/// R-312 — `all:unset` ne doit PAS établir de bloc conteneur :
+/// le reset stocke `""` pour les props sans initiale connue
+/// (`transform`/`filter`/`contain`…), et `"" ≠ "none"`
+/// faisait passer l'élément pour un établisseur
+/// (css-transforms §containing-block) — anomalie terrain
+/// apple.com : `#globalheader{all:unset}` captait le CB du
+/// `nav#globalnav{position:fixed;width:100%;min-width:320px}`
+/// → la nav s'ancrait à l'inline 0×0 et rendait 320 px au
+/// lieu de la largeur viewport.
+#[test]
+fn all_unset_netablit_pas_de_containing_block() {
+    let (dom, bx) = laid(
+        "<div id=h><nav id=n>x</nav></div>",
+        "#h{all:unset}\
+         #n{position:fixed;top:0;left:0;right:0;width:100%;min-width:320px;height:44px}",
+    );
+    let n = find(&bx, by_tag_id(&dom, "n"));
+    assert_eq!(
+        n.rect.width, 800.0,
+        "nav fixed sous ancêtre all:unset : width={} — CB attendu = viewport",
+        n.rect.width
+    );
+    // Contrôle : le même patron avec un vrai `transform`
+    // continue d'établir le CB (padding box de l'ancêtre).
+    let (dom2, bx2) = laid(
+        "<div id=h style=\"transform:translateX(0)\"><nav id=n>x</nav></div>",
+        "#h{width:200px}\
+         #n{position:fixed;top:0;left:0;width:100%;min-width:100px;height:44px}",
+    );
+    let n2 = find(&bx2, by_tag_id(&dom2, "n"));
+    assert_eq!(
+        n2.rect.width, 200.0,
+        "nav fixed sous ancêtre transformé : width={} — CB = padding box ancêtre",
+        n2.rect.width
+    );
+}

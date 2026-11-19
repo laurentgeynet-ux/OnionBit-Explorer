@@ -4121,9 +4121,17 @@ fn establishes_fixed_cb(bx: &LayoutBox) -> bool {
         return false;
     }
     let non_none = |p: &str| {
-        bx.style
-            .get(p)
-            .is_some_and(|v| !v.trim().eq_ignore_ascii_case("none"))
+        bx.style.get(p).is_some_and(|v| {
+            let t = v.trim();
+            // `all:unset`/`all:initial` (ou `prop: unset` direct)
+            // stocke `""` pour les props sans initiale connue de
+            // la table — `""` n'est pas `none` et faisait établir
+            // un CB fantôme (apple `#globalheader{all:unset}` →
+            // `position:fixed` de la nav ancré à l'inline 0×0
+            // au lieu du viewport → `width:100%` clampée à
+            // `min-width:320px`).
+            !t.is_empty() && !t.eq_ignore_ascii_case("none")
+        })
     };
     non_none("transform")
         || non_none("translate")

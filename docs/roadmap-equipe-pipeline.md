@@ -4886,6 +4886,32 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   `ua_liste_nichee_sans_marge` (cascade — `ul`/`ol`/`dl`
   sous `li` → 0, hors `li` → 1em conservé).
 
+- [x] **R-312 — `all:unset` n'etablit plus de bloc conteneur
+  fantome : `position:fixed`/`absolute` sous ancetre reset
+  s'ancre au viewport — anomalie terrain apple.com soldee**
+  (`explorer-layout`, pilotage vol/geodiff vol 898).
+  **Signature** : `nav#globalnav` eng 320x44 vs ref 1366x44
+  (dw −1 046 ; 447 divergents `globalnav` — nav resserree
+  + sous-menus deplies). **Chaine** : `#globalheader{all:
+  unset}` calcule `display:initial`→`inline` (conforme) et
+  stocke `""` pour les props sans initiale de la table
+  (`transform`/`filter`/`contain`/`backdrop-filter`/
+  `translate`/`rotate`/`scale`/`perspective`) ;
+  `establishes_fixed_cb` testait `valeur != "none"` —
+  `"" != "none"` → l'inline 0x0 etablissait le CB des
+  descendants `fixed`/`absolute` (css-transforms §CB,
+  R-173/R-222) au lieu du viewport → `width:100%`→0 →
+  clamp `min-width:320px`. **Fix** : `non_none` traite
+  `""` comme non-etabli (l'initiale reelle de ces props
+  est `none`/`auto` — `""` est le residu d'une initiale
+  absente de la table). **Mesure (site reel)** : nav
+  320→1366x44, `.globalnav-content` 1024 centre
+  (`max-width` + `margin:auto`), doc 6 044 inchange.
+  Verrou : `all_unset_netablit_pas_de_containing_block`
+  (+ controle `transform` reel = CB conserve).
+  Reliquat consigne : `--r-globalnav-text-zoom-scale:
+  NaN` pose par le JS apple propage des `NaN` dans les
+  positions (89 boites — piste jscore, hors scope).
 - [x] **R-311 — Flottants nichés dans `display:inline` hissés
   au BFC englobant (§9.2.1.1 étendue) — anomalie terrain
   csszengarden soldée** (`explorer-layout`, pilotage
