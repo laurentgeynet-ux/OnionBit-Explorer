@@ -15512,6 +15512,53 @@ chaque gain rapporté contre les **deux** archétypes.
   get-value-prop-base-primitive-realm`), aucune régression.
   Gates : c627 7/7, c616-c626/agen_queue/await_thenable verts,
   hostile 12/12 release, lib 54/54, clippy/fmt/doc propres.
+- [x] **JS-C628 — corpus élargi aux `language/statements`
+  restants : complétion `UpdateEmpty` généralisée, env objet
+  `with` spec, déstructuration `for-of` (références cibles,
+  `IteratorClose`), early errors — sous-ensemble 1 787
+  fichiers : 2 978 → **3 172/3 248 passes-mode** (+194 ;
+  `if`/`switch`/`try`/`with`/`while`/`for`/`for-in`/`do-while`
+  + `for-of/dstr` soldés en grande partie)** (`interp/{exec,
+  mod,eval}.rs`, `parser.rs`, `module.rs` + gate
+  `tests/c628_stmt.rs` **4/4**). **`UpdateEmpty` généralisé** :
+  slots `stmt_v`/`child_v` par frame `exec_stmt` (tracés GC) —
+  chaque statement publie sa valeur, `exec_body` plie
+  `UpdateEmpty` par item ; expression-statement écrit sa
+  valeur, `if`/`with`/`while`/`do`/`for`/`for-in`/`for-of`/
+  `label`/`switch`/`try` propagent ; `switch` : `V = undefined`
+  pour `{ }`, `empty` pour `{ CaseClauses }` ; `try` : `F`
+  normal → `F = C` entier (la valeur du `finally` est toujours
+  écartée — `try{7}finally{8}` → `7`, `try{}finally{5}` →
+  `undefined`) ; `if` sans `else` → `undefined`, complétion
+  abrupte `UpdateEmpty(C, undefined)` ; isolation des slots en
+  `exec_program_in`/corps de fonction/module. **`with` spec** :
+  `@@unscopables` lu par vrai `Get` (erreurs propagées via le
+  canal `env_err`, tracé GC), ordre des traps `has → get
+  @@unscopables → has → get/set`, `env_set` refait le
+  `HasProperty` (`stillExists`), `delete ident` supprime la
+  prop de l'objet `with` (plus le global), sloppy
+  binding-supprimé → `undefined`, strict non-résolu →
+  `ReferenceError`. **Déstructuration `for-of`** : en mode
+  `Assign`, la référence cible (`LValueRef`, base+clé figées)
+  est évaluée **avant** `IteratorStep` — `IteratorClose` sur
+  erreur de cible ; `iter_abrupt` distingue les erreurs
+  *produites par* l'itération (`next`/`done`/`value` jettent →
+  pas de close) des erreurs de liaison → close même `done` ;
+  `forof_iterator` accepte les primitives (boxé par `Get`),
+  `Pat::Array` sans `@@iterator` → `TypeError` à la liaison.
+  **Early errors** : rest-trailing validé en contenu
+  (`...x = 1`, `...[(x,y)]`, rests imbriqués invalides),
+  `let` déclarateur seulement devant un binding (`for (let in
+  o)` reste LHS sloppy), `async of =>` arrow autorisé (le ban
+  `async of` saute devant `=>`). Mesure : corpus extrait total
+  **élargi (5 012 fichiers) : 9 447/9 527 passes-mode, 47
+  skips, 80 échecs catalogués** (cliquet `BASELINE_*` regravé
+  2 045 → 9 447, skips 31 → 47) — résidus : `try`/`switch`
+  scope-lex (env lexical des case), `static-init-await`,
+  `with` proxy `[[Set]]` interne + inc-dec `unscopables`,
+  `for-of/dstr` rests imbriqués, `put-let` TDZ script.
+  Gates : c628 4/4, c616-c627 verts, lib 54/54, clippy/fmt
+  propres.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

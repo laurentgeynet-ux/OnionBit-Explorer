@@ -1242,6 +1242,10 @@ impl Engine {
         {
             return Ok(v);
         }
+        // JS-C628 — erreur de trap `with` en attente → jeter.
+        if let Some(v) = self.env_err.take() {
+            return Err(Thrown(v));
+        }
         let tdz = self.tdz_hit.take().is_some();
         Err(self.ref_error(if tdz {
             format!("cannot access `{name}` before initialization")
@@ -1381,6 +1385,9 @@ impl Engine {
                 {
                     Ok(v)
                 } else {
+                    if let Some(v) = self.env_err.take() {
+                        return Err(Thrown(v));
+                    }
                     let tdz = self.tdz_hit.take().is_some();
                     Err(self.ref_error(if tdz {
                         format!("cannot access `{name}` before initialization")
@@ -1453,6 +1460,10 @@ impl Engine {
                     {
                         return Ok(self.str_val(typeof_str(v, &self.heap)));
                     }
+                    // JS-C628 — erreur de trap `with` → jeter.
+                    if let Some(v) = self.env_err.take() {
+                        return Err(Thrown(v));
+                    }
                     // JS-C627 — `typeof` sur liaison TDZ jette
                     // (spec : `GetValue` abrupt → non absorbé).
                     if self.tdz_hit.take().is_some() {
@@ -1488,12 +1499,11 @@ impl Engine {
                 // non-supprimable → `false`; sinon la prop de
                 // l'objet global — configurable incluse
                 // (global implicite sloppy → `true`).
+                // JS-C628 — `with` : `[[Delete]]` sur l'objet
+                // environnant avant tout record déclaratif.
                 Expr::Ident(name) => {
-                    if Self::env_has_binding(env, name) {
-                        if self.strict {
-                            return Err(self.type_error(format!("cannot delete `{name}`")));
-                        }
-                        Ok(Value::Bool(false))
+                    if let Some(res) = self.env_delete_ident(env, name)? {
+                        Ok(res)
                     } else {
                         let g = self.global;
                         self.delete_result(g, name)

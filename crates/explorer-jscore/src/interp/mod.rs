@@ -303,6 +303,19 @@ pub(crate) enum BindMode {
     Assign,
 }
 
+/// État du curseur itérateur interne d'une déstructuration
+/// `[…]` (JS-C619/C628) — `done` fige `IteratorStep`,
+/// `iter_abrupt` marque une erreur *produite par* l'itération
+/// (`next`/`done`/`value` jette) qui dispense de
+/// `IteratorClose`.
+#[derive(Default)]
+struct IterPatState {
+    /// `next()` a rendu `done:true` — plus de tirage.
+    done: bool,
+    /// L'erreur sortante vient de l'itération elle-même.
+    iter_abrupt: bool,
+}
+
 /// Référence d'affectation réifiée — produit de
 /// [`Engine::resolve_lvalue`]. Capturer `base`/`key` une seule fois
 /// respecte l'ordre spec (LHS avant RHS) et évite de réévaluer les
@@ -908,6 +921,16 @@ pub struct Engine {
     /// Last non-empty statement completion (`eval`-style result of
     /// `if (1) 'yes'` must be `"yes"`, as real engines produce).
     completion: Value,
+    /// JS-C628 — `[[Value]]` courant du statement en cours
+    /// (`Option` car `empty` ≠ `undefined` : `var`/`function`/
+    /// `debugger` produisent `empty`, `while(c){}` produit
+    /// `undefined`). Réinitialisé à `None` à chaque entrée
+    /// d'`exec_stmt` ; les bras composites le plient selon
+    /// `UpdateEmpty` (dernier enfant non-vide).
+    pub(crate) stmt_v: Option<Value>,
+    /// JS-C628 — `[[Value]]` du dernier `exec_stmt` enfant —
+    /// le parent le lit juste après l'appel (slot de sortie).
+    pub(crate) child_v: Option<Value>,
     /// Contexte strict courant — posé par `exec_program`
     /// (`Program::strict`) et par chaque appel `Fun::Script`
     /// (`FnLit::strict`). Pilote `TypeError`/`ReferenceError` vs
@@ -1132,6 +1155,12 @@ pub struct Engine {
     /// de « not defined » — `typeof` sur liaison TDZ jette aussi
     /// (spec `GetValue` → `typeof` non absorbé).
     pub(crate) tdz_hit: Option<std::rc::Rc<str>>,
+    /// JS-C628 — erreur d'objet-environment `with` en attente :
+    /// `env_get` renvoie `Option` (pas de canal `Result`), les
+    /// erreurs de traps proxy (`has`, `get @@unscopables`,
+    /// `get` final) sont posées ici et levées par le site de
+    /// lecture (`ident_value`, `read_lvalue_ref`, `typeof`).
+    pub(crate) env_err: Option<Value>,
     /// `FnLit` déjà résolus, indexés par `Rc::as_ptr` — dédup
     /// par corps + gardien AST + clés contribuées. JS-C537 :
     /// éviction **par lit** (FIFO `resolved_fifo`) au cap au
@@ -1813,6 +1842,8 @@ impl Engine {
             ce_upgrade_slot: None,
             hooks: crate::dom_host::BrowserHooks::default(),
             completion: Value::Undefined,
+            stmt_v: None,
+            child_v: None,
             strict: false,
             modules: Vec::new(),
             module_specs: std::collections::HashMap::new(),
@@ -1870,6 +1901,7 @@ impl Engine {
             names_table: FastMap::default(),
             slots_off: std::env::var("EXPLORER_NO_SLOTS").is_ok_and(|v| v == "1"),
             tdz_hit: None,
+            env_err: None,
             resolved_guard: FastMap::default(),
             resolved_fifo: std::collections::VecDeque::new(),
             resolved_envs: FastMap::default(),
@@ -4330,6 +4362,15 @@ impl Engine {
         crate::heap::push_value(&mut ids, &self.async_gen_fn_proto);
         crate::heap::push_value(&mut ids, &self.async_gen_proto);
         crate::heap::push_value(&mut ids, &self.completion);
+        if let Some(v) = &self.stmt_v {
+            crate::heap::push_value(&mut ids, v);
+        }
+        if let Some(v) = &self.child_v {
+            crate::heap::push_value(&mut ids, v);
+        }
+        if let Some(v) = &self.env_err {
+            crate::heap::push_value(&mut ids, v);
+        }
         // `using` en cours (ES2026) — disposeur + ressource
         // vivants tant que leur corps tourne ; mesure mid-eval
         // et safepoint (JS-C421) passent par ici.
@@ -7132,21 +7173,50 @@ impl Engine {
                 }
             };
             if let Some(oid) = with_oid {
-                // Traps proxy en échec → nom non lié (tolérance).
-                let bound = self.with_has(oid, name).unwrap_or(false);
+                // JS-C628 — erreur de trap `has`/getter
+                // `@@unscopables` → propagation via `env_err`
+                // (spec `GetValue`, le site de lecture jette).
+                let bound = match self.with_has(oid, name) {
+                    Ok(b) => b,
+                    Err(Thrown(v)) => {
+                        self.env_err = Some(v);
+                        return None;
+                    }
+                };
                 cur = {
                     let b = e.borrow();
                     b.parent.clone()
                 };
                 if bound {
+                    // spec `GetBindingValue` — `HasProperty`
+                    // relu après `HasBinding` : la prop a pu
+                    // disparaître dans le getter `@@unscopables`
+                    // (`binding-deleted-in-get-unscopables`) —
+                    // disparue → `ReferenceError` strict,
+                    // `undefined` sloppy.
+                    match self.has_prop(oid, name) {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            if self.strict {
+                                self.env_err =
+                                    Some(self.ref_error(format!("{name} is not defined")).0);
+                                return None;
+                            }
+                            return Some(Value::Undefined);
+                        }
+                        Err(Thrown(v)) => {
+                            self.env_err = Some(v);
+                            return None;
+                        }
+                    }
                     // `get_prop` seul est aveugle aux props
                     // host (`NodeHost` réfléchit `id`/`value`…
                     // via `get`, pas de props propres) ET aux
                     // traps proxy : `with(p){x}` où `p` est un
                     // Proxy doit invoquer `get` (B-3 — alpine
                     // `mergeProxies` : `with(scope)` cassé →
-                    // `ReferenceError` en chaîne). Erreur de
-                    // trap → non lié, même tolérance que `has`.
+                    // `ReferenceError` en chaîne). JS-C628 —
+                    // erreur de `Get` propagée via `env_err`.
                     if let Some(h) = self.host_of(oid) {
                         crate::host_mark(h.class_name(), name);
                         if let Ok(Some(v)) = h.get(self, Value::Obj(oid), name) {
@@ -7155,7 +7225,10 @@ impl Engine {
                     }
                     match self.read_prop(Value::Obj(oid), Value::Obj(oid), name) {
                         Ok(v) => return Some(v),
-                        Err(_) => return self.get_prop(oid, name),
+                        Err(Thrown(v)) => {
+                            self.env_err = Some(v);
+                            return None;
+                        }
                     }
                 }
                 continue;
@@ -7256,36 +7329,54 @@ impl Engine {
         if !self.has_prop(oid, name)? {
             return Ok(false);
         }
-        if let Some(Value::Obj(uid)) = self.get_prop(oid, SYM_UNSCOPABLES) {
-            if self.get_prop(uid, name).is_some_and(|v| self.to_boolean(v)) {
+        // JS-C628 — `Get @@unscopables` et `Get unscopables[name]`
+        // sont **observables** (traps proxy, getters) : leurs
+        // erreurs se propagent (spec `HasBinding`), jamais
+        // avalées — le `get_prop` silencieux masquait les
+        // `has-property-err`/`unscopables-get-err` test262.
+        if let Value::Obj(uid) =
+            self.read_prop(Value::Obj(oid), Value::Obj(oid), SYM_UNSCOPABLES)?
+        {
+            let blocked = self.read_prop(Value::Obj(uid), Value::Obj(uid), name)?;
+            if self.to_boolean(blocked) {
                 return Ok(false);
             }
         }
         Ok(true)
     }
 
-    /// `true` si `name` est une liaison d'un env record (local ou
-    /// global declarative) — les props de l'objet global ne
-    /// comptent pas (elles passent par `[[Delete]]`).
-    pub(crate) fn env_has_binding(env: &EnvRef, name: &str) -> bool {
+    /// JS-C628 — `delete x` : marche les envs dans l'ordre —
+    /// `with` → `[[Delete]]` sur l'objet environnant (spec
+    /// `ObjectEnvironmentRecord.DeleteBinding`) ; record
+    /// déclaratif porteur → `false` (non supprimable — strict
+    /// déjà rejeté au parse, garde défensive). `None` si aucun
+    /// env ne lie `name` → prop de l'objet global au site.
+    pub(crate) fn env_delete_ident(&mut self, env: &EnvRef, name: &str) -> JsResult<Option<Value>> {
         let mut cur = Some(env.clone());
         while let Some(e) = cur {
-            let next = {
+            let (oid, parent, decl) = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
-                        if m.contains_key(name) {
-                            return true;
-                        }
-                        b.parent.clone()
+                    EnvKind::With(oid) => (Some(*oid), b.parent.clone(), false),
+                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => {
+                        (None, b.parent.clone(), m.contains_key(name))
                     }
-                    // `with` n'est pas un record declaratif.
-                    EnvKind::With(_) => b.parent.clone(),
                 }
             };
-            cur = next;
+            if decl {
+                if self.strict {
+                    return Err(self.type_error(format!("cannot delete `{name}`")));
+                }
+                return Ok(Some(Value::Bool(false)));
+            }
+            if let Some(oid) = oid {
+                if self.with_has(oid, name)? {
+                    return self.delete_result(oid, name).map(Some);
+                }
+            }
+            cur = parent;
         }
-        false
+        Ok(None)
     }
 
     /// `SetMutableBinding` — résout la liaison, écrit, ou crée le
@@ -7311,6 +7402,13 @@ impl Engine {
             };
             if let Some(oid) = with_oid {
                 if self.with_has(oid, name)? {
+                    // spec `SetMutableBinding` — `HasProperty`
+                    // relu après `HasBinding` (`binding-deleted-
+                    // in-get-unscopables`) : disparu + strict →
+                    // `ReferenceError` ; sloppy → `Set` recrée.
+                    if !self.has_prop(oid, name)? && self.strict {
+                        return Err(self.ref_error(format!("{name} is not defined")));
+                    }
                     // `set_prop_value` (host-aware) plutôt que
                     // `write_prop` : une écriture `with(el)` sur
                     // une prop réfléchie (`value`, `href`…) doit
@@ -7745,33 +7843,15 @@ impl Engine {
             Pat::Array(elems) => {
                 // JS-C619 — itérateur custom : tirage paresseux +
                 // `IteratorClose` (spec `IteratorBinding-
-                // Initialization`). La voie eager `iter_values`
-                // reste pour les valeurs sans itérateur
-                // observable (scalars — même erreur `TypeError`).
+                // Initialization`).
                 if let Some((it, _next)) = self.forof_iterator(v.clone())? {
                     return self.bind_pat_array_iter(env, this, elems, it, mode);
                 }
-                let items = self.iter_values(v)?;
-                for (i, el) in elems.iter().enumerate() {
-                    match el {
-                        None => {}
-                        Some(Pat::Rest(p)) => {
-                            // `i` peut dépasser `items.len()`
-                            // (`[a,b,...rest]` sur tableau
-                            // court) — slice bornée, sinon
-                            // panic (vol 339 finance perso).
-                            let rest =
-                                self.new_array(items.get(i..).map_or_else(Vec::new, <[_]>::to_vec));
-                            self.bind_pat(env, this.clone(), p, rest, mode)?;
-                            break;
-                        }
-                        Some(p) => {
-                            let sub = items.get(i).cloned().unwrap_or(Value::Undefined);
-                            self.bind_pat(env, this.clone(), p, sub, mode)?;
-                        }
-                    }
-                }
-                Ok(())
+                // JS-C628 — spec `GetIterator` : sans méthode
+                // `@@iterator` appelable c'est un `TypeError`
+                // (`delete Array.prototype[Symbol.iterator]` →
+                // `[x] = [1]` jette), pas de scan d'éléments.
+                Err(self.type_error("value is not iterable"))
             }
             Pat::Object { props, rest } => {
                 if matches!(v, Value::Undefined | Value::Null) {
@@ -7786,14 +7866,29 @@ impl Engine {
                 }
                 if let Some(p) = rest {
                     // `{...rest}` — remaining enumerable own props.
+                    // JS-C628 — primitive `string` : les index
+                    // `0..len` sont énumérables sur le wrapper
+                    // (`{...r} = 'f'` → `r[0] === 'f'`).
                     let rest_obj = self.new_object();
-                    if let Value::Obj(id) = v.clone() {
-                        for k in self.own_enum_keys_trapped(id)? {
-                            if !consumed.iter().any(|c| **c == *k) {
-                                let sv = self.get_prop_value(v.clone(), &k)?;
-                                self.set_own(rest_obj, &k, sv, true);
+                    match &v {
+                        Value::Obj(id) => {
+                            for k in self.own_enum_keys_trapped(*id)? {
+                                if !consumed.iter().any(|c| **c == *k) {
+                                    let sv = self.get_prop_value(v.clone(), &k)?;
+                                    self.set_own(rest_obj, &k, sv, true);
+                                }
                             }
                         }
+                        Value::Str(s) => {
+                            for i in 0..s.u16_len() {
+                                let k = i.to_string();
+                                if !consumed.iter().any(|c| **c == k) {
+                                    let sv = self.get_prop_value(v.clone(), &k)?;
+                                    self.set_own(rest_obj, &k, sv, true);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                     self.bind_pat(env, this, p, Value::Obj(rest_obj), mode)?;
                 }
@@ -7817,19 +7912,25 @@ impl Engine {
         it: Value,
         mode: BindMode,
     ) -> JsResult<()> {
-        let mut done = false;
-        match self.bind_pat_array_iter_run(env, this, elems, &it, &mut done, mode) {
+        let mut st = IterPatState::default();
+        match self.bind_pat_array_iter_run(env, this, elems, &it, &mut st, mode) {
             // Abrupt du bind : la complétion d'origine prime —
             // l'erreur éventuelle du close est écartée (spec
             // §7.4.6 : une throw externe garde sa valeur).
+            // JS-C628 — `IfAbruptCloseIterator` : un abrupt
+            // **produit par l'itération** (`next`/`done`/`value`
+            // qui jettent — `*-thrw-close-skip`) n'appelle PAS
+            // `return()` ; un abrupt de cible/liaison ferme même
+            // quand l'itérateur a rendu `done` (`yield` dans un
+            // `= init` — `*-iter-rtrn-close`).
             Err(e) => {
-                if !done {
+                if !st.iter_abrupt {
                     let _ = crate::collections::it_close(self, &it);
                 }
                 Err(e)
             }
             r => {
-                if !done {
+                if !st.done {
                     crate::collections::it_close(self, &it)?;
                 }
                 r
@@ -7845,57 +7946,144 @@ impl Engine {
         this: Value,
         elems: &[Option<Pat>],
         it: &Value,
-        done: &mut bool,
+        st: &mut IterPatState,
         mode: BindMode,
     ) -> JsResult<()> {
         // `next` lu une fois — `GetIterator` fige le record
-        // (`[[NextMethod]]` n'est pas relu par pas).
-        let next = self.get_prop_value(it.clone(), "next")?;
+        // (`[[NextMethod]]` n'est pas relu par pas). Erreur de
+        // lecture → produite par l'itération, pas de close.
+        let next = match self.get_prop_value(it.clone(), "next") {
+            Ok(n) => n,
+            Err(e) => {
+                st.iter_abrupt = true;
+                return Err(e);
+            }
+        };
         if !self.is_callable(next.clone()) {
+            st.iter_abrupt = true;
             return Err(self.type_error("iterator next is not callable"));
         }
         for el in elems {
             match el {
                 // Trou `[,,]` : un pas consommé, rien lié.
                 None => {
-                    self.iter_step_once(it, &next, done)?;
+                    self.iter_step_once(it, &next, st)?;
                 }
                 Some(Pat::Rest(p)) => {
+                    // JS-C628 — spec `AssignmentRestElement` :
+                    // la référence cible est évaluée AVANT le
+                    // premier `next` (mode `Assign`).
+                    let lref = if matches!(mode, BindMode::Assign) {
+                        self.resolve_pat_lref(env, this.clone(), p)?
+                    } else {
+                        None
+                    };
                     let mut items = Vec::new();
-                    while let Some(v) = self.iter_step_once(it, &next, done)? {
+                    while let Some(v) = self.iter_step_once(it, &next, st)? {
                         items.push(v);
                     }
                     let rest = self.new_array(items);
                     // Itérateur épuisé (`done` posé) — pas de
                     // close : le `Ok` court-circuite le wrapper.
-                    return self.bind_pat(env, this, p, rest, mode);
+                    return match lref {
+                        Some(lv) => self.store_lvalue(env, lv, rest),
+                        None => self.bind_pat(env, this, p, rest, mode),
+                    };
                 }
                 Some(p) => {
+                    // JS-C628 — spec `AssignmentElement` : la
+                    // référence cible (`o[f()]`, `{}[k]`…) est
+                    // résolue AVANT `IteratorStep` — ses effets
+                    // précèdent le premier `next()` et son
+                    // throw clôt l'itérateur via le wrapper.
+                    let lref = if matches!(mode, BindMode::Assign) {
+                        self.resolve_pat_lref(env, this.clone(), p)?
+                    } else {
+                        None
+                    };
                     let v = self
-                        .iter_step_once(it, &next, done)?
+                        .iter_step_once(it, &next, st)?
                         .unwrap_or(Value::Undefined);
-                    self.bind_pat(env, this.clone(), p, v, mode)?;
+                    match lref {
+                        Some(lv) => self.store_pat_lref(env, this.clone(), p, lv, v)?,
+                        None => self.bind_pat(env, this.clone(), p, v, mode)?,
+                    }
                 }
             }
         }
         Ok(())
     }
 
+    /// spec `AssignmentElement` — résolution anticipée de la
+    /// cible en mode `Assign` : `Pat::Lvalue`/`Pat::Ident` (et
+    /// la cible d'un `= init`) deviennent une [`LValueRef`]
+    /// figée ; les motifs imbriqués (`[…]`/`{…}`) rendent
+    /// `None` — leur destructuration suit le `next`.
+    fn resolve_pat_lref(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        p: &Pat,
+    ) -> JsResult<Option<LValueRef>> {
+        match p {
+            Pat::Lvalue(e) => self.resolve_lvalue(env, this, e),
+            Pat::Ident(n) => Ok(Some(LValueRef::Ident(n.clone(), 0))),
+            Pat::Default(inner, _) => self.resolve_pat_lref(env, this, inner),
+            _ => Ok(None),
+        }
+    }
+
+    /// `PutValue` après [`Self::resolve_pat_lref`] — `= init`
+    /// évalué quand la valeur tirée est `undefined` (spec :
+    /// init après le `next`), puis écriture via la référence
+    /// figée (la cible n'est évaluée qu'une fois).
+    fn store_pat_lref(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        p: &Pat,
+        lv: LValueRef,
+        v: Value,
+    ) -> JsResult<()> {
+        let v = match p {
+            Pat::Default(inner, d) if matches!(v, Value::Undefined) => {
+                let dv = self.eval_expr(env, this.clone(), d)?;
+                if let Pat::Ident(n) = inner.as_ref() {
+                    if Self::is_anon_fn_def(d) && !n.is_empty() {
+                        self.set_fn_name(&dv, n);
+                    }
+                }
+                dv
+            }
+            _ => v,
+        };
+        self.store_lvalue(env, lv, v)
+    }
+
     /// `IteratorStep`+`IteratorValue` borné par `done` — `None`
     /// quand l'itérateur est fini (aucun tirage après
     /// `done:true`, la spec n'appelle plus `next()`).
+    /// `iter_abrupt` est posé quand l'erreur vient de
+    /// l'itération (`next`/`done`/`value`) — pas de
+    /// `IteratorClose` dans ce cas (JS-C628).
     fn iter_step_once(
         &mut self,
         it: &Value,
         next: &Value,
-        done: &mut bool,
+        st: &mut IterPatState,
     ) -> JsResult<Option<Value>> {
-        if *done {
+        if st.done {
             return Ok(None);
         }
-        let v = crate::collections::it_step(self, it, next)?;
+        let v = match crate::collections::it_step(self, it, next) {
+            Ok(v) => v,
+            Err(e) => {
+                st.iter_abrupt = true;
+                return Err(e);
+            }
+        };
         if v.is_none() {
-            *done = true;
+            st.done = true;
         }
         Ok(v)
     }
@@ -13246,10 +13434,13 @@ impl Engine {
         // par la durée de son appel).
         let yslot = self.young_stack.len() - 1;
         self.young_stack[yslot] = u64::MAX;
-        let r = stacker::maybe_grow(
+        // JS-C628 — corps de fonction : le pli `stmt_v` est isolé
+        // (la valeur de la StatementList n'est pas observable —
+        // `return` porte le sien via `Flow::Return`).
+        let (r, _body_v) = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
-            || self.exec_body(&local, this, &body_rc),
+            || self.exec_body_isolated(&local, this, &body_rc),
         );
         self.young_stack[yslot] = self.heap.alloc_seq();
         let _frame = crate::j17_scope(&crate::J17_FRAME_NS);

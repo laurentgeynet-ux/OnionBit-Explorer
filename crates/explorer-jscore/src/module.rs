@@ -847,7 +847,9 @@ impl Engine {
             self.strict = outer_strict;
             return Ok(());
         }
-        let r = self.exec_body(&env, Value::Undefined, &body);
+        // JS-C628 — corps de module : pli `stmt_v` isolé (la
+        // valeur de la StatementList n'est pas observable ici).
+        let (r, _body_v) = self.exec_body_isolated(&env, Value::Undefined, &body);
         self.current_module = prev_mod;
         self.strict = outer_strict;
         self.modules[idx].state = ModState::Evaluated;

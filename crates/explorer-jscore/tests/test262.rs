@@ -35,18 +35,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Cliquet de régression, double assise (JS-C30) :
-/// - **sous-ensemble versionné** (1 077 fichiers lexer — checkout
-///   nu) : `BASELINE_*` ci-dessous, gravé après la refonte
-///   BOA-10..14 — 2045/2045 passes-mode, 31 skips fichier, 0 échec
-///   @ extraction d53ebc8 ;
+/// - **sous-ensemble versionné** (5 012 fichiers — checkout
+///   élargi JS-C628 à `language/statements/*` restants :
+///   for/for-in/while/do-while/if/switch/try/with/block/
+///   break/return/throw/empty/debugger + `for-of/dstr`) :
+///   `BASELINE_*` ci-dessous — **9 447/9 527 passes-mode,
+///   47 skips fichier, 80 échecs catalogués** @ extraction
+///   d53ebc8 ;
 /// - **corpus complet extrait** (45 579 fichiers, pin 2e58f87d) :
 ///   `FULL_*`, gravé sur la mesure run-3 post-JS-C591..595 +
 ///   whitelist JS-C30 (+ skips `fixture`) — **53 860 passes /
 ///   87 398 exécutées (61,63 %), 980 skips fichier, 0 panic
 ///   moteur**.
-const BASELINE_PASSED: usize = 2045;
+const BASELINE_PASSED: usize = 9447;
 /// Plafond de skips toléré sur le sous-ensemble versionné.
-const BASELINE_SKIPPED_MAX: usize = 31;
+const BASELINE_SKIPPED_MAX: usize = 47;
 /// Seuil de détection du corpus complet extrait.
 const FULL_CORPUS_MIN: usize = 10_000;
 /// Cliquet corpus complet (voir ci-dessus).

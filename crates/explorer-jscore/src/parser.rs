@@ -2365,7 +2365,14 @@ impl Parser {
             Some(DK::Var)
         } else if self.eat_kw(Kw::Const) {
             Some(DK::Const)
-        } else if self.eat_kw(Kw::Let) {
+        } else if matches!(self.peek(), Tok::Kw(Kw::Let))
+            // `let` n'est un déclarateur que devant un binding —
+            // `for (let in o)` / `for (let = 0;;)` : LHS
+            // ident sloppy (JS-C628, `head-lhs-let`).
+            && matches!(self.toks.get(self.pos + 1).map(|t| &t.tok),
+                Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace) | Tok::Kw(Kw::Let)))
+        {
+            self.next(); // `let`
             Some(DK::Let)
         } else {
             None
@@ -2467,6 +2474,11 @@ impl Parser {
             && !self.toks[self.pos].escaped
             && matches!(self.toks.get(self.pos + 1), Some(t)
                 if matches!(&t.tok, Tok::Ident(s) if &**s == "of") && !t.escaped)
+            // `async of => …` — arrow asynchrone de param `of` :
+            // c'est une expression légale en tête `for(;;)`
+            // (`head-init-async-of`), pas la LHS `async of`.
+            && !matches!(self.toks.get(self.pos + 2).map(|t| &t.tok),
+                Some(Tok::P(P::Arrow)))
         {
             return Err(self.err("`async` is not a valid for-of target"));
         }
@@ -4222,14 +4234,27 @@ fn is_lvalue(e: &Expr) -> bool {
 fn for_target_pat_ok(e: &Expr) -> bool {
     match e {
         Expr::Ident(_) | Expr::Member(..) | Expr::Index(..) => true,
-        Expr::Spread(inner) => for_target_pat_ok(inner),
+        // JS-C628 — un rest n'a ni initialiseur ni rest interne
+        // (`[...x = 1]`, `...r` imbriqué — early errors spec).
+        Expr::Spread(inner) => {
+            !matches!(
+                &**inner,
+                Expr::Spread(_) | Expr::Assign(_, AssignOp::Set, _)
+            ) && for_target_pat_ok(inner)
+        }
         Expr::Assign(l, AssignOp::Set, _) => for_target_pat_ok(l),
-        Expr::Array(elems) => elems
-            .iter()
-            .all(|el| el.as_ref().is_none_or(for_target_pat_ok)),
-        Expr::Object(props) => props.iter().all(|p| match p {
+        // `[...r, x]` / `[...r,]` — le rest termine la liste,
+        // et son contenu reste une cible valide (`...x = 1`,
+        // `...[(x, y)]` → rejetés par la récursion).
+        Expr::Array(elems) => elems.iter().enumerate().all(|(i, el)| match el {
+            None => true,
+            Some(e @ Expr::Spread(_)) => i + 1 == elems.len() && for_target_pat_ok(e),
+            Some(e) => for_target_pat_ok(e),
+        }),
+        // `{...r, p}` — même règle : rest en dernière position.
+        Expr::Object(props) => props.iter().enumerate().all(|(i, p)| match p {
             ObjProp::Prop(_, ve) => for_target_pat_ok(ve),
-            ObjProp::Spread(se) => for_target_pat_ok(se),
+            ObjProp::Spread(se) => i + 1 == props.len() && for_target_pat_ok(se),
             ObjProp::Getter(..) | ObjProp::Setter(..) => false,
         }),
         _ => false,

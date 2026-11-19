@@ -284,6 +284,11 @@ impl Engine {
     ) -> JsResult<Value> {
         self.hoist(&prog.body, env);
         self.completion = Value::Undefined;
+        // JS-C628 — contexte isolé : les slots de complétion
+        // (`stmt_v`/`child_v`) de l'appelant (eval dans une
+        // expression de boucle…) traversent intacts.
+        let saved_v = self.stmt_v.take();
+        let saved_cv = self.child_v.take();
         // `using` au niveau programme/module : frame racine dépilée
         // en fin de script (spec).
         let has_using = prog.body.iter().any(|s| matches!(s, Stmt::Using { .. }));
@@ -295,7 +300,13 @@ impl Engine {
             // JS-C421 : frontière de statements — balayage GC
             // licite sous pression (env/this/racines semés).
             self.safepoint_gc(env, &this);
-            match self.exec_stmt(env, this.clone(), s) {
+            let res = self.exec_stmt(env, this.clone(), s);
+            // JS-C628 — complétion du programme : dernier item
+            // non-vide (`UpdateEmpty` au niveau StatementList).
+            if let Some(v) = self.child_v.take() {
+                self.completion = v;
+            }
+            match res {
                 Ok(Flow::Normal | Flow::Break(_) | Flow::Continue(_)) => {}
                 other => {
                     r = other;
@@ -306,6 +317,8 @@ impl Engine {
         if has_using {
             r = self.drain_using(r);
         }
+        self.stmt_v = saved_v;
+        self.child_v = saved_cv;
         match r {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(self.completion.clone()),
@@ -367,7 +380,15 @@ impl Engine {
                     self.call_depth
                 );
             }
-            match self.exec_stmt(env, this.clone(), s) {
+            let res = self.exec_stmt(env, this.clone(), s);
+            // JS-C628 — sémantique `StatementList` : la valeur du
+            // corps = dernier item **non-vide**, y compris quand
+            // l'item sort abruptement (`{3; break}` → `Break(3)`,
+            // `UpdateEmpty` applique la valeur courante).
+            if let Some(v) = self.child_v.take() {
+                self.stmt_v = Some(v);
+            }
+            match res {
                 Ok(Flow::Normal) => {}
                 other => {
                     r = other;
@@ -379,6 +400,23 @@ impl Engine {
             r = self.drain_using(r);
         }
         r
+    }
+
+    /// `exec_body` en isolant le pli de valeurs : rend aussi le
+    /// `[[Value]]` de la `StatementList` — pour les sites qui ont
+    /// besoin de la valeur du corps **sans** mélanger le slot
+    /// `stmt_v` du statement courant (`try`/`catch`/`finally`
+    /// combinent trois valeurs, corps de fonction/module).
+    pub(crate) fn exec_body_isolated(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        body: &[Stmt],
+    ) -> (JsResult<Flow>, Option<Value>) {
+        let saved = self.stmt_v.take();
+        let r = self.exec_body(env, this, body);
+        let v = std::mem::replace(&mut self.stmt_v, saved);
+        (r, v)
     }
 
     /// Dépile la frame `using` courante, appelant chaque disposeur
@@ -468,6 +506,10 @@ impl Engine {
         self.safepoint_roots.push(this.clone());
         self.safepoint_envs.push(env.clone());
         self.young_stack.push(self.heap.alloc_seq());
+        // JS-C628 — frame de complétion : `stmt_v` repart à
+        // `empty` (None) ; le bras le plie (`UpdateEmpty`), le
+        // résultat est publié dans `child_v` pour le parent.
+        let saved_v = self.stmt_v.take();
         // JS-C41 : `if`/`try`/`for` s'exécutent en récursion
         // native — segment tas de secours avant débordement.
         let r = stacker::maybe_grow(
@@ -475,6 +517,8 @@ impl Engine {
             crate::parser::STACK_GROW,
             || self.exec_stmt_inner(env, this, s),
         );
+        let own_v = std::mem::replace(&mut self.stmt_v, saved_v);
+        self.child_v = own_v;
         self.young_stack.pop();
         self.safepoint_roots.pop();
         self.safepoint_envs.pop();
@@ -541,7 +585,7 @@ impl Engine {
                 self.arm_call_only(yslot, e);
                 let v = self.eval_expr(env, this, e);
                 self.call_only_slot = None;
-                self.completion = v?;
+                self.stmt_v = Some(v?);
                 Ok(Flow::Normal)
             }
             Stmt::Var(decls) => {
@@ -667,14 +711,31 @@ impl Engine {
                 let c = c?;
                 // JS-C460 — dispatch pur des branches.
                 self.young_stack[yslot] = u64::MAX;
-                let r = if self.to_boolean(c) {
-                    self.exec_stmt(env, this, then)
+                let (r, taken) = if self.to_boolean(c) {
+                    (self.exec_stmt(env, this, then), true)
                 } else if let Some(e) = else_ {
-                    self.exec_stmt(env, this, e)
+                    (self.exec_stmt(env, this, e), true)
                 } else {
-                    Ok(Flow::Normal)
+                    (Ok(Flow::Normal), false)
                 };
                 self.young_stack[yslot] = self.heap.alloc_seq();
+                // Spec `IfStatement` — `UpdateEmpty(C, undefined)`
+                // y compris sur complétion **abrupte** :
+                // `if(t){break}` produit `Break(undefined)` —
+                // non-vide, il n'est donc PAS remplacé par le
+                // `V` du corps englobant (`do{3;if(t){break}}`
+                // → `undefined`, pas `3` — cptn-abrupt-empty).
+                // Sans `else` et cond fausse → `undefined`
+                // (spec : `NormalCompletion(undefined)`, pas
+                // `empty` — `eval('1;if(false){}')` → `undefined`).
+                self.stmt_v = if taken {
+                    match &r {
+                        Ok(_) => Some(self.child_v.take().unwrap_or(Value::Undefined)),
+                        Err(_) => self.stmt_v.take(),
+                    }
+                } else {
+                    Some(Value::Undefined)
+                };
                 r
             }
             // `with (o) b` — les noms se résolvent d'abord dans les
@@ -689,10 +750,20 @@ impl Engine {
                 self.young_stack[yslot] = u64::MAX;
                 let r = self.exec_stmt(&with_env, this, body);
                 self.young_stack[yslot] = self.heap.alloc_seq();
+                // Spec `WithStatement` — `UpdateEmpty(C, undefined)`
+                // (abrupts inclus, même motif que `IfStatement`).
+                self.stmt_v = match &r {
+                    Ok(_) => Some(self.child_v.take().unwrap_or(Value::Undefined)),
+                    Err(_) => self.stmt_v.take(),
+                };
                 r
             }
             Stmt::While { cond, body } => {
                 let labels = std::mem::take(&mut self.pending_labels);
+                // JS-C628 — `V = undefined` (spec) : la complétion
+                // de la boucle repart à `undefined`, pliée avec
+                // `UpdateEmpty` depuis le corps à chaque tour.
+                self.stmt_v = Some(Value::Undefined);
                 loop {
                     // JS-C460 — re-stamp à chaque tour : ce frame
                     // ne tient plus que des racines (env/this) —
@@ -708,6 +779,9 @@ impl Engine {
                     }
                     self.young_stack[yslot] = u64::MAX;
                     let f = self.exec_stmt(env, this.clone(), body)?;
+                    if let Some(v) = self.child_v.take() {
+                        self.stmt_v = Some(v);
+                    }
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
@@ -715,11 +789,15 @@ impl Engine {
             }
             Stmt::DoWhile { body, cond } => {
                 let labels = std::mem::take(&mut self.pending_labels);
+                self.stmt_v = Some(Value::Undefined);
                 loop {
                     self.young_stack[yslot] = self.heap.alloc_seq();
                     self.tick()?;
                     self.young_stack[yslot] = u64::MAX;
                     let f = self.exec_stmt(env, this.clone(), body)?;
+                    if let Some(v) = self.child_v.take() {
+                        self.stmt_v = Some(v);
+                    }
                     self.young_stack[yslot] = self.heap.alloc_seq();
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
@@ -799,6 +877,9 @@ impl Engine {
                 // copie d'itération.
                 let sp_ienv = self.safepoint_envs.len();
                 self.safepoint_envs.push(ienv.clone());
+                // JS-C628 — `V = undefined` (spec `ForBodyEvaluation`,
+                // `UpdateEmpty` par itération sur le corps).
+                self.stmt_v = Some(Value::Undefined);
                 let mut out: JsResult<Flow> = Ok(Flow::Normal);
                 loop {
                     // JS-C460 — re-stamp à chaque tour : ce frame
@@ -833,6 +914,9 @@ impl Engine {
                             break;
                         }
                         Ok(f) => {
+                            if let Some(v) = self.child_v.take() {
+                                self.stmt_v = Some(v);
+                            }
                             if let Some(f) = Self::loop_flow(f, &labels) {
                                 out = Ok(f);
                                 break;
@@ -897,8 +981,8 @@ impl Engine {
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
                 // Même sémantique de complétion que `for-of`
-                // (JS-C627) — `V` repart à `undefined`.
-                self.completion = Value::Undefined;
+                // (JS-C627/C628) — `V` repart à `undefined`.
+                self.stmt_v = Some(Value::Undefined);
                 // Spec `ForIn/OfHeadEvaluation` (JS-C627) : les
                 // noms liés d'une `ForDeclaration` sont en TDZ
                 // pendant l'éval de l'expr itérée —
@@ -958,6 +1042,9 @@ impl Engine {
                             break;
                         }
                         Ok(f) => {
+                            if let Some(v) = self.child_v.take() {
+                                self.stmt_v = Some(v);
+                            }
                             if let Some(f) = Self::loop_flow(f, &labels) {
                                 out = Ok(f);
                                 break;
@@ -977,13 +1064,13 @@ impl Engine {
                 is_await,
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
-                // Spec `ForIn/OfBodyEvaluation` (JS-C627) : la
+                // Spec `ForIn/OfBodyEvaluation` (JS-C627/C628) : la
                 // complétion du statement est `V`, initialisée
                 // `undefined` — les stmts-expression du corps la
                 // mettent à jour, `UpdateEmpty` ne propage rien
                 // d'avant la boucle (`for (a of []) {}` →
                 // `undefined`, `{3; break;}` → `3`).
-                self.completion = Value::Undefined;
+                self.stmt_v = Some(Value::Undefined);
                 // Spec `ForIn/OfHeadEvaluation` (JS-C627) : les
                 // noms liés d'une `ForDeclaration` (`let`/`const`/
                 // `using`) sont en TDZ pendant l'éval de l'expr
@@ -1105,6 +1192,9 @@ impl Engine {
                                     break;
                                 }
                                 Ok(f) => {
+                                    if let Some(v) = self.child_v.take() {
+                                        self.stmt_v = Some(v);
+                                    }
                                     if let Some(f) = Self::loop_flow(f, &labels) {
                                         // `LoopContinues` faux →
                                         // `IteratorClose` sur
@@ -1182,6 +1272,9 @@ impl Engine {
                             break;
                         }
                         Ok(f) => {
+                            if let Some(v) = self.child_v.take() {
+                                self.stmt_v = Some(v);
+                            }
                             if let Some(f) = Self::loop_flow(f, &labels) {
                                 out = Ok(f);
                                 break;
@@ -1211,9 +1304,19 @@ impl Engine {
                 if let Some(pos) = self.pending_labels.iter().rposition(|l| l == name) {
                     self.pending_labels.remove(pos);
                 }
+                // Spec `LabelledStatement` — `UpdateEmpty(labelEval,
+                // undefined)` uniformément : `a:{3;break a}` → `3`,
+                // `a:{break a}` → `undefined`, abrupts propagés
+                // avec leur valeur (ou `undefined` si vide).
                 match r? {
-                    Flow::Break(Some(l)) if l == *name => Ok(Flow::Normal),
-                    f => Ok(f),
+                    Flow::Break(Some(l)) if l == *name => {
+                        self.stmt_v = Some(self.child_v.take().unwrap_or(Value::Undefined));
+                        Ok(Flow::Normal)
+                    }
+                    f => {
+                        self.stmt_v = Some(self.child_v.take().unwrap_or(Value::Undefined));
+                        Ok(f)
+                    }
                 }
             }
             Stmt::Break(l) => Ok(Flow::Break(l.clone())),
@@ -1228,6 +1331,9 @@ impl Engine {
                     }
                     None => Value::Undefined,
                 };
+                // JS-C628 — `ReturnCompletion(v)` : `[[value]]` = v
+                // (UpdateEmpty le lit sur les chemins abrupts).
+                self.stmt_v = Some(v.clone());
                 Ok(Flow::Return(v))
             }
             Stmt::Throw(e) => {
@@ -1247,7 +1353,10 @@ impl Engine {
                 self.predeclare_slots(&benv, block.as_ptr() as usize);
                 // JS-C460 — dispatch pur des trois corps.
                 self.young_stack[yslot] = u64::MAX;
-                let mut r = self.exec_body(&benv, this.clone(), block);
+                // JS-C628 — `B`/`C`/`F` sont trois complétions
+                // distinctes (valeurs isolées — `exec_body` plie
+                // dans `stmt_v`, il faut la valeur de chacun).
+                let (mut r, mut rv) = self.exec_body_isolated(&benv, this.clone(), block);
                 self.young_stack[yslot] = self.heap.alloc_seq();
                 if let Err(Thrown(ref v)) = r {
                     if let Some((pat, cbody)) = catch {
@@ -1263,14 +1372,17 @@ impl Engine {
                             BindMode::Lex { mutable: true },
                         ) {
                             r = Err(e);
+                            rv = None;
                         } else {
                             // JS-C421 : le jeton vit dans `r`
                             // pendant le corps catch — racine.
                             self.safepoint_roots.push(v.clone());
                             self.young_stack[yslot] = u64::MAX;
-                            r = self.exec_body(&cenv, this.clone(), cbody);
+                            let (cr, cv) = self.exec_body_isolated(&cenv, this.clone(), cbody);
                             self.young_stack[yslot] = self.heap.alloc_seq();
                             self.safepoint_roots.pop();
+                            r = cr;
+                            rv = cv;
                         }
                     }
                 }
@@ -1289,20 +1401,48 @@ impl Engine {
                     let fenv = Env::block(env.clone());
                     self.predeclare_slots(&fenv, fbody.as_ptr() as usize);
                     self.young_stack[yslot] = u64::MAX;
-                    let fr = self.exec_body(&fenv, this, fbody);
+                    let (fr, fv) = self.exec_body_isolated(&fenv, this, fbody);
                     self.young_stack[yslot] = self.heap.alloc_seq();
                     if held {
                         self.safepoint_roots.pop();
                     }
-                    let fr = fr?;
-                    if !matches!(fr, Flow::Normal) {
-                        return Ok(fr);
+                    match fr {
+                        Err(e) => return Err(e),
+                        // F normal → `F = C` entièrement (spec
+                        // `TryStatement` : la valeur d'un finally
+                        // normal est écartée — `try{5}finally{7}`
+                        // → `5`, `catch{7}finally{8}` → `7`).
+                        Ok(Flow::Normal) => {}
+                        // F abrupt (break/continue/return) → `F`
+                        // est la complétion du try —
+                        // `UpdateEmpty(F, undefined)`.
+                        Ok(f) => {
+                            self.stmt_v = Some(fv.unwrap_or(Value::Undefined));
+                            return Ok(f);
+                        }
                     }
+                }
+                // F normal (ou absent) → `UpdateEmpty(F,
+                // undefined)` — la valeur résultante si non-vide,
+                // `undefined` sinon (`try{}catch{}` → `undefined`,
+                // `try{7}` → `7`).
+                if r.is_ok() {
+                    self.stmt_v = Some(rv.unwrap_or(Value::Undefined));
                 }
                 r
             }
             Stmt::Switch { disc, cases } => {
                 let dv = self.eval_expr(env, this.clone(), disc)?;
+                // Spec `CaseBlockEvaluation` — `V` démarre à
+                // `undefined` pour `{ CaseClauses }` comme `{ }` :
+                // sans match ni `default`, ou `case` matché à corps
+                // vide → `NormalCompletion(undefined)` — le switch
+                // ne produit jamais `empty` (`eval('1; switch("a")
+                // {case null:}')` → `undefined`, cptn-*).
+                self.stmt_v = Some(Value::Undefined);
+                if cases.is_empty() {
+                    return Ok(Flow::Normal);
+                }
                 let mut matched = None;
                 let mut default = None;
                 for (i, c) in cases.iter().enumerate() {
@@ -1327,6 +1467,11 @@ impl Engine {
                 self.predeclare_slots(&senv, cases.as_ptr() as usize);
                 // JS-C421 : `dv` vit à travers les corps de cases.
                 self.safepoint_roots.push(dv);
+                // JS-C628 — `CaseBlockEvaluation` : `V` démarre à
+                // `empty` (un `case` matché à corps vide produit
+                // `empty`, pas `undefined` — `eval('1; switch(1){
+                // case 1:}')` → `1`) — plié `UpdateEmpty` sur les
+                // corps de cases (chaîne de fall-through incluse).
                 let mut out = Ok(Flow::Normal);
                 for c in &cases[start..] {
                     // JS-C460 — dispatch pur d'un corps de case.
@@ -1397,10 +1542,15 @@ impl Engine {
     /// itérateur non-objet → `TypeError` (avant : `break`
     /// silencieux).
     pub(crate) fn forof_iterator(&mut self, v: Value) -> JsResult<Option<(Value, Value)>> {
-        let Value::Obj(id) = v else { return Ok(None) };
-        let Some(m) = self.get_prop(id, SYM_ITERATOR) else {
+        // JS-C628 — `@@iterator` lu par `Get` sur TOUTE valeur :
+        // les primitives passent par leur proto-wrappé
+        // (`'ab'[Symbol.iterator]` vit sur `String.prototype`),
+        // et les accesseurs substitués (`delete`/`getter` sur
+        // `Array.prototype[Symbol.iterator]`) sont observables.
+        let m = self.get_prop_value(v.clone(), SYM_ITERATOR)?;
+        if matches!(m, Value::Undefined | Value::Null) {
             return Ok(None);
-        };
+        }
         if !self.is_callable(m.clone()) {
             return Ok(None);
         }
