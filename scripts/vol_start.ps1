@@ -76,10 +76,14 @@ $ErrorActionPreference = 'Stop'
 
 $scriptRepo = Split-Path -Parent $PSScriptRoot
 # Corpus = Explorer-data du repo du script (jonction : même
-# corpus physique quel que soit le clone de travail).
+# corpus physique quel que soit le clone de travail — les
+# chemins affichés peuvent résoudre vers la cible physique,
+# ce n'est PAS un changement de projet).
 $corpus = Join-Path $scriptRepo 'Explorer-data'
 $vols = Join-Path $corpus 'vols'
 New-Item -ItemType Directory -Force -Path $vols | Out-Null
+$jtarget = (Get-Item $corpus -ErrorAction SilentlyContinue).Target
+if ($jtarget) { Write-Output "corpus : $corpus → $jtarget (jonction, même corpus partagé)" }
 
 # -Repo explicite = build direct dans cet arbre (expert) ;
 # défaut = repo du script → le build vivra dans un worktree
