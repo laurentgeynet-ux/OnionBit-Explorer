@@ -688,9 +688,12 @@ pub(crate) fn text_encoder_encode(e: &mut Engine, _t: Value, args: &[Value]) -> 
     Ok(crate::typed_array::new_u8_array(e, s.into_bytes()))
 }
 
-/// `new TextDecoder(label?)` — UTF-8 (labels parsed but ignored;
-/// non-UTF-8 requested → `RangeError` like real engines for
-/// unsupported labels).
+/// `new TextDecoder(label?, options?)` — UTF-8 (labels parsed
+/// but ignored; non-UTF-8 requested → `RangeError` like real
+/// engines for unsupported labels). `options.fatal` : données
+/// invalides → `TypeError` au lieu du remplacement `U+FFFD`
+/// (audit 4 voix — l'option était ignorée) ; `options.ignoreBOM`
+/// : le BOM UTF-8 n'est pas livré dans la sortie.
 pub(crate) fn text_decoder_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let label = match arg(args, 0) {
         Value::Undefined => "utf-8".to_string(),
@@ -699,14 +702,25 @@ pub(crate) fn text_decoder_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     if !matches!(label.as_str(), "utf-8" | "utf8" | "unicode-1-1-utf-8") {
         return Err(e.range_error("unsupported encoding"));
     }
+    let flag = |e: &mut Engine, key: &str| match arg(args, 1) {
+        Value::Obj(id) => {
+            let v = e.get_prop(id, key).unwrap_or(Value::Undefined);
+            e.to_boolean(v)
+        }
+        _ => false,
+    };
+    let fatal = flag(e, "fatal");
+    let ignore_bom = flag(e, "ignoreBOM");
     let id = e.new_object();
     e.add_method(id, "decode", text_decoder_decode);
     let enc = e.str_val("utf-8");
     e.set_own(id, "encoding", enc, true);
+    e.set_own(id, "fatal", Value::Bool(fatal), true);
+    e.set_own(id, "ignoreBOM", Value::Bool(ignore_bom), true);
     Ok(Value::Obj(id))
 }
 
-pub(crate) fn text_decoder_decode(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn text_decoder_decode(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     let bytes: Vec<u8> = match arg(args, 0) {
         // Vue typée / `DataView` / `ArrayBuffer` — ses octets bruts.
         Value::Obj(id) => match crate::typed_array::bytes_of_value(e, Value::Obj(id)) {
@@ -723,7 +737,24 @@ pub(crate) fn text_decoder_decode(e: &mut Engine, _t: Value, args: &[Value]) -> 
         },
         _ => Vec::new(),
     };
-    Ok(e.str_val(String::from_utf8_lossy(&bytes).into_owned()))
+    let flag = |e: &mut Engine, key: &str| match t {
+        Value::Obj(id) => {
+            let v = e.get_prop(id, key).unwrap_or(Value::Undefined);
+            e.to_boolean(v)
+        }
+        _ => false,
+    };
+    let mut slice = &bytes[..];
+    if flag(e, "ignoreBOM") && slice.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        slice = &slice[3..];
+    }
+    match String::from_utf8(slice.to_vec()) {
+        Ok(s) => Ok(e.str_val(s)),
+        Err(_) if flag(e, "fatal") => {
+            Err(e.type_error("The encoded data was not valid for encoding utf-8"))
+        }
+        Err(_) => Ok(e.str_val(String::from_utf8_lossy(slice).into_owned())),
+    }
 }
 
 // -- Math extras --------------------------------------------------------

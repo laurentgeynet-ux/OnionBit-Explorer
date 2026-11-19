@@ -2034,29 +2034,19 @@ fn promise_with_resolvers(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<V
     Ok(Value::Obj(out))
 }
 
-/// `Promise.try(fn, ...args)` (ES2025) — `fn(...args)` appelé en
-/// microtâche (via `then` sur une promesse résolue), résultat
-/// adopté / exception rejetée.
-fn promise_try(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+/// `Promise.try(fn, ...args)` (ES2025) — spec `Promise.try` :
+/// `NewPromiseCapability(this)` puis **`Call(F, undefined, args)`
+/// synchrone** — le callback n'est jamais différé en microtâche
+/// (audit 4 voix : l'implémentation via `then` lisait les effets
+/// de `fn` après coup). Résultat → resolve, abrupt → reject.
+fn promise_try(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    if !e.is_callable(f) {
-        return Err(e.type_error("Promise.try: not a function"));
+    let (cap_promise, next) = e.new_promise_capability(this)?;
+    match e.call_value(f, Value::Undefined, args.get(1..).unwrap_or(&[])) {
+        Ok(v) => e.sink_resolve(next, v)?,
+        Err(Thrown(t)) => e.sink_reject(next, t)?,
     }
-    // Bound = `[f, ...extras]` ; le dernier arg reçu à l'appel est
-    // la valeur `then` (ignorée).
-    let cb = bound_anon(e, "try", promise_try_call, args.to_vec());
-    let pid = e.new_promise();
-    e.resolve_promise(pid, Value::Undefined);
-    promise_then(e, Value::Obj(pid), &[cb, Value::Undefined])
-}
-
-/// Callback `then` de `Promise.try` — bound `[f, ...extras]`,
-/// appelle `f(...extras)` et laisse `then` adopter le retour.
-fn promise_try_call(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let f = args.first().cloned().unwrap_or(Value::Undefined);
-    let end = args.len().saturating_sub(1).max(1);
-    let extras: Vec<Value> = args.get(1..end).unwrap_or(&[]).to_vec();
-    e.call_value(f, Value::Undefined, &extras)
+    Ok(cap_promise)
 }
 
 /// `queueMicrotask(f)`.

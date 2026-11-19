@@ -791,9 +791,12 @@ pub(crate) fn install(e: &mut Engine) {
     }
 
     // -- `%TypedArray%` — ctor abstrait (spec 23.2.1) -------------------
-    // Exposé en global ; `new`/`call` direct → `TypeError` (intrin-
-    // sèque abstrait, ne sert que de `[[Prototype]]` aux 9 concrets
-    // et de porteur à `from`/`of`/`@@species` génériques).
+    // PAS de binding global (spec : `%TypedArray%` n'est pas une
+    // prop de globalThis — audit 4 voix ; atteint via
+    // `Object.getPrototypeOf(Uint8Array)`). `new`/`call` direct →
+    // `TypeError` (intrinsèque abstrait, ne sert que de
+    // `[[Prototype]]` aux 9 concrets et de porteur à `from`/`of`/
+    // `@@species` génériques).
     let ta_abs = e.native_fn("TypedArray", ta_abstract_ctor);
     let ta_abs_id = c_id(ta_abs.clone());
     e.set_own_attrs(
@@ -808,7 +811,6 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(ta_abs_id, "from", gfrom, false);
     let gof = e.native_fn("of", ta_of_generic);
     e.set_own(ta_abs_id, "of", gof, false);
-    e.set_own(g, "TypedArray", ta_abs, false);
 
     // -- les 9 constructeurs typés ------------------------------------
     for ta in TaKind::ALL {

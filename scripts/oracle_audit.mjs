@@ -18,13 +18,21 @@ const CORPUS = ROOT + '/crates/explorer-jscore/tests/oracle_corpus.rs';
 const GOLDEN = ROOT + '/crates/explorer-jscore/tests/data/oracle_golden.txt';
 const BASE = '7bc0b59'; // JS-C588 — corpus migré, baseline figée
 const argv = process.argv.slice(2);
-const PROBE = argv.length ? { cmd: argv[0], args: argv.slice(1) }
-                          : { cmd: 'node', args: [ROOT + '/scripts/v8_probe.js'] };
+// --grep <regex> : ne rejouer que les sondes dont le nom
+// matche (vagues ciblées). --worktree : diff BASE vs arbre de
+// travail (bless non commité — arbitrage avant commit).
+const grepIdx = argv.indexOf('--grep');
+const GREP = grepIdx >= 0 ? new RegExp(argv[grepIdx + 1]) : null;
+const WORKTREE = argv.includes('--worktree');
+const pargv = argv.filter((a, i) =>
+  a !== '--worktree' && i !== grepIdx && i !== grepIdx + 1);
+const PROBE = pargv.length ? { cmd: pargv[0], args: pargv.slice(1) }
+                           : { cmd: 'node', args: [ROOT + '/scripts/v8_probe.js'] };
 console.log(`# oracle : ${PROBE.cmd} ${PROBE.args.join(' ')}`);
 
 // 1) Sondes ajoutées au golden depuis BASE
 const diff = execSync(
-  `git -C "${ROOT}" diff ${BASE}..HEAD -- crates/explorer-jscore/tests/data/oracle_golden.txt`,
+  `git -C "${ROOT}" diff ${WORKTREE ? BASE : BASE + '..HEAD'} -- crates/explorer-jscore/tests/data/oracle_golden.txt`,
   { encoding: 'utf8' }
 );
 const added = new Map(); // nom -> outcome gravé
@@ -33,6 +41,7 @@ for (const line of diff.split('\n')) {
   const body = line.slice(1);
   const tab = body.indexOf('\t');
   if (tab < 0) continue;
+  if (GREP && !GREP.test(body.slice(0, tab))) continue;
   added.set(body.slice(0, tab), body.slice(tab + 1));
 }
 

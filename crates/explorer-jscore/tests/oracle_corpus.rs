@@ -894,4 +894,93 @@ pub const PROBES: &[(&str, &str)] = &[
     ("c612_nt_symbol", "var r=$262.createRealm();var nt=r.evalScript('Function')();nt.prototype=Symbol();var e=Reflect.construct(EvalError,[],nt);(Object.getPrototypeOf(e)===r.evalScript('EvalError').prototype)+'|'+(e instanceof EvalError)"),
     ("c612_nt_typed", "var r=$262.createRealm();var nt=r.evalScript('Function')();nt.prototype=null;var t=Reflect.construct(Int8Array,[],nt);(Object.getPrototypeOf(t)===r.evalScript('Int8Array').prototype)+'|'+(t instanceof r.evalScript('Int8Array'))+'|'+(t instanceof Int8Array)"),
     ("c612_nt_hidden", "var r=$262.createRealm();var nt=r.evalScript('Function')();nt.prototype=0;var GF=Object.getPrototypeOf(function*(){}).constructor;var g=Reflect.construct(GF,['return 1'],nt);var OGF=r.evalScript('Object.getPrototypeOf(function*(){}).constructor');(g instanceof OGF)+'|'+(g instanceof GF)"),
+    // --- audit 4 voix : vague A — surfaces installées jamais
+    // sondées (oracle_coverage), arbitrables par V8/JSC/QuickJS
+    // — chaque sonde est arbitrée AVANT bless ---
+    // --- URL / URLSearchParams ---
+    ("cov_url_full", "var u=new URL('https://u:p@h.com:8080/p?q=1#f');u.origin+'|'+u.username+'|'+u.password+'|'+u.port+'|'+u.search+'|'+u.hash"),
+    ("cov_url_canparse", "URL.canParse('https://x.y')+'|'+URL.canParse('nope')+'|'+URL.canParse('/r','https://b/')"),
+    ("cov_url_sp", "var s=new URLSearchParams('a=1&b=2&a=3');s.get('a')+'|'+s.getAll('a').join(',')+'|'+s.size"),
+    ("cov_url_sp_enc", "new URLSearchParams({a:'1 2'}).toString()"),
+    // --- TextEncoder / TextDecoder ---
+    ("cov_textenc", "new TextEncoder().encode('aé😀').join(',')"),
+    ("cov_textdec", "new TextDecoder().decode(new Uint8Array([97,195,169,240,159,152,128]))"),
+    ("cov_textdec_fatal", "(()=>{try{return new TextDecoder('utf-8',{fatal:true}).decode(new Uint8Array([255]))}catch(e){return e.constructor.name}})()"),
+    // --- Uint8Array base64/hex (ES2025) ---
+    ("cov_u8_b64", "var a=Uint8Array.fromBase64('aGk=');a.join(',')+'|'+a.toBase64()"),
+    ("cov_u8_hex", "var a=Uint8Array.fromHex('ff00ab');a.join(',')+'|'+a.toHex()"),
+    ("cov_u8_b64set", "var a=new Uint8Array(2);a.setFromBase64('aGk=');a.join(',')"),
+    ("cov_u8_b64_err", "(()=>{try{Uint8Array.fromBase64('!!!')}catch(e){return e.constructor.name}})()"),
+    // --- RegExp.escape (ES2025) ---
+    ("cov_re_escape", "RegExp.escape('a.b[c]')+'|'+RegExp.escape('')"),
+    // --- Map/WeakMap getOrInsert (ES2025) ---
+    ("cov_map_getins", "var m=new Map();var a=m.getOrInsert('k',1);var b=m.getOrInsert('k',99);a+'|'+b+'|'+m.size"),
+    ("cov_map_getinsc", "var n=0;var m=new Map();m.getOrInsertComputed('k',()=>{n++;return 5})+'|'+m.getOrInsertComputed('k',()=>{n++;return 9})+'|'+n"),
+    ("cov_wmap_getins", "var k={};var m=new WeakMap();var a=m.getOrInsert(k,7);(a===m.getOrInsert(k,8))+'|'+(a===7)"),
+    // --- Promise ---
+    ("cov_prom_resolvers", "var p=Promise.withResolvers();(p.promise instanceof Promise)+'|'+typeof p.resolve+'|'+typeof p.reject"),
+    ("cov_prom_try", "(()=>{var v;Promise.try(()=>{v=42});return v})()"),
+    // --- JSON.rawJSON ---
+    ("cov_json_raw", "var r=JSON.rawJSON('123');JSON.isRawJSON(r)+'|'+JSON.isRawJSON('x')+'|'+typeof r"),
+    // --- fonctions URI / hôte-langage ---
+    ("cov_atob_btoa", "btoa('hi')+'|'+atob('aGk=')"),
+    ("cov_uri", "encodeURI('a é/b?')+'|'+decodeURI('a%20%C3%A9')"),
+    ("cov_uri_comp", "encodeURIComponent('a é/b')+'|'+decodeURIComponent('a%20%C3%A9')"),
+    ("cov_isnan", "isNaN('x')+'|'+isNaN('5')+'|'+Number.isNaN(NaN)+'|'+Number.isNaN('x')"),
+    ("cov_parse", "parseInt('0x10')+'|'+parseFloat('1.5e2')+'|'+parseInt('12abc')"),
+    // --- constructeurs d'erreur ---
+    ("cov_err_ctors", "var e=new RangeError('m');(e instanceof Error)+'|'+e.name+'|'+(new URIError() instanceof Error)"),
+    ("cov_err_names", "RangeError.prototype.name+'|'+ReferenceError.prototype.name+'|'+SyntaxError.prototype.name+'|'+URIError.prototype.name"),
+    ("cov_err_iserror", "Error.isError(new TypeError())+'|'+Error.isError({})+'|'+Error.isError(null)"),
+    // --- TypedArray de base ---
+    ("cov_ta_base", "typeof TypedArray+'|'+Object.getPrototypeOf(Uint8Array).name+'|'+Float64Array.BYTES_PER_ELEMENT+'|'+BigUint64Array.BYTES_PER_ELEMENT+'|'+new Uint32Array([4294967295])[0]"),
+    ("cov_ta_f16", "new Float16Array([1.5])[0]"),
+    ("cov_ta_conv", "new Uint8Array([256,257,258]).join(',')"),
+    // --- WeakRef / FinalizationRegistry ---
+    ("cov_weakref", "var o={};var w=new WeakRef(o);(w.deref()===o)+'|'+typeof w.deref"),
+    ("cov_finreg", "var f=new FinalizationRegistry(function(){});typeof f.register+'|'+typeof f.unregister"),
+    // --- Object ---
+    ("cov_obj_defprops", "var o={};Object.defineProperties(o,{a:{value:1,enumerable:true},b:{value:2}});o.a+'|'+o.b+'|'+Object.keys(o).join(',')"),
+    ("cov_obj_seal", "var o=Object.seal({a:1});Object.isSealed(o)+'|'+Object.isExtensible({})+'|'+o.hasOwnProperty('a')"),
+    ("cov_obj_isproto", "Object.prototype.isPrototypeOf.call(Array.prototype,[])+'|'+({}).hasOwnProperty.call({x:1},'x')"),
+    // --- Array ---
+    ("cov_arr_stack", "var a=[3,1];a.pop()+'|'+a.shift()+'|'+a.length"),
+    ("cov_arr_rest", "[1,2,3].reduceRight(function(x,y){return x-y})+'|'+[1,2,3].findLastIndex(function(x){return x>1})"),
+    ("cov_arr_tospliced", "var a=[1,2,3];var b=a.toSpliced(1,1,9);a.join(',')+'|'+b.join(',')"),
+    // --- String ---
+    ("cov_str_wellformed", "'ab'.isWellFormed()+'|'+' x'.trimStart().length"),
+    ("cov_str_towell", "'abc'.toWellFormed()+'|'+'  x'.trimStart()"),
+    // --- Number ---
+    ("cov_num_consts", "Number.MIN_SAFE_INTEGER+'|'+(Number.MAX_VALUE>1e308)+'|'+(Number.NaN!==Number.NaN)+'|'+(Number.POSITIVE_INFINITY>0)"),
+    // --- Reflect / Symbol ---
+    ("cov_reflect_ext", "Reflect.isExtensible({})+'|'+Reflect.isExtensible(Object.freeze({}))"),
+    ("cov_sym_wk", "typeof Symbol.unscopables+'|'+typeof Symbol.isConcatSpreadable+'|'+typeof Symbol.asyncDispose"),
+    // --- RegExp getters ---
+    ("cov_re_getters", "/x/giy.flags+'|'+/x/giy.global+'|'+/x/giy.ignoreCase"),
+    ("cov_re_hasidx", "/x/d.hasIndices+'|'+/x/d.unicode+'|'+/x/d.unicodeSets"),
+    // --- Math ---
+    ("cov_math_a", "Math.abs(-3)+Math.ceil(0.1)+Math.round(2.5)+Math.sign(-7)+Math.imul(3,4)"),
+    ("cov_math_b", "Math.cbrt(8)+Math.log2(8)+Math.log1p(0)+Math.expm1(0)+Math.fround(1.5)"),
+    ("cov_math_precise", "typeof Math.sumPrecise+'|'+typeof Math.f16round"),
+    // --- Map/Set/WeakSet ---
+    ("cov_mapset_del", "var m=new Map([['a',1]]);var s=new Set([1,2]);m.delete('a')+'|'+m.size+'|'+s.delete(9)+'|'+(s.clear()===undefined)+'|'+s.size"),
+    ("cov_wset_del", "var k={};var s=new WeakSet([k]);s.delete(k)+'|'+s.has(k)"),
+    // --- ArrayBuffer / SharedArrayBuffer / Atomics / DataView ---
+    ("cov_ab_resizable", "var b=new ArrayBuffer(8,{maxByteLength:16});b.resizable+'|'+b.maxByteLength+'|'+ArrayBuffer.isView(new Uint8Array(b))"),
+    ("cov_ab_transfer", "var b=new ArrayBuffer(8,{maxByteLength:16});var t=b.transferToFixedLength();b.byteLength+'|'+t.byteLength+'|'+t.resizable"),
+    ("cov_sab_grow", "var s=new SharedArrayBuffer(8,{maxByteLength:16});s.growable+'|'+(s.grow(12)===undefined)+'|'+s.byteLength"),
+    ("cov_atomics", "var a=new Int32Array(new SharedArrayBuffer(8));Atomics.store(a,0,5)+'|'+Atomics.add(a,0,3)+'|'+Atomics.exchange(a,0,9)+'|'+Atomics.load(a,0)"),
+    ("cov_dv", "var v=new DataView(new ArrayBuffer(16));v.setUint16(0,0x0102,true);v.getUint8(0)+'|'+v.getUint8(1)+'|'+v.byteOffset"),
+    // --- Date (UTC uniquement — jamais getTimezoneOffset,
+    // dépend de l'environnement) ---
+    ("cov_date_get", "var d=new Date(Date.UTC(2020,0,15,10,30,45,123));d.getUTCFullYear()+'|'+d.getUTCMonth()+'|'+d.getUTCDate()+'|'+d.getUTCMilliseconds()"),
+    ("cov_date_set", "var d=new Date(0);d.setUTCFullYear(1999);d.setUTCMonth(5);d.getUTCFullYear()+'|'+d.getUTCMonth()"),
+    // --- ERM (DisposableStack / SuppressedError / using) ---
+    ("cov_erm_stack", "var d=new DisposableStack();typeof d.dispose+'|'+typeof d.use+'|'+typeof d.defer"),
+    ("cov_erm_suppressed", "var e=new SuppressedError('err','sup','msg');e.error+'|'+e.suppressed+'|'+e.message"),
+    ("cov_erm_using", "var log='';{using r={[Symbol.dispose](){log+='d'}};log+='x'};log"),
+    // --- Iterator chunking / zip (ES2025 — arbitrabilité à
+    // vérifier, retirées si tous les oracles répondent na) ---
+    ("cov_iter_chunks", "var it=[1,2,3,4].values().chunks(2);it.next().value.join(',')+'|'+it.next().value.join(',')"),
+    ("cov_iter_zip", "Iterator.zip([[1,2],[3]]).next().value.join(',')"),
 ];
