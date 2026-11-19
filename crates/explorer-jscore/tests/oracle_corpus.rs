@@ -23,6 +23,13 @@
 // installée jamais sondée. Les sondes marqueurs d'extensions
 // (`cov_ext_*`, déviations documentées) se justifient en
 // commentaire.
+//
+// GATES — `cargo test -p explorer-jscore --test oracle_ratchet`
+// fait partie des **gates d'étape** de tout commit jscore (à
+// côté des `--test cXXX` ciblés) : le cliquet ne protège que
+// s'il tourne — `str_surr_re_match` a dormi 4 commits (C622 →
+// fix) faute de l'inclure ; la régression aurait été interceptée
+// au commit, pas au bless suivant.
 
 /// `(nom, source)` — noms stables, préfixés par famille.
 pub const PROBES: &[(&str, &str)] = &[
