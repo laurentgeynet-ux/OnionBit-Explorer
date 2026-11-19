@@ -19,6 +19,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 mod mcp;
+mod wptscan;
 
 use explorer_html::TreeBuilder;
 use explorer_net::decode::DecodingTransport;
@@ -60,6 +61,7 @@ fn main() -> ExitCode {
         [_, cmd, port] if cmd == "mcp" => mcp_main(Some(port)),
         [_, cmd] if cmd == "daemons" => daemons_list(),
         [_, cmd, a, b] if cmd == "diff" => diff_pngs(a, b),
+        [_, cmd, manifest, rest @ ..] if cmd == "wpt-scan" => wptscan::run(manifest, rest),
         _ => {
             eprintln!("usage : explorer-cli dump <fichier|url>");
             eprintln!("        explorer-cli fetch <url>");
@@ -86,6 +88,7 @@ fn main() -> ExitCode {
                        \x20                           port = daemon épinglé par défaut)"
             );
             eprintln!("        explorer-cli daemons   (registre des daemons vivants)");
+            eprintln!("        explorer-cli wpt-scan <MANIFEST.json> [--type reftest] <préfixe>…");
             ExitCode::FAILURE
         }
     }

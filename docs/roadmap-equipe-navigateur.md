@@ -8227,6 +8227,23 @@ MCP = adaptateur, jamais la base.
   mesure inaugurale 83,7 % divergents, artefacts
   `Explorer-data/vols/vitrine/`. Verrou :
   `dir_transport_replays_youtube_flight`.
+- [x] **Étape 314. `scan_wpt.ps1` + `wpt-scan` : prospection
+  du `MANIFEST.json` officiel du WPT** (`scripts/` +
+  `explorer-cli` — ADR-0010, outillage de curation).
+  L'index canonique de la suite (asset `MANIFEST-*.json.gz`
+  des releases `merge_pr_*`, ~41 Mio décompressé) énumère
+  les 29 177 reftests avec références `==`/`!=` racine-dépôt
+  et flags (`fuzzy`, `timeout`, `testdriver`…) — table
+  équivalente au frontmatter test262 : la découverte des
+  salves n'est plus manuelle. Cache sous
+  `Explorer-data/wpt/` (gitignoré, `EXPLORER_DATA` honoré) ;
+  `wpt-scan` filtre `items.<type>` par préfixe de dossier —
+  sortie TSV `chemin / refs / extras`. Diff avec
+  `manifest.txt` : 55 reftests sous `css/css-grid/grid-model`,
+  2 déjà listés, 53 candidats ; `-Add` ajoute les nouveaux
+  sous commentaire de salve daté — gouvernance inchangée
+  (cliquet `WPT_BASELINE`, skip list raisonnée, score borné
+  sur extrait).
 - [x] **Étape 312. §B-114 — le shed suspend le drain
   d'applies et borne la file** (`explorer-core`, garde
   ressource — trou des vols 857/860/861 : `rss_shed`
