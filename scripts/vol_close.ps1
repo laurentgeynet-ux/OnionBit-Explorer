@@ -68,10 +68,26 @@ if (-not $rep) {
 # --- 1. arrêt daemon : graceful d'abord, pidfile seul ensuite ---
 $outcome = 'absent'
 if (-not $KeepDaemon -and $port -gt 0) {
-  try {
-    $null = Invoke-RestMethod "http://127.0.0.1:$port/api/shutdown" `
-      -Method Post -TimeoutSec 3
-  } catch { }
+  # Le POST /api/shutdown vise le PORT : on n'envoie que si le
+  # listener appartient au pid du claim. Une course au bind (vols
+  # 908/909) peut laisser le daemon d'une AUTRE piste sur ce port —
+  # sans cette preuve le POST le tuerait en plein vol.
+  $owner = 0
+  foreach ($line in (netstat -ano)) {
+    if ($line -notmatch 'LISTENING') { continue }
+    $t = $line -split '\s+' | Where-Object { $_ }
+    if ($t.Count -ge 5 -and $t[1] -match ":(\d+)$" -and `
+        [int]$Matches[1] -eq $port) { $owner = [int]$t[-1]; break }
+  }
+  if ($owner -gt 0 -and $owner -ne $dpid) {
+    Write-Warning "port $port possédé par pid $owner ≠ claim $dpid — daemon voisin épargné"
+    $outcome = "foreign-owner:$owner"
+  } else {
+    try {
+      $null = Invoke-RestMethod "http://127.0.0.1:$port/api/shutdown" `
+        -Method Post -TimeoutSec 3
+    } catch { }
+  }
   if ($dpid -gt 0) {
     $deadline = (Get-Date).AddSeconds(5)
     while ((Get-Date) -lt $deadline -and
@@ -80,11 +96,11 @@ if (-not $KeepDaemon -and $port -gt 0) {
     }
     if (Get-Process -Id $dpid -ErrorAction SilentlyContinue) {
       taskkill /PID $dpid /F | Out-Null
-      $outcome = 'killed'
-    } else {
+      $outcome = "$outcome+killed" -replace '^absent\+', ''
+    } elseif ($outcome -eq 'absent') {
       $outcome = 'graceful'
     }
-  } else {
+  } elseif ($outcome -eq 'absent') {
     $outcome = 'shutdown-posted'
   }
 } elseif ($KeepDaemon) {

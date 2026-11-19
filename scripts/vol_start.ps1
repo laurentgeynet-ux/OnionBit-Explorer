@@ -26,7 +26,11 @@
        convention « un target par agent » est laissée à
        l'appelant qui pose sa variable).
     4. Spawn : `spawn_daemon.ps1` (watchdog cmd caché, canal
-       `session`, exe.log + exit.log + pidfile). Les envs
+       `session`, exe.log + exit.log + pidfile). Port dérivé du
+       numéro de vol (9385 + (N-1) mod 200 — arbitré par le même
+       claim atomique) + vérification pid↔listener post-spawn :
+       une défaite au bind relance sur le port suivant au lieu
+       de laisser un vol zombie sur le daemon d'un voisin. Les envs
        `EXPLORER_DEATH_LOG`/`EXPLORER_FLIGHT_LOG` pointent sur
        `vol<N>\logs\` — l'instrumentation atterrit dans le vol,
        plus d'archivage manuel des journaux.
@@ -160,38 +164,91 @@ if (-not $NoBuild) {
   if ($LASTEXITCODE -ne 0) { Abort-Vol 'build échoué' }
 }
 
-# --- 4. port libre ≥ 9385 (hors claims vivants + listeners) ---
-if ($Port -eq 0) {
-  for ($p = 9385; $p -lt 9600 -and $Port -eq 0; $p++) {
-    if ($usedPorts[$p]) { continue }
-    try {
-      $l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Parse('127.0.0.1'), $p)
-      $l.Start(); $l.Stop(); $Port = $p
-    } catch { }
+# --- 4/5. port + spawn ---
+# Le numéro de vol est DÉJÀ arbitré atomiquement → le port par
+# défaut en dérive (9385 + (N-1) mod 200) : pas de coordination
+# partagée à respecter. Le sondage « port libre » reste un
+# check-then-act face au bind du daemon (~1 s de fenêtre — course
+# constatée : deux « en ligne » sur un même port, le perdant mort
+# os error 10048 pendant que /api/status était répondu par le
+# daemon VAINQUEUR). Après chaque spawn on vérifie donc que le pid
+# du pidfile possède réellement le listener — défaite au bind =
+# port suivant, jamais un vol zombie pointant un daemon voisin.
+function Read-UsedPorts {
+  $h = @{}
+  foreach ($d in Get-ChildItem $vols -Directory -ErrorAction SilentlyContinue) {
+    $cj = Join-Path $d.FullName 'CLAIMED.json'
+    if ((Test-Path $cj) -and -not (Test-Path (Join-Path $d.FullName 'DONE'))) {
+      try {
+        $j = Get-Content $cj -Raw | ConvertFrom-Json
+        if ($j.port) { $h[[int]$j.port] = $true }
+      } catch { }
+    }
   }
+  return $h
 }
-if ($Port -eq 0) { Abort-Vol 'aucun port libre 9385-9599' }
+function Test-PortFree([int]$p, [hashtable]$used) {
+  if ($used[$p]) { return $false }
+  try {
+    $l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Parse('127.0.0.1'), $p)
+    $l.Start(); $l.Stop(); return $true
+  } catch { return $false }
+}
+function Get-PortOwner([int]$p) {
+  foreach ($line in (netstat -ano)) {
+    if ($line -notmatch 'LISTENING') { continue }
+    $t = $line -split '\s+' | Where-Object { $_ }
+    if ($t.Count -ge 5 -and $t[1] -match ":(\d+)$" -and [int]$Matches[1] -eq $p) {
+      return [int]$t[-1]
+    }
+  }
+  return 0
+}
 
-# --- 5. spawn daemon (envs cuits dans la ligne cmd par le script) ---
 $env:EXPLORER_VIEWPORT   = '1366x900'
 $env:EXPLORER_MEM_DIAG   = '1'
 $env:EXPLORER_PROFILE    = "vol:vol$N"
 $env:EXPLORER_DEATH_LOG  = Join-Path $logdir 'explorer_daemon_death.log'
 $env:EXPLORER_FLIGHT_LOG = Join-Path $logdir 'explorer_daemon_flight.log'
-Write-Claim @{ state = 'spawning'; port = $Port }
 
-$out = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'spawn_daemon.ps1') `
-  -Port $Port -Repo $repo -LogDir $logdir 2>&1
-$out | ForEach-Object { Write-Output $_ }
-if (($out | Select-String -Pattern 'en ligne').Count -eq 0) {
-  Abort-Vol "daemon $Port muet — voir $logdir"
+$forcedPort = $Port -gt 0
+$dpid = 0; $exePath = ''; $spawned = $false
+for ($try = 1; $try -le 4 -and -not $spawned; $try++) {
+  if ($Port -eq 0) {
+    $used = Read-UsedPorts
+    $cand = 9385 + (($N - 1) % 200)
+    if (-not (Test-PortFree $cand $used)) {
+      $cand = 0
+      for ($p = 9385; $p -lt 9600 -and $cand -eq 0; $p++) {
+        if (Test-PortFree $p $used) { $cand = $p }
+      }
+    }
+    if ($cand -eq 0) { Abort-Vol 'aucun port libre 9385-9599' }
+    $Port = $cand
+  }
+  Write-Claim @{ state = 'spawning'; port = $Port }
+
+  $out = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'spawn_daemon.ps1') `
+    -Port $Port -Repo $repo -LogDir $logdir 2>&1
+  $out | ForEach-Object { Write-Output $_ }
+  $dpid = 0
+  $m = $out | Select-String -Pattern 'daemon PID (\d+)' | Select-Object -First 1
+  if ($m) { $dpid = [int]$m.Matches[0].Groups[1].Value }
+  if (-not $exePath) {
+    $exe = (($out | Select-String -Pattern '^exe=(\S+)') | Select-Object -First 1)
+    $exePath = if ($exe) { $exe.Matches[0].Groups[1].Value } else { '' }
+  }
+  # Appartenance pid↔port — le seul arbitre qui compte (« en ligne »
+  # peut être répondu par un daemon voisin ayant gagné le bind).
+  $alive = $dpid -gt 0 -and `
+    [bool](Get-Process -Id $dpid -ErrorAction SilentlyContinue)
+  if ($alive -and (Get-PortOwner $Port) -eq $dpid) { $spawned = $true; break }
+  Write-Output "port $Port : pid $dpid ne possède pas le listener — essai suivant"
+  if ($alive) { taskkill /PID $dpid /F | Out-Null }
+  if ($forcedPort) { Abort-Vol "port forcé $Port perdu au bind" }
+  $Port = 0
 }
-$dpid = 0
-$m = $out | Select-String -Pattern 'daemon PID (\d+)' | Select-Object -First 1
-if ($m) { $dpid = [int]$m.Matches[0].Groups[1].Value }
-if ($dpid -eq 0) { Abort-Vol 'daemon en ligne mais PID introuvable' }
-$exe = (($out | Select-String -Pattern '^exe=(\S+)') | Select-Object -First 1)
-$exePath = if ($exe) { $exe.Matches[0].Groups[1].Value } else { '' }
+if (-not $spawned) { Abort-Vol "aucun bind gagné après les essais — voir $logdir" }
 
 # --- 6. Job Object mémoire (gardien détaché, meurt avec la session) ---
 $null = Start-Process pwsh -WindowStyle Hidden -PassThru -ArgumentList @(
