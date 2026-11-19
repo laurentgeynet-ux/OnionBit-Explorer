@@ -15306,6 +15306,46 @@ chaque gain rapporté contre les **deux** archétypes.
   propres. **Reste catalogué** : noms de groupes non-BMP,
   `poisoned-stdlib`, capture reset quantifié,
   `builtin-infer-unicode`.
+- [x] **JS-C626 — sémantique `%IteratorPrototype%` /
+  `Iterator.from` : `built-ins/Iterator` soldé à
+  1 368/1 368 passes-mode (684 fichiers, +136)**
+  (`collections.rs`, `builtins/c17.rs`, `heap.rs`,
+  `interp/mod.rs` + gate `tests/c626_iterator.rs` **11/11**).
+  **Ordre spec universel** : receveur objet → record
+  *placeholder* → validation/coercition des arguments
+  (`IsCallable`, `ToNumber` limit, `skipped`/`size` non
+  coercés) avec `IteratorClose` du sous-jacent sur échec →
+  **`GetIteratorDirect` en dernier** — `get next` lu brut,
+  jamais validé (`map.call({next:0})` ne jette qu'au
+  `next()` ; `get @@iterator` avant `get next` dans
+  `GetIteratorFlattenable`). `return` retiré de
+  `%IteratorPrototype%` (les itérateurs de tableaux n'en ont
+  pas — `iterator-has-no-return`), gardé sur
+  `%IteratorHelperPrototype%` avec forwarding verbatim pour
+  `%WrapForValidIteratorPrototype%` et fermeture de
+  l'interne `flatMap` avant le sous-jacent. Détail :
+  `includes(v, skipped)` strict (non-Number/NaN/non-entier →
+  `TypeError`, négatif/`>2^53−1` → `RangeError`), `join`
+  (`ToString(sep)` avant `get next`, nullish → `""`),
+  `windows(n,"only-full"|"allow-partial")` reste rendu une
+  fois, bornes `chunks`/`windows` `2^32−1`, `flatMap`
+  `reject-primitives` (`"ab"` non aplatie) + step interne
+  abrupt → seul le sous-jacent fermé, `Iterator.from` —
+  `iterate-string-primitives` par vrai `Get @@iterator`,
+  autres primitives rejetées, complétion throw entrante
+  prioritaire sur l'échec du `return()` interne. Correctifs
+  connexes : fast-path `to_primitive` masquait les
+  accesseurs (`get_own` → `find`), accesseurs
+  `@@toStringTag`/`constructor` de `%IteratorPrototype%`
+  (non-objet/home → `TypeError`). Gates : c626 11/11, c616
+  10/10, c619 8/8, c620 11/11, c621 6/6, c623 6/6, iter_lazy
+  25/25, agen_queue 12/12, await_thenable 18/18,
+  promise_species 13/13, lazy_gen 3/3, hostile 12/12
+  release, lib 54/54, clippy/fmt/doc propres. **Mesure** :
+  corpus extrait **6 038 → 6 174/6 279** (+136) — résidus
+  105 = `for-of` (~97, scope/TDZ/typedarray-resizable),
+  `labeled`/`types` (~8). C625 = chantier RegExp du
+  worktree, non touché.
 - [x] **JS-C624 — reliquats RegExp/String : borne units dans
   `regexp_exec` (boucle infinie `matchAll`/`(?:)`+`u` après
   `lastIndex` hors-chaîne — OOM observée), `ToLength`

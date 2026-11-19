@@ -686,7 +686,30 @@ pub(crate) fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
             // `{done:true}`) ; suspendedYield → état
             // « executing » pendant le close — la sentinelle
             // `Running` reste → ré-entrance → `TypeError`.
-            let r = if let IterOp::Zip { iters, .. } = &st.op {
+            let r = if matches!(st.op, IterOp::Wrap) {
+                // `%WrapForValidIteratorPrototype%.return` (spec)
+                // : `GetMethod(iterator, "return")` → résultat
+                // **verbatim** forwardé (non-objet → `TypeError`),
+                // `{undefined, done:true}` quand absent.
+                let src = st.source.clone();
+                let rf = e.get_prop_value(src.clone(), "return");
+                let r = match rf {
+                    Ok(Value::Undefined | Value::Null) => {
+                        Ok(iter_result(e, Value::Undefined, true))
+                    }
+                    Ok(f) if e.is_callable(f.clone()) => match e.call_value(f, src, &[]) {
+                        Ok(res) if matches!(res, Value::Obj(_)) => Ok(res),
+                        Ok(_) => Err(e.type_error("iterator return result is not an object")),
+                        Err(t) => Err(t),
+                    },
+                    Ok(_) => Err(e.type_error("iterator return is not callable")),
+                    Err(t) => Err(t),
+                };
+                if let Some(o) = e.heap.obj_mut(id) {
+                    o.kind = ObjKind::IterHelper(st);
+                }
+                return r;
+            } else if let IterOp::Zip { iters, .. } = &st.op {
                 let recs = iters.clone();
                 if st.counter > 0 {
                     let r = zip_close_all(e, &recs);
@@ -701,8 +724,15 @@ pub(crate) fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
                     zip_close_all(e, &recs)
                 }
             } else {
+                // `flatMap` — l'itérateur **interne** ouvert est
+                // fermé avant le sous-jacent (spec : `return`
+                // forwardé au résultat du mapper).
+                let inner = st.inner.take().map(|(isrc, _)| isrc);
                 let src = st.source.clone();
-                let r = it_close(e, &src);
+                let r = match inner {
+                    Some(isrc) => it_close(e, &isrc).and_then(|()| it_close(e, &src)),
+                    None => it_close(e, &src),
+                };
                 if let Some(o) = e.heap.obj_mut(id) {
                     o.kind = ObjKind::IterHelper(st);
                 }
@@ -717,9 +747,14 @@ pub(crate) fn iter_return(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Iter { items, idx, .. } = &mut o.kind {
             *idx = items.len();
+            return Ok(iter_result(e, arg(args, 0), true));
         }
     }
-    Ok(iter_result(e, arg(args, 0), true))
+    // `%IteratorHelperPrototype%.return` sur un objet sans
+    // slot `[[Iterated]]` (objet ordinaire inclus) →
+    // `TypeError` (spec — `return-method-throws-for-
+    // invalid-this`).
+    Err(e.type_error("return on non-iterator"))
 }
 
 /// `gen.throw(e)` — lazy (JS-C34) : jeté *au site* suspendu
@@ -790,8 +825,12 @@ fn c_id(v: Value) -> ObjId {
 pub(crate) fn install(e: &mut Engine) {
     let iterator = e.protos.iterator;
     e.add_method(iterator, "next", iter_next);
-    e.add_method(iterator, "return", iter_return);
     e.add_method(iterator, "throw", iter_throw);
+    // `return` vit sur `%IteratorHelperPrototype%` (spec) —
+    // PAS sur `%IteratorPrototype%` : un itérateur de tableau
+    // n'a pas de méthode `return` (test262
+    // `iterator-has-no-return`). Les générateurs ont le leur.
+    e.add_method(e.protos.iter_helper, "return", iter_return);
     {
         let self_fn = e.native_fn("[Symbol.iterator]", iter_self);
         e.set_own(iterator, SYM_ITERATOR, self_fn, false);
@@ -1112,6 +1151,83 @@ pub(crate) fn it_record(e: &mut Engine, v: Value) -> JsResult<(Value, Value)> {
     Err(e.type_error("value is not iterable"))
 }
 
+/// `GetIteratorDirect` (spec §7.4) — receveur des méthodes
+/// `%IteratorPrototype%` : `O` doit être un objet (sinon
+/// `TypeError` **à l'appel**) puis `next` est lu **brut** —
+/// la callabilité n'est testée qu'au `Call` de `IteratorStep`
+/// (`map.call({next: 0})` ne jette qu'au premier `next()`).
+/// Pas de repli `@@iterator` ici.
+/// `Type(O) is Object` (spec) — les **symboles** sont des
+/// `Value::Obj(ObjKind::Symbol)` chez nous mais restent des
+/// primitives côté spec (`TypeError` attendu, `from/primitives`).
+fn it_is_object(e: &Engine, v: &Value) -> bool {
+    match v {
+        Value::Obj(id) => !matches!(
+            e.heap.obj(*id).map(|o| &o.kind),
+            Some(ObjKind::Symbol { .. })
+        ),
+        _ => false,
+    }
+}
+
+pub(crate) fn it_record_direct(e: &mut Engine, v: Value) -> JsResult<(Value, Value)> {
+    if !it_is_object(e, &v) {
+        return Err(e.type_error("this is not an iterator object"));
+    }
+    let nf = e.get_prop_value(v.clone(), "next")?;
+    Ok((v, nf))
+}
+
+/// `GetIteratorFlattenable` (spec) — `GetMethod(O, @@iterator)`
+/// lu **en premier** (ordre observable — `get @@iterator` avant
+/// `get next`) : nullish → `next` de `O` est exigé callable ;
+/// sinon `Call(m)` → objet exigé → `next` du résultat exigé
+/// callable. `allow_prim` (`Iterator.from` —
+/// `iterate-string-primitives`) matérialise les chaînes ;
+/// sinon (`flatMap`, `reject-primitives`) un non-objet →
+/// `TypeError`.
+pub(crate) fn it_record_flat(
+    e: &mut Engine,
+    v: Value,
+    allow_prim: bool,
+) -> JsResult<(Value, Value)> {
+    if !it_is_object(e, &v) {
+        // `iterate-string-primitives` (`Iterator.from`) — la
+        // chaîne primitive passe par un **vrai** `Get` de
+        // `@@iterator` (`this` = la primitive, observable dans
+        // le getter) puis `Call` ; tout autre primitif est
+        // rejeté (`TypeError`) comme les non-objets.
+        if allow_prim && matches!(v, Value::Str(_)) {
+            let m = e.get_prop_value(v.clone(), SYM_ITERATOR)?;
+            if !matches!(m, Value::Undefined | Value::Null) {
+                if !e.is_callable(m.clone()) {
+                    return Err(e.type_error("@@iterator is not callable"));
+                }
+                let it = e.call_value(m, v, &[])?;
+                if matches!(it, Value::Obj(_)) {
+                    let nf = e.get_prop_value(it.clone(), "next")?;
+                    return Ok((it, nf));
+                }
+            }
+        }
+        return Err(e.type_error("value is not iterable"));
+    }
+    let m = e.get_prop_value(v.clone(), SYM_ITERATOR)?;
+    if matches!(m, Value::Undefined | Value::Null) {
+        let nf = e.get_prop_value(v.clone(), "next")?;
+        return Ok((v, nf));
+    }
+    if !e.is_callable(m.clone()) {
+        return Err(e.type_error("@@iterator is not callable"));
+    }
+    let it = e.call_value(m, v, &[])?;
+    if !matches!(it, Value::Obj(_)) {
+        return Err(e.type_error("iterator is not an object"));
+    }
+    let nf = e.get_prop_value(it.clone(), "next")?;
+    Ok((it, nf))
+}
+
 /// `CreateRegExpStringIterator` (spec 22.2.9.1, JS-C618) —
 /// objet `%RegExpStringIteratorPrototype%` paresseux : chaque
 /// `next` = `RegExpExec(rx, s)` sur le matcher vivant.
@@ -1188,10 +1304,9 @@ pub(crate) fn it_concat(e: &mut Engine, recs: VecDeque<(Value, Value)>) -> Value
     Value::Obj(id)
 }
 
-/// Crée le helper paresseux — valide le receveur
-/// (`GetIteratorDirect`) puis pose le record + `op`.
-fn it_helper(e: &mut Engine, this: Value, op: IterOp) -> JsResult<Value> {
-    let (source, next) = it_record(e, this)?;
+/// Pose le record déjà formé + `op` dans un nouvel objet
+/// `%IteratorHelperPrototype%`.
+fn it_helper_with(e: &mut Engine, source: Value, next: Value, op: IterOp) -> JsResult<Value> {
     let id = e
         .heap
         .alloc_obj(Object::ordinary(Value::Obj(e.protos.iter_helper)));
@@ -1391,7 +1506,12 @@ fn it_helper_step(e: &mut Engine, st: &mut IterHelperState) -> JsResult<ItOut> {
             let mut out = ItOut::Done;
             while matches!(out, ItOut::Done) {
                 if let Some((isrc, inext)) = st.inner.clone() {
-                    match it_step(e, &isrc, &inext)? {
+                    // Abrupt du step **interne** : seul le
+                    // sous-jacent est fermé (spec —
+                    // `IfAbruptCloseIterator(innerResult, iterated)`
+                    // — l'interne n'est PAS fermé).
+                    let step = it_step(e, &isrc, &inext);
+                    match step_or_close(e, &st.source, step)? {
                         Some(v) => {
                             out = ItOut::Val(v);
                             break;
@@ -1406,7 +1526,10 @@ fn it_helper_step(e: &mut Engine, st: &mut IterHelperState) -> JsResult<ItOut> {
                         st.counter += 1;
                         let m = cb(e, f, v, i);
                         let m = step_or_close(e, &st.source, m)?;
-                        let r = it_record(e, m);
+                        // `GetIteratorFlattenable` — `reject-
+                        // primitives` : un `mapped` non-objet
+                        // (chaîne incluse) → `TypeError`.
+                        let r = it_record_flat(e, m, false);
                         st.inner = Some(step_or_close(e, &st.source, r)?);
                     }
                 }
@@ -1459,19 +1582,26 @@ fn it_helper_step(e: &mut Engine, st: &mut IterHelperState) -> JsResult<ItOut> {
                 ItOut::Val(e.new_array(buf))
             }
         }
-        IterOp::Windows { n, buf } => {
+        IterOp::Windows { n, buf, partial } => {
             while buf.len() < *n {
                 match it_step(e, &st.source, &st.next)? {
                     Some(v) => buf.push_back(v),
                     None => break,
                 }
             }
-            if buf.len() < *n {
-                ItOut::Done
-            } else {
+            if buf.len() == *n {
                 let out = e.new_array(buf.iter().cloned().collect());
                 buf.pop_front();
                 ItOut::Val(out)
+            } else if *partial && !buf.is_empty() {
+                // `"allow-partial"` (spec 8.a.ii) — le reste est
+                // rendu **une fois** puis `done` (pas de
+                // suffixes glissants).
+                let out = e.new_array(buf.iter().cloned().collect());
+                buf.clear();
+                ItOut::Val(out)
+            } else {
+                ItOut::Done
             }
         }
         IterOp::Zip {
@@ -1571,7 +1701,7 @@ fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
                 return Ok(rest);
             }
         }
-        let (src, next) = it_record(e, this)?;
+        let (src, next) = it_record_direct(e, this)?;
         let mut out = Vec::new();
         while let Some(v) = it_step(e, &src, &next)? {
             out.push(v);
@@ -1581,51 +1711,96 @@ fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
     Err(e.type_error("iterator helper on non-iterator"))
 }
 
+/// Étape 2 des méthodes (spec) — `this` doit être un objet ;
+/// le record « placeholder » n'est que `O` : `next` n'est lu
+/// qu'**après** la validation des arguments (`Set iterated to
+/// ? GetIteratorDirect(obj)` — `argument-effect-order`).
+fn it_this_obj(e: &mut Engine, this: &Value) -> JsResult<()> {
+    if !it_is_object(e, this) {
+        return Err(e.type_error("this is not an iterator object"));
+    }
+    Ok(())
+}
+
 fn it_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("mapper is not callable"));
     }
-    it_helper(e, this, IterOp::Map(f))
+    let (src, next) = it_record_direct(e, this)?;
+    it_helper_with(e, src, next, IterOp::Map(f))
 }
 
 fn it_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("predicate is not callable"));
     }
-    it_helper(e, this, IterOp::Filter(f))
+    let (src, next) = it_record_direct(e, this)?;
+    it_helper_with(e, src, next, IterOp::Filter(f))
 }
 
-/// `limit` spec `ToIntegerOrInfinity` — NaN → +0, négatif →
-/// `RangeError` (le `.max(0.0)` clampait silencieusement).
+/// `take`/`drop` `limit` (spec) — `ToNumber` (coercitif), NaN →
+/// `RangeError`, fini > `2**53 - 1` → `RangeError`, puis
+/// `ToIntegerOrInfinity` : négatif → `RangeError`. Les échecs
+/// sont fermés par l'appelant (`IteratorClose`).
 fn it_limit(e: &mut Engine, v: Value, what: &str) -> JsResult<f64> {
     let n = e.to_number(v)?;
     if n.is_nan() {
-        return Ok(0.0);
+        return Err(e.range_error(format!("{what} must not be NaN")));
     }
-    if n < 0.0 {
+    if n.is_finite() && n > 9_007_199_254_740_991.0 {
+        return Err(e.range_error(format!("{what} is too large")));
+    }
+    let i = n.trunc();
+    if i < 0.0 {
         return Err(e.range_error(format!("{what} must be non-negative")));
     }
-    Ok(n)
+    Ok(i)
+}
+
+/// `Return ? IteratorClose(iterated, error)` — ferme le record
+/// puis propage `t`. Spec `IteratorClose` : la complétion de
+/// throw **entrante** l'emporte — l'échec du `return()` interne
+/// est masqué (`argument-validation-failure-close-throws`).
+fn close_then_err(e: &mut Engine, src: &Value, t: Thrown) -> JsResult<Value> {
+    let _ = it_close(e, src);
+    Err(t)
 }
 
 fn it_take(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let n = it_limit(e, arg(args, 0), "take limit")?;
-    it_helper(e, this, IterOp::Take(n))
+    it_this_obj(e, &this)?;
+    let n = match it_limit(e, arg(args, 0), "take limit") {
+        Ok(n) => n,
+        Err(t) => return close_then_err(e, &this, t),
+    };
+    let (src, next) = it_record_direct(e, this)?;
+    it_helper_with(e, src, next, IterOp::Take(n))
 }
 
 fn it_drop(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let n = it_limit(e, arg(args, 0), "drop limit")?;
-    it_helper(e, this, IterOp::Drop(n))
+    it_this_obj(e, &this)?;
+    let n = match it_limit(e, arg(args, 0), "drop limit") {
+        Ok(n) => n,
+        Err(t) => return close_then_err(e, &this, t),
+    };
+    let (src, next) = it_record_direct(e, this)?;
+    it_helper_with(e, src, next, IterOp::Drop(n))
 }
 
 fn it_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("mapper is not callable"));
     }
-    it_helper(e, this, IterOp::FlatMap(f))
+    let (src, next) = it_record_direct(e, this)?;
+    it_helper_with(e, src, next, IterOp::FlatMap(f))
 }
 
 fn it_to_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -1637,11 +1812,13 @@ fn it_to_array(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 /// d'un callback ferme le sous-jacent (`IfAbruptCloseIterator`)
 /// au lieu de l'avoir déjà drainé en entier.
 fn it_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("callback is not callable"));
     }
-    let (src, next) = it_record(e, this)?;
+    let (src, next) = it_record_direct(e, this)?;
     let mut i = 0u64;
     while let Some(v) = it_step(e, &src, &next)? {
         if let Err(t) = e.call_value(f.clone(), Value::Undefined, &[v, Value::Num(i as f64)]) {
@@ -1654,11 +1831,13 @@ fn it_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 fn it_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("reducer is not callable"));
     }
-    let (src, next) = it_record(e, this)?;
+    let (src, next) = it_record_direct(e, this)?;
     let mut acc = match arg(args, 1) {
         Value::Undefined => match it_step(e, &src, &next)? {
             Some(v) => v,
@@ -1684,11 +1863,13 @@ fn it_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 fn it_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("predicate is not callable"));
     }
-    let (src, next) = it_record(e, this)?;
+    let (src, next) = it_record_direct(e, this)?;
     let mut i = 0u64;
     while let Some(v) = it_step(e, &src, &next)? {
         match e.call_value(f.clone(), Value::Undefined, &[v, Value::Num(i as f64)]) {
@@ -1707,11 +1888,13 @@ fn it_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 fn it_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("predicate is not callable"));
     }
-    let (src, next) = it_record(e, this)?;
+    let (src, next) = it_record_direct(e, this)?;
     let mut i = 0u64;
     while let Some(v) = it_step(e, &src, &next)? {
         match e.call_value(f.clone(), Value::Undefined, &[v, Value::Num(i as f64)]) {
@@ -1730,11 +1913,13 @@ fn it_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 fn it_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let f = arg(args, 0);
     if !e.is_callable(f.clone()) {
+        let _ = it_close(e, &this);
         return Err(e.type_error("predicate is not callable"));
     }
-    let (src, next) = it_record(e, this)?;
+    let (src, next) = it_record_direct(e, this)?;
     let mut i = 0u64;
     while let Some(v) = it_step(e, &src, &next)? {
         match e.call_value(
@@ -1759,11 +1944,42 @@ fn it_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 // -- Iterator helpers ES2026 (chunking/sequencing proposals) --------------
 // Même mécanisme paresseux que les helpers ES2025.
 
-/// `iter.includes(v)` — `SameValueZero` (`===` + NaN), early-
-/// exit fermé (`IteratorClose`).
+/// `iter.includes(v, skipped?)` — `SameValueZero` (`===` +
+/// NaN), early-exit fermé (`IteratorClose`).
 fn it_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
     let needle = arg(args, 0);
-    let (src, next) = it_record(e, this)?;
+    // `skipped` n'est **pas** coercé (spec) : non-Number →
+    // `TypeError` (jamais de `valueOf`), NaN/non-entier →
+    // `TypeError`, négatif ou fini > `2**53-1` → `RangeError` —
+    // chaque échec ferme le sous-jacent.
+    let mut left = match arg(args, 1) {
+        Value::Undefined => 0.0,
+        Value::Num(n) if n.is_nan() || (n.is_finite() && n.fract() != 0.0) => {
+            let t = e.type_error("skipped must be an integer");
+            return close_then_err(e, &this, t);
+        }
+        Value::Num(n) if n < 0.0 => {
+            let t = e.range_error("skipped must be non-negative");
+            return close_then_err(e, &this, t);
+        }
+        Value::Num(n) if n.is_finite() && n > 9_007_199_254_740_991.0 => {
+            let t = e.range_error("skipped is too large");
+            return close_then_err(e, &this, t);
+        }
+        Value::Num(n) => n,
+        _ => {
+            let t = e.type_error("skipped must be a number");
+            return close_then_err(e, &this, t);
+        }
+    };
+    let (src, next) = it_record_direct(e, this)?;
+    while left > 0.0 {
+        match it_step(e, &src, &next)? {
+            Some(_) => left -= 1.0,
+            None => return Ok(Value::Bool(false)),
+        }
+    }
     while let Some(v) = it_step(e, &src, &next)? {
         let nan = matches!((v.clone(), needle.clone()), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan());
         if nan || e.strict_eq(&v, &needle) {
@@ -1774,27 +1990,52 @@ fn it_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(false))
 }
 
-/// `iter.join(sep?)` — joint les valeurs (défaut `,`).
+/// `iter.join(sep?)` — joint les valeurs (défaut `,`) ; les
+/// éléments nullish sont joints vides (spec `ToString` —
+/// `""` pour `null`/`undefined`), la coercition du
+/// séparateur ou d'un élément qui jette ferme le sous-jacent.
 fn it_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_this_obj(e, &this)?;
+    // Spec : `ToString(separator)` est observé **avant** le
+    // `get next` du record (`next-lookup-after-separator-
+    // tostring`) ; un abrupt ferme le sous-jacent sans le lire.
     let sep = match arg(args, 0) {
         Value::Undefined => ",".to_string(),
-        v => e.to_js_string(v)?,
+        v => match e.to_js_string(v) {
+            Ok(s) => s,
+            Err(t) => return close_then_err(e, &this, t),
+        },
     };
+    let (src, next) = it_record_direct(e, this)?;
     let mut out = String::new();
-    for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
+    let mut i = 0u64;
+    while let Some(v) = it_step(e, &src, &next)? {
+        let s = match v {
+            Value::Undefined | Value::Null => String::new(),
+            v => match e.to_js_string(v) {
+                Ok(s) => s,
+                Err(t) => return close_then_err(e, &src, t),
+            },
+        };
         if i > 0 {
             out.push_str(&sep);
         }
-        out.push_str(&e.to_js_string(v)?);
+        out.push_str(&s);
+        i += 1;
     }
     Ok(e.str_val(out))
 }
 
-/// Taille de lot `n` : entier ≥ 1, `RangeError` sinon (proposal).
+/// Taille de lot `n` (`chunks`/`windows`) — **non coercée**
+/// (spec) : non-Number, NaN, infini ou non-entier → `TypeError`
+/// ; hors de `1..=2**32-1` → `RangeError`.
 fn it_chunk_size(e: &mut Engine, v: Value) -> JsResult<usize> {
-    let n = e.to_number(v)?;
-    if n.is_nan() || n < 1.0 {
-        return Err(e.range_error("chunk size must be a positive integer"));
+    let n = match v {
+        Value::Num(n) if n.is_finite() && n.fract() == 0.0 => n,
+        _ => return Err(e.type_error("size must be an integer")),
+    };
+    if !(1.0..=4_294_967_295.0).contains(&n) {
+        return Err(e.range_error("size out of range"));
     }
     Ok(n as usize)
 }
@@ -1802,21 +2043,43 @@ fn it_chunk_size(e: &mut Engine, v: Value) -> JsResult<usize> {
 /// `iter.chunks(n)` — lots consécutifs de `n` éléments (le
 /// dernier peut être plus court) → itérateur d'arrays paresseux.
 fn it_chunks(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let n = it_chunk_size(e, arg(args, 0))?;
-    it_helper(e, this, IterOp::Chunks(n))
+    it_this_obj(e, &this)?;
+    let n = match it_chunk_size(e, arg(args, 0)) {
+        Ok(n) => n,
+        Err(t) => return close_then_err(e, &this, t),
+    };
+    let (src, next) = it_record_direct(e, this)?;
+    it_helper_with(e, src, next, IterOp::Chunks(n))
 }
 
-/// `iter.windows(n)` — fenêtres glissantes de `n` (rien si
-/// l'itérateur est plus court que `n`) → itérateur d'arrays
-/// paresseux.
+/// `iter.windows(n, undersized?)` — fenêtres glissantes de `n` ;
+/// `undersized` : `"only-full"` (défaut — rien si la source est
+/// trop courte) ou `"allow-partial"` (le reste est rendu une
+/// fois) → itérateur d'arrays paresseux.
 fn it_windows(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let n = it_chunk_size(e, arg(args, 0))?;
-    it_helper(
+    it_this_obj(e, &this)?;
+    let n = match it_chunk_size(e, arg(args, 0)) {
+        Ok(n) => n,
+        Err(t) => return close_then_err(e, &this, t),
+    };
+    let partial = match arg(args, 1) {
+        Value::Undefined => false,
+        Value::Str(ref s) if s.as_str() == "only-full" => false,
+        Value::Str(ref s) if s.as_str() == "allow-partial" => true,
+        _ => {
+            let t = e.type_error("undersized must be \"only-full\" or \"allow-partial\"");
+            return close_then_err(e, &this, t);
+        }
+    };
+    let (src, next) = it_record_direct(e, this)?;
+    it_helper_with(
         e,
-        this,
+        src,
+        next,
         IterOp::Windows {
             n,
             buf: std::collections::VecDeque::new(),
+            partial,
         },
     )
 }

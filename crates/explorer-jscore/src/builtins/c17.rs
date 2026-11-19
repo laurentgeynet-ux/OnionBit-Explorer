@@ -182,11 +182,24 @@ pub(crate) fn iterator_ctor_get(_e: &mut Engine, _t: Value, args: &[Value]) -> J
 /// `set Iterator.prototype.constructor` (spec) — `CreateData-
 /// PropertyOrThrow(this, "constructor", v)` : data prop propre
 /// `{w:true,e:true,c:true}` qui masque l'accesseur.
-pub(crate) fn iterator_ctor_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    if let Value::Obj(id) = this {
-        e.set_own(id, "constructor", arg(args, 0), true);
+/// `set` des accesseurs `%IteratorPrototype%` — algorithme spec
+/// : receveur non-objet → `TypeError` ; `this` === objet hôte
+/// (équivalent d'une assignation sur une data prop non-writable
+/// en strict) → `TypeError` ; sinon
+/// `CreateDataPropertyOrThrow`/`Set` sur le receveur.
+fn it_accessor_set(e: &mut Engine, this: Value, key: &str, v: Value) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("setter receiver is not an object"));
+    };
+    if id == e.protos.iterator {
+        return Err(e.type_error("cannot set on the Iterator prototype"));
     }
+    e.set_own(id, key, v, true);
     Ok(Value::Undefined)
+}
+
+pub(crate) fn iterator_ctor_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    it_accessor_set(e, this, "constructor", arg(args, 0))
 }
 
 /// `get Iterator.prototype[@@toStringTag]` (spec) — `"Iterator"`.
@@ -194,13 +207,10 @@ pub(crate) fn iterator_tag_get(e: &mut Engine, _t: Value, _a: &[Value]) -> JsRes
     Ok(e.str_val("Iterator"))
 }
 
-/// `set Iterator.prototype[@@toStringTag]` (spec) — data prop
-/// propre `{w:true,e:true,c:true}` masquant l'accesseur.
+/// `set Iterator.prototype[@@toStringTag]` (spec) — mêmes
+/// gardes que [`it_accessor_set`].
 pub(crate) fn iterator_tag_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    if let Value::Obj(id) = this {
-        e.set_own(id, crate::interp::SYM_TO_STRING_TAG, arg(args, 0), true);
-    }
-    Ok(Value::Undefined)
+    it_accessor_set(e, this, crate::interp::SYM_TO_STRING_TAG, arg(args, 0))
 }
 
 /// `it` hérite-t-il `%IteratorPrototype%` ? (spec
@@ -229,7 +239,7 @@ fn it_is_iterator(e: &mut Engine, it: &Value) -> bool {
 /// function`).
 pub(crate) fn iterator_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
-    let (it, next) = crate::collections::it_record(e, v)?;
+    let (it, next) = crate::collections::it_record_flat(e, v, true)?;
     if it_is_iterator(e, &it) {
         return Ok(it);
     }

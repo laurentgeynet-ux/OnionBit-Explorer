@@ -11874,12 +11874,18 @@ impl Engine {
         // (`+obj`/`${obj}` sur des données plain) payait ~19 M
         // d'appels natifs à la page.
         if let Some(o) = self.heap.obj(id) {
+            // `find` (pas `get_own`) — un `get valueOf(){…}` est
+            // un accesseur (`Prop::Acc`, `data_value` → `None`)
+            // que `get_own` masquait : `{get valueOf(){throw}}`
+            // tombait sur le fast-path → `"[object Object]"`
+            // au lieu de lancer le getter (test262
+            // `argument-validation-failure-closes-underlying`).
             if matches!(o.kind, ObjKind::Ordinary)
                 && matches!(o.proto, Value::Obj(p) if p == self.protos.object)
-                && o.get_own(SYM_TO_PRIMITIVE).is_none()
-                && o.get_own("valueOf").is_none()
-                && o.get_own("toString").is_none()
-                && o.get_own(SYM_TO_STRING_TAG).is_none()
+                && o.find(SYM_TO_PRIMITIVE).is_none()
+                && o.find("valueOf").is_none()
+                && o.find("toString").is_none()
+                && o.find(SYM_TO_STRING_TAG).is_none()
             {
                 let s = self.str_val("[object Object]".to_string());
                 return Ok(s);

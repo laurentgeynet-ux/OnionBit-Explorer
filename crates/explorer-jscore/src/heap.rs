@@ -2723,6 +2723,9 @@ pub enum IterOp {
         n: usize,
         /// Valeurs en attente (fenêtre courante).
         buf: std::collections::VecDeque<Value>,
+        /// `"allow-partial"` — les suffixes plus courts que `n`
+        /// sont rendus (`"only-full"` = faux).
+        partial: bool,
     },
     /// `Iterator.zip`/`zipKeyed` (joint-iteration) — les records
     /// `(source, next, done)` des sous-itérateurs sont ouverts à
