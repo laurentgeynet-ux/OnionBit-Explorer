@@ -771,6 +771,41 @@ pub struct GeometryReport {
     pub boxes: Vec<GeomBox>,
 }
 
+/// Style calculé d'un nœud porteur de géométrie — sidecar
+/// d'attribution de [`GeometryReport`] (geodiff → feature
+/// soupçonnée) : le delta `dx/dy/dw/dh` seul ne désigne pas
+/// la prop fautive, le style calculé + la chaîne d'ancêtres
+/// le permettent. `computed` est borné aux props qui font la
+/// géométrie (`ATTRIB_PROPS` côté layout) — les purement
+/// visuelles n'attribuent rien.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StyleNode {
+    /// Index d'arène du nœud (même identifiant que
+    /// `GeomBox::node` — la jointure geodiff se fait là).
+    pub node: u32,
+    /// Plus proche ancêtre de boîte porteur d'un `NodeId` —
+    /// la chaîne de contexte (la cause d'un décalage vit
+    /// presque toujours chez le parent).
+    pub parent: Option<u32>,
+    /// Nom de balise minuscule (`"#text"` hors éléments) —
+    /// le sidecar est auto-descriptif, lisible sans geom.
+    pub tag: String,
+    /// Attribut `id` (vide si absent).
+    pub id: String,
+    /// Premier token de `class` (même troncature que geom).
+    pub cls: String,
+    /// Props d'attribution déclarées/résolues.
+    pub computed: std::collections::BTreeMap<String, String>,
+}
+
+/// Rapport de styles calculés d'une frame posée — sidecar
+/// optionnel de `--geometry` (jointure par `node`).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StylesReport {
+    /// Entrées en pré-ordre de boîtes (même ordre que geom).
+    pub nodes: Vec<StyleNode>,
+}
+
 /// Signet utilisateur.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bookmark {

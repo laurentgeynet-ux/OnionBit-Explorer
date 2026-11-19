@@ -188,6 +188,139 @@ fn rect_of_points(pts: &[(f32, f32)]) -> Rect {
     }
 }
 
+/// Une entrée `NodeId → style calculé` pour l'attribution
+/// terrain (geodiff → feature soupçonnée).
+#[derive(Debug, Clone)]
+pub struct StyleEntry {
+    /// Nœud DOM porteur de la boîte.
+    pub node: NodeId,
+    /// Plus proche ancêtre de boîte porteur d'un `NodeId`
+    /// (chaîne de contexte — la cause d'un décalage vit
+    /// presque toujours chez le parent : sa marge, sa
+    /// largeur, son `display`).
+    pub parent: Option<NodeId>,
+    /// Props d'attribution déclarées/résolues, dans l'ordre
+    /// fixe d'`ATTRIB_PROPS` (déterministe pour le diff).
+    pub computed: Vec<(&'static str, String)>,
+}
+
+/// Props retenues pour l'attribution : celles qui font la
+/// géométrie (boîte, flux, texte, alignement) — pas les
+/// purement visuelles (`color`, `background`…). Un delta
+/// `dx/dy/dw/dh` n'a de coupables que dans cet ensemble.
+const ATTRIB_PROPS: &[&str] = &[
+    "display",
+    "position",
+    "float",
+    "clear",
+    "z-index",
+    "visibility",
+    "box-sizing",
+    "width",
+    "height",
+    "min-width",
+    "min-height",
+    "max-width",
+    "max-height",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "margin-inline-start",
+    "margin-inline-end",
+    "margin-block-start",
+    "margin-block-end",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "padding-inline-start",
+    "padding-inline-end",
+    "padding-block-start",
+    "padding-block-end",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "line-height",
+    "font-size",
+    "font-family",
+    "font-weight",
+    "text-align",
+    "text-indent",
+    "white-space",
+    "vertical-align",
+    "direction",
+    "writing-mode",
+    "overflow",
+    "overflow-x",
+    "overflow-y",
+    "list-style-type",
+    "list-style-position",
+    "list-style-image",
+    "align-content",
+    "align-items",
+    "align-self",
+    "justify-content",
+    "justify-items",
+    "justify-self",
+    "gap",
+    "row-gap",
+    "column-gap",
+    "flex-direction",
+    "flex-wrap",
+    "flex-grow",
+    "flex-shrink",
+    "flex-basis",
+    "order",
+    "grid-template-columns",
+    "grid-template-rows",
+    "grid-column",
+    "grid-row",
+    "column-count",
+    "column-width",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "transform",
+    "contain",
+    "aspect-ratio",
+    "object-fit",
+    "content",
+    "table-layout",
+    "border-collapse",
+    "border-spacing",
+    "caption-side",
+];
+
+/// Parcourt l'arbre posé et rapporte, pour chaque nœud
+/// producteur de géométrie, son style calculé réduit aux
+/// props d'attribution + le nœud de son plus proche ancêtre
+/// de boîte (même marche que [`geometry_dump`] — pile,
+/// pré-ordre, déterministe). Consommé par `geo_diff` pour
+/// transformer un delta en hypothèse de feature.
+#[must_use]
+pub fn style_dump(root: &LayoutBox) -> Vec<StyleEntry> {
+    let mut out: Vec<StyleEntry> = Vec::new();
+    let mut stack = vec![(root, Option::<NodeId>::None)];
+    while let Some((b, parent)) = stack.pop() {
+        if let Some(n) = b.node {
+            out.push(StyleEntry {
+                node: n,
+                parent,
+                computed: ATTRIB_PROPS
+                    .iter()
+                    .filter_map(|p| b.style.get(p).map(|v| (*p, v.to_string())))
+                    .collect(),
+            });
+        }
+        let next_parent = b.node.or(parent);
+        stack.extend(b.children.iter().rev().map(|c| (c, next_parent)));
+    }
+    out
+}
+
 /// Union de deux rects (bord le plus externe par axe).
 fn union(a: Rect, b: Rect) -> Rect {
     let x = a.x.min(b.x);

@@ -31,10 +31,18 @@
 // `ref.boxes ≥ 4000` → `ref_truncated` + `score_partial`
 // (le score ne couvre que l'échantillon sous le cap).
 //
+// `--styles <site.styles.json>` (sidecar `--styles` de
+// `shot`) : enrichit chaque divergent de `class` (famille de
+// feature soupçonnée), `suspect` (zones WPT candidates) et
+// `ancestors` (chaîne de boîtes parentes) ; les styles
+// calculés utiles sont embarqués dans le geodiff — le JSON
+// devient auto-porteur pour la transposition vers WPT.
+//
 // Usage :
 //   node scripts/geo_diff.mjs site.geom.json site.ref.json
 //     [--tol 2] [--out site.geodiff.json] [--top 12]
 //     [--text] [--min-matched 20] [--moved-tol 50]
+//     [--styles site.styles.json]
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -42,7 +50,7 @@ const args = process.argv.slice(2);
 // Options qui consomment la valeur suivante — toute nouvelle
 // option à valeur DOIT être ajoutée ici, sinon sa valeur
 // devient un positionnel (crash ENOENT sur engFile).
-const VALUE_OPTS = new Set(['--tol', '--out', '--top', '--min-matched', '--moved-tol']);
+const VALUE_OPTS = new Set(['--tol', '--out', '--top', '--min-matched', '--moved-tol', '--styles']);
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !VALUE_OPTS.has(args[i - 1]));
 const opt = (n, d) => {
@@ -64,6 +72,76 @@ const keepText = args.includes('--text');
 const eng = JSON.parse(readFileSync(engFile, 'utf8'));
 const ref = JSON.parse(readFileSync(refFile, 'utf8'));
 const key = (b) => `${b.tag}|${b.id || ''}|${b.cls || ''}`;
+
+// ── Sidecar d'attribution (--styles) ─────────────────────
+// `node` → {parent, tag, id, cls, computed}. La jointure
+// avec geom se fait par index d'arène : les GeomBox portent
+// `node` depuis l'origine, il suffisait de le conserver
+// dans les entrées divergentes.
+const stylesPath = opt('styles', '');
+let stylesByNode = null;
+if (stylesPath) {
+  const sr = JSON.parse(readFileSync(stylesPath, 'utf8'));
+  stylesByNode = new Map();
+  for (const n of sr.nodes || []) stylesByNode.set(n.node, n);
+}
+
+// Familles de feature soupçonnées — la forme du delta +
+// la nature de la boîte désignent une zone WPT candidate
+// (pas un verdict : une porte d'entrée de prospection,
+// la transposition reste éditoriale via wpt-scan/fetch).
+const INLINE_TAGS = new Set([
+  'a', 'span', 'em', 'strong', 'code', 'b', 'i', 'u', 'small',
+  'sup', 'sub', 'label', 'abbr', 'cite', 'q', 'samp', 'kbd',
+  'var', 'time', 'mark', 'dfn', '#text',
+]);
+const classify = (tag, d, computed) => {
+  const disp = (computed && computed.display) || '';
+  const displayDirs =
+    disp === 'flex' || disp === 'inline-flex' ? ['css/css-flexbox']
+    : disp === 'grid' || disp === 'inline-grid' ? ['css/css-grid']
+    : disp.startsWith('table') ? ['css/css-tables', 'CSS2/tables']
+    : [];
+  const pack = (cls, dirs) => ({ class: cls, suspect: [...displayDirs, ...dirs] });
+  const ax = { x: Math.abs(d.dx), y: Math.abs(d.dy), w: Math.abs(d.dw), h: Math.abs(d.dh) };
+  // `moved` ne qualifie qu'un déplacement : si la distance
+  // vient de dw/dh la boîte n'a pas bougé — c'est un écart
+  // de taille, classé plus bas (box-size).
+  if (d.moved && Math.max(ax.x, ax.y) >= Math.max(ax.w, ax.h)) {
+    return pack('moved', ['css/css-position', 'css/css-flexbox']);
+  }
+  if (INLINE_TAGS.has(tag) && (ax.x > 0.5 || ax.w > 0.5)) {
+    return pack('inline-measure', ['css/css-text', 'css/css-fonts', 'css/css-inline']);
+  }
+  if (ax.h > 0.1 && ax.x < 0.5 && ax.w < 0.5 && ax.y < 2.5) {
+    return pack('line-metric', ['css/css-inline', 'css/css-text', 'css/css-fonts']);
+  }
+  if (ax.y > 0.5 && ax.x < 0.5 && ax.w < 0.5 && ax.h < 0.5) {
+    return pack('flow-position', ['css/CSS2/margin-padding-clear', 'css/css-box', 'css/css-position']);
+  }
+  if (ax.w > 2 || ax.h > 2) {
+    return pack('box-size', ['css/css-sizing', 'css/css-box', 'css/css-align']);
+  }
+  if (ax.x > 0.5) {
+    return pack('position-x', ['css/css-position', 'css/css-logical', 'css/css-writing-modes']);
+  }
+  return pack('mixed', []);
+};
+
+// Chaîne d'ancêtres bornée (4 niveaux) — la cause d'un
+// décalage vit presque toujours chez un parent (sa marge,
+// sa largeur, son display) : on la lit au lieu de deviner.
+const ancestorsOf = (nodeId, depth) => {
+  const out = [];
+  let cur = stylesByNode && stylesByNode.get(nodeId);
+  while (cur && cur.parent != null && out.length < depth) {
+    const p = stylesByNode.get(cur.parent);
+    if (!p) break;
+    out.push({ node: p.node, key: `${p.tag}|${p.id}|${p.cls}` });
+    cur = p;
+  }
+  return out;
+};
 
 // `#text` : le dump couvre éléments + nœuds texte, la ref
 // n'énumère que des éléments — orphelins garantis sinon.
@@ -91,6 +169,7 @@ const dist = (e, r) => Math.max(
   Math.abs(e.w - r.w), Math.abs(e.h - r.h));
 
 const divergent = [];
+const engOnlyBoxes = [];
 let ok = 0, engOnly = 0, refOnly = 0, moved = 0;
 const allKeys = new Set([...em.keys(), ...rm.keys()]);
 for (const k of allKeys) {
@@ -117,7 +196,16 @@ for (const k of allKeys) {
       const d = dist(e, rb[j]);
       if (d < bestD) { bestD = d; best = j; }
     }
-    if (best < 0) { engOnly++; continue; }
+    if (best < 0) {
+      engOnly++;
+      // Orphelin moteur = boîte produite sans pendant réf —
+      // conservée bornée pour attribution (élément que le
+      // navigateur ne boxifie pas : display/content trou).
+      if (stylesByNode && engOnlyBoxes.length < 500) {
+        engOnlyBoxes.push({ key: k, node: e.node, class: 'orphan-eng' });
+      }
+      continue;
+    }
     used.add(best);
     const r = rb[best];
     // Au-delà de --moved-tol ce n'est plus un nudge mais un
@@ -132,6 +220,15 @@ for (const k of allKeys) {
       },
     };
     if (bestD > movedTol) { dv.moved = true; moved++; }
+    // Attribution (--styles) : famille de feature + zone WPT
+    // candidate + chaîne d'ancêtres de boîtes.
+    if (stylesByNode) {
+      const se = stylesByNode.get(e.node);
+      dv.node = e.node;
+      Object.assign(dv, classify(k.split('|')[0], { ...dv.d, moved: !!dv.moved },
+        se && se.computed));
+      dv.ancestors = ancestorsOf(e.node, 4);
+    }
     divergent.push(dv);
   }
   refOnly += rb.length - used.size;
@@ -145,6 +242,25 @@ for (const dv of divergent) {
   tagAgg[t] = (tagAgg[t] || 0) + 1;
 }
 const pareto = Object.entries(tagAgg).sort((a, b) => b[1] - a[1]).slice(0, topN);
+// Patterns corpus : un delta quasi uniforme sur tous les
+// divergents n'est pas un bug par élément — dw constant =
+// écart de viewport/capture, dh constant = métrique de
+// ligne globale, dy constant = décalage d'un ancêtre
+// commun. Signalé pour ne pas chasser un faux bug.
+const patterns = [];
+if (divergent.length >= 4) {
+  for (const axis of ['dw', 'dh', 'dy', 'dx']) {
+    const hist = {};
+    for (const dv of divergent) {
+      const v = Math.round(dv.d[axis] * 2) / 2;
+      hist[v] = (hist[v] || 0) + 1;
+    }
+    const [v, n] = Object.entries(hist).sort((a, b) => b[1] - a[1])[0];
+    if (Math.abs(v) >= 2 && n >= Math.ceil(divergent.length * 0.6)) {
+      patterns.push({ axis, delta: +v, n, of: divergent.length });
+    }
+  }
+}
 // Mesurabilité relative : une petite page entièrement
 // appariée reste mesurée (example.com : 8 paires / 12 boîtes
 // ref = 66 % couvert) ; seul un faible taux de couverture
@@ -167,8 +283,29 @@ const result = {
   eng_doc: { w: eng.width, h: eng.height },
   ref_doc: { w: ref.doc_w, h: ref.doc_h },
   pareto: pareto.map(([tag, n]) => ({ tag, n })),
+  patterns,
   divergent: divergent.slice(0, 500),
 };
+
+// Attribution (--styles) : map de styles élaguée aux nœuds
+// référencés (divergents + ancêtres + orphelins moteur) —
+// le geodiff devient auto-porteur pour la lecture et la
+// transposition vers WPT, sans recopier tout le sidecar.
+if (stylesByNode) {
+  const used = new Set();
+  for (const dv of result.divergent) {
+    if (dv.node != null) used.add(dv.node);
+    for (const a of dv.ancestors || []) used.add(a.node);
+  }
+  for (const o of engOnlyBoxes) used.add(o.node);
+  const stylesOut = {};
+  for (const n of used) {
+    const s = stylesByNode.get(n);
+    if (s) stylesOut[n] = s;
+  }
+  result.styles = stylesOut;
+  if (engOnlyBoxes.length) result.eng_only_boxes = engOnlyBoxes;
+}
 
 if (out) writeFileSync(out, JSON.stringify(result, null, 1));
 if (!measurable) {

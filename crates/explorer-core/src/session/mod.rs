@@ -2167,6 +2167,50 @@ impl Session {
             boxes,
         })
     }
+
+    /// Rapport d'attribution style calculé (sidecar de
+    /// [`Self::geometry_report`], demande PIPE journalisée) :
+    /// chaque nœud porteur de géométrie reçoit ses props
+    /// géométriques résolues + le nœud de son plus proche
+    /// ancêtre de boîte — `geo_diff --styles` joint par
+    /// `node` pour classifier chaque divergent et remonter
+    /// la chaîne de contexte. `None` dans les mêmes cas que
+    /// [`Self::layout_dump`].
+    #[must_use]
+    pub fn styles_report(&self, tab: TabId) -> Option<StylesReport> {
+        let entry = self.tabs.get(&tab)?;
+        let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
+        let nodes = explorer_layout::style_dump(tree)
+            .into_iter()
+            .map(|e| {
+                let tag = dom.tag_name(e.node).unwrap_or("#text").to_string();
+                let attr = |name: &str| {
+                    dom.attribute_str(e.node, name)
+                        .ok()
+                        .flatten()
+                        .unwrap_or("")
+                        .to_string()
+                };
+                StyleNode {
+                    node: e.node.index(),
+                    parent: e.parent.map(|p| p.index()),
+                    tag,
+                    id: attr("id"),
+                    cls: attr("class")
+                        .split_whitespace()
+                        .next()
+                        .unwrap_or("")
+                        .to_string(),
+                    computed: e
+                        .computed
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), v))
+                        .collect(),
+                }
+            })
+            .collect();
+        Some(StylesReport { nodes })
+    }
 }
 
 /// Fenêtre minimale entre deux écritures disque d'une même

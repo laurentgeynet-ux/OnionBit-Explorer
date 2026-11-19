@@ -67,7 +67,7 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli fetch <url>");
             eprintln!("        explorer-cli layout <fichier|url>");
             eprintln!(
-                "        explorer-cli shot <url> <sortie.png> [LxH] [--report out.json] [--geometry out.json]"
+                "        explorer-cli shot <url> <sortie.png> [LxH] [--report out.json] [--geometry out.json] [--styles out.json]"
             );
             eprintln!("        explorer-cli jprobe <url>");
             eprintln!("        explorer-cli dom <url>");
@@ -244,6 +244,7 @@ struct ShotTail<'a> {
     size: Option<&'a str>,
     report: Option<&'a str>,
     geometry: Option<&'a str>,
+    styles: Option<&'a str>,
 }
 
 fn shot_tail(rest: &[String]) -> Result<ShotTail<'_>, ()> {
@@ -265,6 +266,10 @@ fn shot_tail(rest: &[String]) -> Result<ShotTail<'_>, ()> {
                 out.geometry = Some(rest.get(idx + 1).ok_or(())?.as_str());
                 idx += 2;
             }
+            "--styles" => {
+                out.styles = Some(rest.get(idx + 1).ok_or(())?.as_str());
+                idx += 2;
+            }
             _ => return Err(()),
         }
     }
@@ -277,9 +282,10 @@ async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
         size,
         report,
         geometry,
+        styles,
     }) = shot_tail(rest)
     else {
-        eprintln!("usage : explorer-cli shot <url> <sortie.png> [LxH] [--report out.json] [--geometry out.json]");
+        eprintln!("usage : explorer-cli shot <url> <sortie.png> [LxH] [--report out.json] [--geometry out.json] [--styles out.json]");
         return ExitCode::FAILURE;
     };
     if geometry.is_some() {
@@ -344,7 +350,7 @@ async fn shot(url: &str, out: &str, rest: &[String]) -> ExitCode {
         session.journal_fallbacks(),
         session.journal_classified()
     );
-    emit_shot_reports(&mut session, tab, url, report, geometry);
+    emit_shot_reports(&mut session, tab, url, report, geometry, styles);
     if let Some(png) = session.frame_png(tab) {
         match std::fs::write(out, &png) {
             Ok(()) => {
@@ -375,6 +381,7 @@ fn emit_shot_reports(
     url: &str,
     report: Option<&str>,
     geometry: Option<&str>,
+    styles: Option<&str>,
 ) {
     if let Some(rep) = report {
         let mut doc_h = serde_json::Value::Null;
@@ -402,6 +409,19 @@ fn emit_shot_reports(
                 _ => eprintln!("--geometry : écriture {gpath} impossible"),
             },
             None => eprintln!("--geometry : pas d'arbre posé"),
+        }
+    }
+    // `--styles` : sidecar d'attribution — style calculé
+    // (props géométriques) + parent de boîte par nœud,
+    // jointure `geo_diff --styles` pour classifier chaque
+    // divergent (demande PIPE journalisée).
+    if let Some(spath) = styles {
+        match session.styles_report(tab) {
+            Some(s) => match serde_json::to_string_pretty(&s).map(|j| std::fs::write(spath, j)) {
+                Ok(Ok(())) => {}
+                _ => eprintln!("--styles : écriture {spath} impossible"),
+            },
+            None => eprintln!("--styles : pas d'arbre posé"),
         }
     }
 }

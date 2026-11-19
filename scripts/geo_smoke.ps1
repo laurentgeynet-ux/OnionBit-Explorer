@@ -95,11 +95,13 @@ foreach ($site in $sites) {
         -replace '[^A-Za-z0-9_.-]', '_'
     $png = Join-Path $outDir "$name.png"
     $geom = Join-Path $outDir "$name.geom.json"
+    $sty = Join-Path $outDir "$name.styles.json"
     $ref = Join-Path $refDir "$name.ref.json"
-    Remove-Item $png,$geom,$ref -Force -ErrorAction SilentlyContinue
+    Remove-Item $png,$geom,$sty,$ref -Force -ErrorAction SilentlyContinue
 
-    # 1. Boîtes posées par le moteur.
-    $null = & $cli shot $site $png --geometry $geom 2>&1
+    # 1. Boîtes posées par le moteur + sidecar d'attribution
+    #    (styles calculés — alimente `class`/`ancestors`).
+    $null = & $cli shot $site $png --geometry $geom --styles $sty 2>&1
     if (-not (Test-Path $geom)) {
         Write-Output "  FAIL $site (geometry moteur)"
         $echoues++
@@ -114,9 +116,13 @@ foreach ($site in $sites) {
         continue
     }
 
-    # 3. Diff élément par élément.
+    # 3. Diff élément par élément — enrichi des styles quand
+    #    le sidecar a été produit (attribution `class`/
+    #    `suspect`/`ancestors` dans le geodiff).
     $diff = Join-Path $outDir "$name.geodiff.json"
-    $out = & node (Join-Path $root 'scripts\geo_diff.mjs') $geom $ref --out $diff --top 5 2>&1
+    $diffArgs = @($geom, $ref, '--out', $diff, '--top', '5')
+    if (Test-Path $sty) { $diffArgs += @('--styles', $sty) }
+    $out = & node (Join-Path $root 'scripts\geo_diff.mjs') @diffArgs 2>&1
     $line = ($out | Select-String -Pattern 'divergents|matched|hors-mesure' | Select-Object -First 1)
     Write-Output ("  DIFF {0}  {1}" -f $site, $(if ($line) { $line.Line.Trim() } else { 'n/a' }))
 

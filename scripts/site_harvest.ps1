@@ -200,6 +200,11 @@ if ($reportOk) {
 # `NodeId→rect` joint (tag,id,cls), même détection.
 $geomOk = $usage -match '--geometry'
 if ($geomOk) { Write-Output 'géométrie : --geometry détecté' }
+# Sidecar d'attribution styles calculés (geodiff enrichi —
+# `class`/`suspect`/`ancestors` par divergent). Même garde
+# d'usage : présent seulement si le binaire le connaît.
+$stylesOk = $usage -match '--styles'
+if ($stylesOk) { Write-Output 'styles : --styles détecté' }
 
 # Viewport radar — même convention que site_smoke (étape 129).
 $env:EXPLORER_VIEWPORT = $Viewport
@@ -347,9 +352,11 @@ foreach ($site in $sites) {
     if ($Mode -eq 'cli') {
         $rep = Join-Path $OutDir "$name.census.json"
         $geo = Join-Path $OutDir "$name.geom.json"
+        $sty = Join-Path $OutDir "$name.styles.json"
         $argList = @('shot', $site, $png, $Viewport)
         if ($reportOk) { $argList += @('--report', $rep) }
         if ($geomOk) { $argList += @('--geometry', $geo) }
+        if ($stylesOk) { $argList += @('--styles', $sty) }
         # Timeout dur : un TLS suspendu ne doit pas figer la
         # récolte — kill propre, marqué `timeout`.
         $p = Start-Process -FilePath $cli -ArgumentList $argList `
@@ -388,6 +395,7 @@ foreach ($site in $sites) {
             } catch { }
         }
         if (Test-Path $geo) { $rec.geom = "$name.geom.json" }
+        if (Test-Path $sty) { $rec.styles = "$name.styles.json" }
     } else {
         # Mode daemon : onglet -> viewport -> navigate -> frame
         # -> layout -> mem -> close. doc_h réel exposé par
@@ -465,8 +473,11 @@ foreach ($site in $sites) {
         $refj = Join-Path $refOut "$name.ref.json"
         if ((Test-Path $geomFile) -and (Test-Path $refj)) {
             $gd = Join-Path $OutDir "$name.geodiff.json"
+            $gdArgs = @($geomFile, $refj, '--out', $gd)
+            $styFile = Join-Path $OutDir "$name.styles.json"
+            if (Test-Path $styFile) { $gdArgs += @('--styles', $styFile) }
             $gout = & node (Join-Path $root 'scripts\geo_diff.mjs') `
-                $geomFile $refj --out $gd 2>&1 | Out-String
+                @gdArgs 2>&1 | Out-String
             if ($gout -match 'geo : ([\d.—]+)%') {
                 if ($Matches[1] -ne '—') {
                     $rec.geo_pct = [double]$Matches[1]

@@ -8227,6 +8227,24 @@ MCP = adaptateur, jamais la base.
   mesure inaugurale 83,7 % divergents, artefacts
   `Explorer-data/vols/vitrine/`. Verrou :
   `dir_transport_replays_youtube_flight`.
+- [x] **Étape 315. Attribution d'anomalies terrain : sidecar
+  `--styles` + `geo_diff` enrichi (demande équipe vols)**
+  (`explorer-layout` `style_dump` + `explorer-core`
+  `styles_report` + `explorer-cli --styles` +
+  `scripts/geo_diff.mjs --styles` + `geo_smoke.ps1` +
+  `site_harvest.ps1`). Les geodiff localisaient sans
+  attribuer : chaque divergent porte désormais `class`
+  (hypothèse de famille — `inline-measure`/`box-size`/
+  `line-metric`/`flow-position`/`moved`/`orphan-eng`),
+  `suspect` (dossiers WPT candidats pour `wpt-scan`),
+  `ancestors` (chaîne `key`+`node` bornée 4 niveaux) ;
+  `patterns` signale les deltas uniformes (viewport,
+  métrique de ligne, ancêtre commun) ; `styles` embarque
+  la map élaguée — le geodiff devient auto-porteur pour
+  la lecture et la transposition WPT. `moved` requalifié
+  : déplacement seul, un `dw`/`dh` dominant est un
+  `box-size`. Verdict/score inchangés. Verrou :
+  `style_dump_style_calcule_et_parent`.
 - [x] **Étape 314. `scan_wpt.ps1` + `wpt-scan` : prospection
   du `MANIFEST.json` officiel du WPT** (`scripts/` +
   `explorer-cli` — ADR-0010, outillage de curation).
