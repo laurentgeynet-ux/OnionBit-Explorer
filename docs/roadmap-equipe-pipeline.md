@@ -4912,6 +4912,34 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   Reliquat consigne : `--r-globalnav-text-zoom-scale:
   NaN` pose par le JS apple propage des `NaN` dans les
   positions (89 boites — piste jscore, hors scope).
+- [x] **R-313 — Hauteur stretchée `top`+`bottom` posee avant
+  le flot du contenu : flex/grid/% descendants d'un absolu
+  `height:auto` voient la taille definie — anomalie terrain
+  openstreetmap.org soldee** (`explorer-layout`, pilotage
+  vol/geodiff vol 898). **Signature** : `div#map` eng
+  1366x0 a y=55 vs ref 1366x845 (dh −845). **Chaine** :
+  `#content{position:absolute;top:55px;bottom:0;display:
+  flex;flex-direction:row}` s'etirait bien a 845 px
+  (mecanisme sain) mais sa hauteur n'etait appliquee a
+  `rect.height` qu'**apres** `layout_block` — les items
+  flex coulaient avec `h_css=None` : `align-items:stretch`
+  sans taille cross → `#map` a hauteur de contenu (0, JS
+  Leaflet non demarre). **Fix** : `abs_stretch_content_h`
+  calcule la hauteur contenu stretchée (border-box −
+  chassis, ou border-box brute sous `box-sizing:border-box`)
+  et l'ecrit dans le style avant `layout_block`. **Fix
+  annexe colonne** : un item `flex-basis:%`/px explicite en
+  direction `column` n'ecrivait `height` que si la cible
+  differait de la **base** — or `flex-basis` ne touche pas
+  le rect : comparaison corrigee contre la hauteur
+  **mesuree** (passe 0). **Mesure (site reel)** : `#map`
+  1366x0 → 1366x845 a (0,55) — identique a la reference
+  Chrome ; repro mini row 845, column `flex-basis:50%` →
+  422,5. Verrou : `abs_stretch_alimente_flex_items` (row
+  stretch + column basis %). Le §B-176 (erreur typecheck
+  Bootstrap tooltip) reste un mur JS distinct — il prive
+  la carte de ses tuiles mais n'effondre plus le
+  conteneur.
 - [x] **R-311 — Flottants nichés dans `display:inline` hissés
   au BFC englobant (§9.2.1.1 étendue) — anomalie terrain
   csszengarden soldée** (`explorer-layout`, pilotage

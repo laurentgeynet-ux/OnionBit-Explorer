@@ -3984,6 +3984,37 @@ struct AbsGeo {
     explicit_w: bool,
 }
 
+/// §10.6.4 : hauteur **contenu** de la boîte stretchée par
+/// `top`+`bottom` (`height` auto), à poser AVANT le flot du
+/// contenu pour que flex/grid/% descendants la voient
+/// définie. `None` si pas de stretch ou `height` déjà fixée.
+fn abs_stretch_content_h(
+    geo: &AbsGeo,
+    cst: &ComputedStyle,
+    target: Rect,
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> Option<f32> {
+    let (tv, bv) = (geo.t?, geo.b?);
+    if cst
+        .get("height")
+        .is_some_and(|h| !h.is_empty() && h != "auto")
+    {
+        return None;
+    }
+    let chassis_v = side_px(cst, "padding-top", cb_w, fs, ctx, 0.0)
+        + side_px(cst, "padding-bottom", cb_w, fs, ctx, 0.0)
+        + border_px(cst, "border-top-width", cb_w, fs, ctx)
+        + border_px(cst, "border-bottom-width", cb_w, fs, ctx);
+    let border_h = (target.height - tv - bv - geo.mt - geo.mb).max(0.0);
+    Some(if cst.get("box-sizing") == Some("border-box") {
+        border_h
+    } else {
+        (border_h - chassis_v).max(0.0)
+    })
+}
+
 /// §10.3.7 : les marges `auto` d'une boîte positionnée sont
 /// résolues ici et écrites dans le style — `layout_block`
 /// leur appliquerait sinon le centrage §10.3.3 du flux
@@ -4323,6 +4354,18 @@ fn resolve_absolutes_impl(
         } else {
             geo.cw + geo.ml + geo.mr
         };
+        // §10.6.4 — `top`+`bottom`+`height:auto` : la hauteur
+        // stretchée est DÉFINIE avant le flot du contenu —
+        // sans la poser en amont, les descendants `display:
+        // flex|grid` et les tailles en % coulaient avec
+        // `h_css=None` : `align-items:stretch`/`flex-basis`
+        // ne voyaient aucune taille cross et l'item
+        // retombait à sa hauteur de contenu (vol OSM :
+        // `#map` flex-item de `#content{position:absolute;
+        // top:55px;bottom:0}` → h=0 au lieu de 845).
+        if let Some(h) = abs_stretch_content_h(&geo, &cst, target, cb_w, cfs, ctx) {
+            child.style.set("height", &format!("{h}px"));
+        }
         layout_block(
             child,
             geo.cx,

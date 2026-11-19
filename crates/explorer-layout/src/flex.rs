@@ -1021,11 +1021,16 @@ pub(crate) fn flow_flex_children(
                 }
             }
             // Hauteur cible écrite quand elle diffère de la
-            // base mesurée — `layout_block` reproduit alors
-            // la border box exacte (content-box §9.7 ; valeur
-            // border-box équivalente pour `border-box`, R-43).
+            // hauteur **mesurée** (passe 0) — pas de la base
+            // théorique : `flex-basis` n'est pas `height`, une
+            // base déclarée laisse le rect à sa hauteur de
+            // contenu si on saute l'écriture (vol OSM :
+            // `flex-basis:50%` colonne → item jamais étiré).
+            // `layout_block` reproduit alors la border box
+            // exacte (content-box §9.7 ; valeur border-box
+            // équivalente pour `border-box`, R-43).
             for (lk, &k) in line.iter().enumerate() {
-                if (sizes_l[lk] - bases[k]).abs() > 0.01 {
+                if (sizes_l[lk] - measured[k]).abs() > 0.01 {
                     let i = order_idx[k];
                     let c = &mut bx.children[i];
                     let h = if c.style.get("box-sizing") == Some("border-box") {
