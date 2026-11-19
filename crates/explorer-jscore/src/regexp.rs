@@ -285,7 +285,8 @@ impl JsRegExp {
         // `v` ≈ `u` côté moteur (unicodeSets non implémenté) —
         // même traduction unicode.
         let uni = unicode || unicode_sets;
-        let (translated, synth, renamed) = translate_pattern(source, uni, ignore_case && !uni)?;
+        let (translated, synth, renamed) =
+            translate_pattern(source, uni, unicode_sets, dot_all, ignore_case && !uni)?;
         pat.push_str(&translated);
         // Domaine sentinelle : le pattern traduit porte des
         // chars `F0000..=F0800` (surrogates du source ou d'un
@@ -537,7 +538,14 @@ type TranslateOut = (
 ///
 /// Renvoie `(pattern traduit, noms synthétiques `__eN` anonymes,
 /// renommages `synth → orig` des noms non-ASCII JS-C624)`.
-fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<TranslateOut, String> {
+#[allow(clippy::fn_params_excessive_bools)]
+fn translate_pattern(
+    src: &str,
+    unicode: bool,
+    vsets: bool,
+    dotall: bool,
+    fold: bool,
+) -> Result<TranslateOut, String> {
     let cs: Vec<char> = src.chars().collect();
     let (all_names, n_groups, has_decimal) = prescan(&cs);
     // JS-C269 : `fancy_regex` refuse `\N` dès qu'un groupe nommé
@@ -549,6 +557,8 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<TranslateOu
     let need_synth = !all_names.is_empty() && has_decimal;
     let mut t = Trans {
         unicode,
+        vsets,
+        dotall,
         fold,
         n_groups,
         names: std::collections::BTreeSet::new(),
@@ -642,6 +652,18 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<TranslateOu
                 continue;
             }
             let (frag, next) = t.escape(&cs, i, src)?;
+            // JS-C625 : `\s` JS = `White_Space` Unicode **+ FEFF**
+            // (BOM/ZWNBSP) — le `\s` backend est le set Unicode
+            // sans FEFF. Hors classe : atome classe élargie ;
+            // en classe : membre `\x{feff}` supplémentaire
+            // (couvre `[^\s]` = `\S` correctement). `\S` nu en
+            // classe reste la limite connue (union non-négative).
+            let frag = match frag.as_str() {
+                "\\s" if in_class => "\\s\\x{feff}".to_string(),
+                "\\s" => "[\\s\\x{feff}]".to_string(),
+                "\\S" if !in_class => "[^\\s\\x{feff}]".to_string(),
+                _ => frag,
+            };
             if in_class {
                 let atom = class_atom_of(&cs, i);
                 if let ClassAtom::Char(cp) = atom {
@@ -791,6 +813,16 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<TranslateOu
             continue;
         }
         match c {
+            '[' if !in_class && t.vsets => {
+                // JS-C625 : grammaire `v` — `v_class` parse la
+                // classe entière (imbrication/ops/strings) et
+                // rend un atome complet.
+                let (frag, next) = v_class(&mut t, &cs, i, src)?;
+                out.push_str(&frag);
+                last_atom = true;
+                i = next;
+                continue;
+            }
             '[' if !in_class => {
                 in_class = true;
                 class_prev = None;
@@ -1096,7 +1128,14 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<TranslateOu
             }
             '.' if !in_class => {
                 last_atom = true;
-                out.push('.');
+                // JS-C625 : `.` exclut les 4 `LineTerminator` —
+                // le `.` fancy n'exclut que `\n`. Sous `s` :
+                // tout char (`[\s\S]`).
+                if t.dotall {
+                    out.push_str("[\\s\\S]");
+                } else {
+                    out.push_str("[^\\n\\r\u{2028}\u{2029}]");
+                }
             }
             _ => {
                 if in_class && !unicode && (c as u32) >= 0x1_0000 {
@@ -1155,8 +1194,14 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<TranslateOu
 }
 
 /// État partagé du traducteur : flags, tables de groupes.
+#[allow(clippy::struct_excessive_bools)]
 struct Trans {
     unicode: bool,
+    /// JS-C625 : flag `v` — classes à grammaire étendue
+    /// (`v_class` : `[` imbriqué, `&&`, `--`, `\q{…}`).
+    vsets: bool,
+    /// Flag `s` — `.` matche aussi les `LineTerminator`.
+    dotall: bool,
     /// `i` en mode non-`u` : folding `ToUppercase` simple émis à la
     /// main (le `i` du backend est un folding Unicode complet).
     fold: bool,
@@ -1222,6 +1267,546 @@ impl Trans {
 /// une backref nommée peut précéder sa déclaration en JS) + la
 /// présence d'un échappement `\`+chiffre hors classe (backref
 /// décimale plausible — sur-approximation bénigne, JS-C269).
+// ==================== JS-C625 : classes `v` ====================
+//
+// Sous-grammaire `ClassSetExpression` du flag `v` : classes
+// imbriquées `[[…]]`, intersection `A&&B`, différence `A--B`,
+// strings `\q{a|bc}`, ponctuateurs réservés (singles `(){}|/-`
+// exigent l'échappement, doubles `&& !! ## … ~~` interdits).
+// Abaissé vers fancy-regex : `A--B` → `(?![B])[A]`,
+// `A&&B` → `(?=[B])[A]`, strings → alternance triée par
+// longueur décroissante. `[^…]` porteur de strings : les
+// strings 1-char rejoignent le corps nié, les multi-chars
+// s'évanouissent — le complément fournit toujours un membre
+// 1-char à la position (les strings exclues ≥2 chars ne
+// peuvent jamais être consommées par l'atome nié).
+/// Partie « 1 char » d'un set `v` évalué.
+enum VPart {
+    /// Aucun char dans le set.
+    Empty,
+    /// Corps de classe — fragments insérables dans `[…]`
+    /// (fusionnable en union et opérande `&&`/`--` native).
+    Body(String),
+    /// Corps **nié** `[^…]` — atom `[^b]`, opérande `&&`
+    /// imbriqué, non fusionnable en union.
+    Neg(String),
+    /// Atome complet (composite avec lookarounds — ne peut
+    /// plus servir d'opérande de classe).
+    Atom(String),
+}
+
+impl VPart {
+    /// Le fragment atome consommant un char du set —
+    /// toujours quantifiable (`[^\s\S]` pour le vide : une
+    /// lookahead `(?!x)` n'est pas une cible de répétition
+    /// valide côté backend).
+    fn atom(&self) -> String {
+        match self {
+            VPart::Empty => "[^\\s\\S]".to_string(),
+            VPart::Body(b) => format!("[{b}]"),
+            VPart::Neg(b) => format!("[^{b}]"),
+            VPart::Atom(a) => a.clone(),
+        }
+    }
+    fn is_empty(&self) -> bool {
+        matches!(self, VPart::Empty)
+    }
+}
+
+/// Domaine des strings d'un set `v` (`\q{…}`).
+enum VStrings {
+    /// Strings énumérées — `(fragment échappé, len chars)`.
+    Finite(Vec<(String, usize)>),
+    /// Complément : toutes les strings sauf celles listées —
+    /// produit d'une classe nichée niée porteuse de `\q{…}`.
+    Complement(Vec<(String, usize)>),
+}
+
+/// Set `v` évalué — chars (part) + strings (`\q{…}`).
+struct VSet {
+    part: VPart,
+    strings: VStrings,
+}
+
+impl VSet {
+    fn empty() -> VSet {
+        VSet {
+            part: VPart::Empty,
+            strings: VStrings::Finite(Vec::new()),
+        }
+    }
+    /// `\q{…}` : une string de **1 char est un char** (même
+    /// élément de set — `[\d&&\q{0}]` matche "0") → elle
+    /// rejoint le `Body` ; les ≥2 restent des strings.
+    fn with_strings(strings: Vec<(String, usize)>) -> VSet {
+        let mut body = String::new();
+        let mut strs = Vec::new();
+        for (f, len) in strings {
+            if len == 1 {
+                body.push_str(&f);
+            } else {
+                strs.push((f, len));
+            }
+        }
+        VSet {
+            part: if body.is_empty() {
+                VPart::Empty
+            } else {
+                VPart::Body(body)
+            },
+            strings: VStrings::Finite(strs),
+        }
+    }
+}
+
+/// Union de parties char : `Body`+`Body` concatène, toute
+/// autre paire passe en alternance.
+fn v_part_union(a: VPart, b: VPart) -> VPart {
+    match (a, b) {
+        (VPart::Empty, x) | (x, VPart::Empty) => x,
+        (VPart::Body(mut x), VPart::Body(y)) => {
+            x.push_str(&y);
+            VPart::Body(x)
+        }
+        (a, b) => VPart::Atom(format!("(?:{}|{})", a.atom(), b.atom())),
+    }
+}
+
+/// `A ∪ B` — union de strings : `Finite`+`Finite` concatène
+/// dédup ; un `Complement` absorbe tout sauf ce qu'il exclut.
+fn v_union(mut a: VSet, b: VSet) -> VSet {
+    a.part = v_part_union(a.part, b.part);
+    a.strings = match (a.strings, b.strings) {
+        (VStrings::Finite(mut x), VStrings::Finite(y)) => {
+            for s in y {
+                if !x.iter().any(|z| z.0 == s.0) {
+                    x.push(s);
+                }
+            }
+            VStrings::Finite(x)
+        }
+        (VStrings::Complement(mut x), VStrings::Finite(y)) => {
+            x.retain(|e| !y.iter().any(|z| z.0 == e.0));
+            VStrings::Complement(x)
+        }
+        (VStrings::Finite(x), VStrings::Complement(mut y)) => {
+            y.retain(|e| !x.iter().any(|z| z.0 == e.0));
+            VStrings::Complement(y)
+        }
+        (VStrings::Complement(mut x), VStrings::Complement(y)) => {
+            x.retain(|e| y.iter().any(|z| z.0 == e.0));
+            VStrings::Complement(x)
+        }
+    };
+    a
+}
+
+/// `A -- B` : `Body`/`Neg` descendent en syntaxe de classe
+/// **native** (`a && [^b]` — quantifiable et fusionnable en
+/// union) ; seul un `Atom` impose le repli lookahead
+/// `(?![B])[A]` (non quantifiable côté backend — limite
+/// connue). Strings : égalité exacte (un char ≠ sa string
+/// 1-unit, spec).
+fn v_diff(mut a: VSet, b: VSet) -> VSet {
+    a.strings = match (a.strings, b.strings) {
+        (VStrings::Finite(mut x), VStrings::Finite(y)) => {
+            x.retain(|e| !y.iter().any(|z| z.0 == e.0));
+            VStrings::Finite(x)
+        }
+        // B complément = « tout sauf excluded » — ne restent
+        // de A que les strings que B exclut.
+        (VStrings::Finite(mut x), VStrings::Complement(y)) => {
+            x.retain(|e| y.iter().any(|z| z.0 == e.0));
+            VStrings::Finite(x)
+        }
+        (s @ VStrings::Complement(_), _) => s,
+    };
+    if a.part.is_empty() || b.part.is_empty() {
+        return a;
+    }
+    a.part = match (a.part, b.part) {
+        // `a -- b` = `a ∩ ~b` → `a && [^b]` natif.
+        (VPart::Body(x), VPart::Body(y)) => VPart::Body(format!("{x}&&[^{y}]")),
+        // `a -- [^y]` = `a ∩ y` → `a && [y]`.
+        (VPart::Body(x), VPart::Neg(y)) => VPart::Body(format!("{x}&&[{y}]")),
+        // `[^x] -- y` = `~x ∩ ~y` = `~(x ∪ y)`.
+        (VPart::Neg(x), VPart::Body(y)) => VPart::Neg(format!("{x}{y}")),
+        // `[^x] -- [^y]` = `~x ∩ y` = `y && [^x]`.
+        (VPart::Neg(x), VPart::Neg(y)) => VPart::Body(format!("{y}&&[^{x}]")),
+        (a, b) => VPart::Atom(format!("(?!{}){}", b.atom(), a.atom())),
+    };
+    a
+}
+
+/// `A && B` : `Body`/`Neg` descendent en `a && [b]` natif ;
+/// seul un `Atom` impose le repli `(?=[B])[A]`. Strings =
+/// intersection exacte.
+fn v_inter(mut a: VSet, b: VSet) -> VSet {
+    a.strings = match (a.strings, b.strings) {
+        (VStrings::Finite(mut x), VStrings::Finite(y)) => {
+            x.retain(|e| y.iter().any(|z| z.0 == e.0));
+            VStrings::Finite(x)
+        }
+        (VStrings::Finite(mut x), VStrings::Complement(y))
+        | (VStrings::Complement(y), VStrings::Finite(mut x)) => {
+            x.retain(|e| !y.iter().any(|z| z.0 == e.0));
+            VStrings::Finite(x)
+        }
+        (VStrings::Complement(mut x), VStrings::Complement(y)) => {
+            x.extend(y);
+            VStrings::Complement(x)
+        }
+    };
+    if a.part.is_empty() || b.part.is_empty() {
+        a.part = VPart::Empty;
+        return a;
+    }
+    a.part = match (a.part, b.part) {
+        (VPart::Body(x), VPart::Body(y)) => VPart::Body(format!("{x}&&[{y}]")),
+        (VPart::Body(x), VPart::Neg(y)) => VPart::Body(format!("{x}&&[^{y}]")),
+        (VPart::Neg(x), VPart::Body(y)) => VPart::Body(format!("{y}&&[^{x}]")),
+        // `~x ∩ ~y` = `~(x ∪ y)`.
+        (VPart::Neg(x), VPart::Neg(y)) => VPart::Neg(format!("{x}{y}")),
+        (a, b) => VPart::Atom(format!("(?={}){}", b.atom(), a.atom())),
+    };
+    a
+}
+
+/// Complément d'un set — opérande `[^…]` niché ou classe de
+/// tête niée : chars → `Neg`/`Body`/`Atom`, strings → domaine
+/// `Complement`.
+fn v_negate_operand(set: VSet) -> VSet {
+    // Le complément devient `Neg` (`[^…]` : atom `[^b]`,
+    // opérande `&&`/`--` imbriqué) — pas un `Body` : concaténé
+    // dans une union, le `^` tomberait en milieu de classe
+    // (`[^0-9][a]` émis `[^0-9a]` = complément de l'union ≠
+    // union des compléments). Les strings 1-char ne touchent
+    // pas le domaine chars : chars et strings sont des
+    // éléments *distincts* (spec) — `[^\q{a}x]` matche 'a'.
+    let part = match &set.part {
+        // Complément du vide = tout char — `Body` fusionnable.
+        VPart::Empty => VPart::Body("\\s\\S".to_string()),
+        VPart::Body(b) => VPart::Neg(b.clone()),
+        VPart::Neg(n) => VPart::Body(n.clone()),
+        // Atome composite : `(?!A)[\s\S]`.
+        VPart::Atom(a) => VPart::Atom(format!("(?:(?!{a})[\\s\\S])")),
+    };
+    let strings = match &set.strings {
+        VStrings::Finite(ss) => VStrings::Complement(ss.clone()),
+        VStrings::Complement(ss) => VStrings::Finite(ss.clone()),
+    };
+    VSet { part, strings }
+}
+
+/// Char littéral en position pattern — les métachars fancy
+/// sont échappés (`\q{…}` assemble des fragments).
+fn v_lit_char(c: char) -> String {
+    match c {
+        '\\' | '.' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|'
+        | '/' => format!("\\{c}"),
+        _ => c.to_string(),
+    }
+}
+
+/// Strings `\p{Emoji_Keycap_Sequence}` — propriété « de
+/// strings » finie (12 membres) non connue du backend.
+fn emoji_keycap_strings() -> Vec<(String, usize)> {
+    // `*`/`#` échappés via `v_lit_char` — `|*\u{fe0f}…` nu =
+    // quantificateur sans cible côté backend.
+    "0123456789#*"
+        .chars()
+        // Format `\x{…}` aligné sur `escape()` — l'intersection/
+        // différence de strings compare les fragments textuellement.
+        .map(|c| (format!("{}\\x{{fe0f}}\\x{{20e3}}", v_lit_char(c)), 3))
+        .collect()
+}
+
+/// Opérateur d'ensemble rencontré entre opérandes.
+#[derive(Clone, Copy, PartialEq)]
+enum VOp {
+    Inter,
+    Diff,
+}
+
+/// Parse `\q{…}` — items `|`-séparés de chars et
+/// `CharacterEscape`s. `i` = index du `\`.
+fn v_q_strings(
+    t: &mut Trans,
+    cs: &[char],
+    i: usize,
+    src: &str,
+) -> Result<(Vec<(String, usize)>, usize), String> {
+    let mut j = i + 3; // après `\q{`
+    let mut strings = Vec::new();
+    let mut frag = String::new();
+    let mut len = 0usize;
+    loop {
+        match cs.get(j) {
+            None => return Err(format!("unterminated \\q{{…}} in /{src}/")),
+            Some('}') => {
+                strings.push((frag, len));
+                return Ok((strings, j + 1));
+            }
+            Some('|') => {
+                strings.push((std::mem::take(&mut frag), len));
+                len = 0;
+                j += 1;
+            }
+            Some('\\') => {
+                // `\q{…}` : `CharacterEscape` seulement — les
+                // `CharacterClassEscape` (`\d`, `\s`, `\w`,
+                // `\p{…}` et négations) sont un early error.
+                if let Some('d' | 'D' | 's' | 'S' | 'w' | 'W' | 'p' | 'P' | 'b' | 'B') =
+                    cs.get(j + 1)
+                {
+                    return Err(format!("class escape in \\q{{…}} of /{src}/"));
+                }
+                let (f, next) = t.escape(cs, j, src)?;
+                len += 1;
+                frag.push_str(&f);
+                j = next;
+            }
+            Some(&c) => {
+                frag.push_str(&v_lit_char(c));
+                len += 1;
+                j += 1;
+            }
+        }
+    }
+}
+
+/// Parse un `ClassSetOperand` : `[…]` niché, `\q{…}`,
+/// `CharacterClassEscape`, `ClassSetCharacter`. Retourne
+/// `(set, char unique si opérande char, index suivant)`.
+fn v_operand(
+    t: &mut Trans,
+    cs: &[char],
+    i: usize,
+    src: &str,
+) -> Result<(VSet, Option<u32>, usize), String> {
+    match cs.get(i) {
+        Some('[') => {
+            // Classe nichée — récursion complète (`^` possible).
+            let (set, next) = v_set(t, cs, i, src)?;
+            Ok((set, None, next))
+        }
+        Some('\\') => {
+            if cs.get(i + 1) == Some(&'q') {
+                if cs.get(i + 2) == Some(&'{') {
+                    let (ss, next) = v_q_strings(t, cs, i, src)?;
+                    return Ok((VSet::with_strings(ss), None, next));
+                }
+                return Err(format!("malformed \\q in `v` regex /{src}/"));
+            }
+            if matches!(cs.get(i + 1), Some('p' | 'P')) && cs.get(i + 2) == Some(&'{') {
+                // `\p{Emoji_Keycap_Sequence}` — strings finies.
+                let body: String = cs[i + 3..].iter().take_while(|&&c| c != '}').collect();
+                if body == "Emoji_Keycap_Sequence" && cs[i + 1] == 'p' {
+                    return Ok((
+                        VSet::with_strings(emoji_keycap_strings()),
+                        None,
+                        i + 3 + body.len() + 1,
+                    ));
+                }
+            }
+            let (frag, next) = t.escape(cs, i, src)?;
+            // JS-C625 : `\s` JS inclut FEFF (mémo traduction).
+            let frag = if frag == "\\s" {
+                "\\s\\x{feff}".to_string()
+            } else {
+                frag
+            };
+            let cp = frag_char(&frag).map(u32::from);
+            Ok((
+                VSet {
+                    part: VPart::Body(frag),
+                    strings: VStrings::Finite(Vec::new()),
+                },
+                cp,
+                next,
+            ))
+        }
+        Some(&c) => {
+            // Réservés `v` : singles `(){}|/-` exigent
+            // l'échappement (`[`/`]` gérés en amont) ; les
+            // doubles ponctuateurs `!! ## … ~~` sont interdits.
+            const DP: &str = "&!#$%*+,.:;<=>?@^`~";
+            match c {
+                '(' | ')' | '{' | '}' | '/' | '|' => {
+                    return Err(format!("unescaped `{c}` in `v` class /{src}/"));
+                }
+                '-' => {
+                    return Err(format!("unescaped `-` in `v` class /{src}/"));
+                }
+                _ => {}
+            }
+            if DP.contains(c) && cs.get(i + 1) == Some(&c) {
+                return Err(format!("reserved `{c}{c}` in `v` class /{src}/"));
+            }
+            let mut body = String::new();
+            class_char(&mut body, u32::from(c));
+            Ok((
+                VSet {
+                    part: VPart::Body(body),
+                    strings: VStrings::Finite(Vec::new()),
+                },
+                Some(u32::from(c)),
+                i + 1,
+            ))
+        }
+        None => Err(format!("unterminated `v` class in /{src}/")),
+    }
+}
+
+/// Parse `ClassSetExpression` jusqu'au `]` fermant —
+/// retourne le set et l'index du `]`. `i` = premier membre.
+fn v_expr(t: &mut Trans, cs: &[char], i: usize, src: &str) -> Result<(VSet, usize), String> {
+    let mut acc = VSet::empty();
+    let mut op: Option<VOp> = None;
+    let mut members = 0usize;
+    // Opérateur consommé : un opérande est exigé ensuite
+    // (`[a&&]`/`[a&&b c]`/`[&&a]` → SyntaxError).
+    let mut pending_op = false;
+    let mut j = i;
+    loop {
+        match cs.get(j) {
+            None => return Err(format!("unterminated `v` class in /{src}/")),
+            Some(']') => {
+                if pending_op {
+                    return Err(format!("missing `v` operand in /{src}/"));
+                }
+                return Ok((acc, j));
+            }
+            Some('&') if cs.get(j + 1) == Some(&'&') => {
+                // `&&` en tête, après ≥2 membres juxtaposés
+                // (union + op — hors grammaire) ou en chaîne `--`.
+                if op == Some(VOp::Diff) || (op.is_none() && members != 1) {
+                    return Err(format!("mixed `&&` in `v` class /{src}/"));
+                }
+                pending_op = true;
+                op = Some(VOp::Inter);
+                j += 2;
+            }
+            Some('-') if cs.get(j + 1) == Some(&'-') => {
+                if op == Some(VOp::Inter) || (op.is_none() && members != 1) {
+                    return Err(format!("mixed `--` in `v` class /{src}/"));
+                }
+                pending_op = true;
+                op = Some(VOp::Diff);
+                j += 2;
+            }
+            _ => {
+                if op.is_some() && !pending_op {
+                    return Err(format!("mixed operands in `v` class /{src}/"));
+                }
+                pending_op = false;
+                let (operand, single_cp, next) = v_operand(t, cs, j, src)?;
+                // `a-b` : range — uniquement en union, jamais
+                // en opérande d'`&&`/`--` (spec → SyntaxError).
+                if op.is_none()
+                    && single_cp.is_some()
+                    && cs.get(next) == Some(&'-')
+                    && cs.get(next + 1) != Some(&'-')
+                {
+                    let (_bound, bcp, bnext) = v_operand(t, cs, next + 1, src)?;
+                    let Some(hi) = bcp else {
+                        return Err(format!("class range bound in `v` /{src}/"));
+                    };
+                    let lo = single_cp.unwrap_or(0);
+                    if lo > hi {
+                        return Err(format!("invalid class range in `v` /{src}/"));
+                    }
+                    let mut body = String::new();
+                    class_char(&mut body, lo);
+                    body.push('-');
+                    class_char(&mut body, hi);
+                    acc = v_union(
+                        acc,
+                        VSet {
+                            part: VPart::Body(body),
+                            strings: VStrings::Finite(Vec::new()),
+                        },
+                    );
+                    members += 1;
+                    j = bnext;
+                    continue;
+                }
+                acc = match op {
+                    Some(VOp::Inter) => v_inter(acc, operand),
+                    Some(VOp::Diff) => v_diff(acc, operand),
+                    None => v_union(acc, operand),
+                };
+                members += 1;
+                j = next;
+            }
+        }
+    }
+}
+
+/// Parse `[…]` `v` complet (négation `^` incluse) — rend le
+/// **set** (pour usage d'opérande niché). `i` = index du `[`.
+fn v_set(t: &mut Trans, cs: &[char], i: usize, src: &str) -> Result<(VSet, usize), String> {
+    let mut j = i + 1;
+    let neg = cs.get(j) == Some(&'^');
+    if neg {
+        j += 1;
+    }
+    let (set, k) = v_expr(t, cs, j, src)?;
+    if cs.get(k) != Some(&']') {
+        return Err(format!("unterminated `v` class in /{src}/"));
+    }
+    let set = if neg { v_negate_operand(set) } else { set };
+    Ok((set, k + 1))
+}
+
+/// Assemble l'atome pattern final : `[corps]` seul, atome
+/// composite, ou alternance `strings | chars` (longueur décroissante).
+fn v_assemble(set: VSet) -> String {
+    let mut strs = match &set.strings {
+        VStrings::Finite(ss) => ss.clone(),
+        // Complément de strings au niveau atom : le complément
+        // fournit toujours un membre 1-char à la position —
+        // approximation `[\s\S]` couverte par la partie char
+        // niée (JS-C625, limite connue).
+        VStrings::Complement(_) => Vec::new(),
+    };
+    strs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut salt = strs
+        .iter()
+        .map(|(f, _)| f.as_str())
+        .collect::<Vec<_>>()
+        .join("|");
+    // `\q{}` — string vide : alternative terminale vide.
+    if strs.iter().any(|(f, _)| f.is_empty()) {
+        salt.push('|');
+    }
+    if salt.is_empty() {
+        return match &set.part {
+            // `[^\s\S]` — classe vide **quantifiable** (une
+            // lookahead `(?!x)` n'est pas une cible valide).
+            VPart::Empty => "[^\\s\\S]".to_string(),
+            VPart::Body(b) => format!("[{b}]"),
+            VPart::Neg(b) => format!("[^{b}]"),
+            // `(?:…)` — un quantificateur se lie à l'atome
+            // entier, pas à la dernière alternative/lookahead.
+            VPart::Atom(a) => format!("(?:{a})"),
+        };
+    }
+    match &set.part {
+        VPart::Empty => format!("(?:{salt})"),
+        VPart::Body(b) => format!("(?:{salt}|[{b}])"),
+        VPart::Neg(b) => format!("(?:{salt}|[^{b}])"),
+        VPart::Atom(a) => format!("(?:{salt}|{a})"),
+    }
+}
+
+/// Point d'entrée — `[…]` en mode `v`. `i` = index du `[` ;
+/// retourne `(atome pattern, index après le `]` fermant)`.
+fn v_class(t: &mut Trans, cs: &[char], i: usize, src: &str) -> Result<(String, usize), String> {
+    let (set, next) = v_set(t, cs, i, src)?;
+    Ok((v_assemble(set), next))
+}
+
 fn prescan(cs: &[char]) -> (std::collections::BTreeSet<String>, usize, bool) {
     let mut all = std::collections::BTreeSet::new();
     let mut n = 0usize;
@@ -2119,7 +2704,9 @@ mod tests {
     use super::translate_pattern;
 
     fn tr(src: &str) -> String {
-        translate_pattern(src, false, false).unwrap().0
+        translate_pattern(src, false, false, false, false)
+            .unwrap()
+            .0
     }
 
     /// `-` littéral en classe (tête/queue) : émis `\x{2d}` et
@@ -2236,7 +2823,7 @@ mod tests {
         );
         assert_eq!(tr(r"\uD800"), "[\\x{f0000}\\x{10000}-\\x{103ff}]");
         // `lo > hi` brut reste une erreur (surrogate > ASCII).
-        assert!(translate_pattern(r"[\uD800-z]", false, false).is_err());
+        assert!(translate_pattern(r"[\uD800-z]", false, false, false, false).is_err());
         // Le pattern réel du bundle Google compile et ne matche
         // rien (nos strings n'ont pas de surrogate orphelin).
         let t = tr(r"(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])");
@@ -2280,14 +2867,16 @@ mod dbg_vol10 {
             "/tests/data/vol10_yt_regex.txt"
         ))
         .unwrap();
-        let t = super::translate_pattern(&pat, false, false).unwrap().0;
+        let t = super::translate_pattern(&pat, false, false, false, false)
+            .unwrap()
+            .0;
         eprintln!("TAIL>>{}", &t[1850.min(t.len())..]);
         assert!(!t.contains("(?!)"), "dead branch left: {t}");
         assert!(fancy_regex::Regex::new(&t).is_ok());
         // Plage astrale `\uD800\uDD00-\uDD02` = U+10300–U+10302 :
         // la classe multi-items doit la couvrir.
         // `\uD800\uDD00` = U+10100, `\uD800\uDF9F` = U+1039F.
-        let mini = super::translate_pattern("\\uD800[\\uDD00-\\uDD02]", false, false)
+        let mini = super::translate_pattern("\\uD800[\\uDD00-\\uDD02]", false, false, false, false)
             .unwrap()
             .0;
         // JS-C622 non-`u` : units éclatés — lead sentinelle +

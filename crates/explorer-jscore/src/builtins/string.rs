@@ -734,8 +734,11 @@ pub(crate) fn match_result(
     let Value::Obj(arr) = e.new_array(elems) else {
         return Value::Null;
     };
-    e.set_own(arr, "index", Value::Num(pos(m.index) as f64), false);
-    e.set_own(arr, "input", Value::Str(input.clone()), false);
+    // JS-C625 : `index`/`input`/`groups`/`indices` sont posés
+    // par `CreateDataPropertyOrThrow` — `{w,e,c}` complets
+    // (énumerables — `named-groups/groups-object` test262).
+    e.set_own(arr, "index", Value::Num(pos(m.index) as f64), true);
+    e.set_own(arr, "input", Value::Str(input.clone()), true);
     let groups_v = if m.named.is_empty() {
         Value::Undefined
     } else {
@@ -749,7 +752,7 @@ pub(crate) fn match_result(
         }
         Value::Obj(gobj)
     };
-    e.set_own(arr, "groups", groups_v, false);
+    e.set_own(arr, "groups", groups_v, true);
     // `d` flag : `indices` = [[start, end] | undefined] par groupe
     // (+ `indices.groups` miroir des groupes nommés).
     if re.has_indices {
@@ -777,9 +780,9 @@ pub(crate) fn match_result(
                 };
                 e.set_own(gobj, k, v, true);
             }
-            e.set_own(ia, "groups", Value::Obj(gobj), false);
+            e.set_own(ia, "groups", Value::Obj(gobj), true);
         }
-        e.set_own(arr, "indices", Value::Obj(ia), false);
+        e.set_own(arr, "indices", Value::Obj(ia), true);
     }
     Value::Obj(arr)
 }
@@ -936,28 +939,76 @@ pub(crate) fn regexp_test(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     Ok(Value::Bool(!matches!(r, Value::Null)))
 }
 
-/// `RegExp.escape(s)` — ES2025 : échappe `s` pour insertion
-/// littérale dans un pattern. `SyntaxCharacter`s/`/` → `\c` ;
-/// en tête, tout autre caractère ASCII non sûr (ponctuation,
-/// chiffres, lettres, espace) → `\xNN` ou `\uNNNN`.
+/// `RegExp.escape(S)` — spec 22.2.5.1 (ES2025,
+/// `EncodeForRegExpEscape`) : `TypeError` sur non-String ;
+/// syntaxchars+`/` → `\c` ; `\t\n\v\f\r` → escapes ;
+/// `otherPunctuators`/whitespace/`LineTerminator`/surrogates →
+/// `\xHH` ou `\uXXXX` ; premier char alphanum ASCII → `\xHH`
+/// (JS-C625) ; sinon `UTF16EncodeCodePoint(c)` littéral.
 pub(crate) fn regexp_escape(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    const SYNTAX: &str = "^$\\.*+?()[]{}|/";
-    let src = e.to_js_string(arg(args, 0))?;
-    let mut out = String::with_capacity(src.len() * 2);
-    for (i, c) in src.chars().enumerate() {
-        let esc_hex = i == 0 && (c.is_ascii_alphanumeric() || c.is_ascii_punctuation() || c == ' ');
-        if SYNTAX.contains(c) {
-            out.push('\\');
-            out.push(c);
-        } else if esc_hex {
-            let cp = c as u32;
-            if cp <= 0xff {
-                out.push_str(&format!("\\x{cp:02x}"));
-            } else {
-                out.push_str(&format!("\\u{cp:04x}"));
-            }
+    const OTHER_PUNCT: &str = ",-=<>#&!%:;@~'`\"";
+    let Value::Str(sid) = arg(args, 0) else {
+        return Err(e.type_error("RegExp.escape requires a string"));
+    };
+    let units = sid.units_view();
+    let mut out = String::with_capacity(units.len() * 2);
+    let mut i = 0;
+    while i < units.len() {
+        let u = units[i];
+        // Code point : paire de surrogates fusionnée, surrogate
+        // isolé = point à part (spec `StringToCodePoints`).
+        let (cp, n) = if (0xD800..0xDC00).contains(&u)
+            && matches!(units.get(i + 1), Some(&t) if (0xDC00..0xE000).contains(&t))
+        {
+            (
+                0x1_0000 + (((u32::from(u) - 0xD800) << 10) | (u32::from(units[i + 1]) - 0xDC00)),
+                2,
+            )
         } else {
-            out.push(c);
+            (u32::from(u), 1)
+        };
+        i += n;
+        // Premier code point alphanum ASCII → `\xHH` (spec 4.a :
+        // protège contre la continuation d'un escape précédent).
+        if out.is_empty() && matches!(char::from_u32(cp), Some(c) if c.is_ascii_alphanumeric()) {
+            out.push_str(&format!("\\x{cp:02x}"));
+            continue;
+        }
+        match cp {
+            // `SyntaxCharacter` ∪ `/` → `\c`.
+            0x2F | 0x24 | 0x28 | 0x29 | 0x2A | 0x2B | 0x2E | 0x3F | 0x5B | 0x5C | 0x5D | 0x5E
+            | 0x7B | 0x7C | 0x7D => {
+                out.push('\\');
+                out.push(char::from_u32(cp).unwrap_or('\u{fffd}'));
+            }
+            0x09 => out.push_str("\\t"),
+            0x0A => out.push_str("\\n"),
+            0x0B => out.push_str("\\v"),
+            0x0C => out.push_str("\\f"),
+            0x0D => out.push_str("\\r"),
+            // `otherPunctuator`/whitespace/`LineTerminator`/
+            // surrogate isolé → `\xHH` si ≤FF sinon `\uXXXX`
+            // par code unit (spec pas 5).
+            _ => {
+                // `js_ws` sans NEL (U+0085 : White_Space Unicode
+                // mais pas `WhiteSpace`/`LineTerminator` JS).
+                let esc = char::from_u32(cp)
+                    .is_some_and(|c| OTHER_PUNCT.contains(c) || (js_ws(c) && cp != 0x85))
+                    || (0xD800..0xE000).contains(&cp);
+                if esc && cp <= 0xFF {
+                    out.push_str(&format!("\\x{cp:02x}"));
+                } else if esc {
+                    out.push_str(&format!("\\u{cp:04x}"));
+                } else {
+                    // UTF16EncodeCodePoint(c) — littéral.
+                    match char::from_u32(cp) {
+                        Some(c) => out.push(c),
+                        // cp dans D800-E000 traité par `esc` —
+                        // cp invalide autrement impossible.
+                        None => out.push_str(&format!("\\u{cp:04x}")),
+                    }
+                }
+            }
         }
     }
     Ok(e.str_val(out))
@@ -1017,32 +1068,72 @@ pub(crate) fn re_source_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
 }
 /// `get flags` — ordre canonique `dgimsuvy`.
 pub(crate) fn re_flags_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let re = re_get(e, this)?;
-    Ok(e.str_val(re.flag_string()))
+    // Spec 22.2.6.4 : `flags` accepte **tout objet** (pas de
+    // brand-check `[[RegExpMatcher]]`) — chaque flag est lu par
+    // `Get` + `ToBoolean` dans l'ordre `dgimsuvy` (JS-C625 —
+    // `flags/coercion-*` test262).
+    match this {
+        Value::Obj(_) => {}
+        _ => return Err(e.type_error("RegExp.prototype.flags called on non-object")),
+    }
+    let mut f = String::new();
+    for (prop, ch) in [
+        ("hasIndices", 'd'),
+        ("global", 'g'),
+        ("ignoreCase", 'i'),
+        ("multiline", 'm'),
+        ("dotAll", 's'),
+        ("unicode", 'u'),
+        ("unicodeSets", 'v'),
+        ("sticky", 'y'),
+    ] {
+        let v = e.get_prop_value(this.clone(), prop)?;
+        if e.to_boolean(v) {
+            f.push(ch);
+        }
+    }
+    Ok(e.str_val(&f))
 }
 pub(crate) fn re_global_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.global))
+    re_flag(e, this, |r| r.global)
+}
+/// `RegExpHasFlag` (spec 22.2.5.x) : `%RegExp.prototype%`
+/// n'a pas de slot `[[OriginalFlags]]` — le getter rend
+/// `undefined` (pas `TypeError`) quand `this` est le proto
+/// (test262 `*-this-val-regexp-prototype`, JS-C625).
+fn re_flag(
+    e: &mut Engine,
+    this: Value,
+    f: impl Fn(&crate::regexp::JsRegExp) -> bool,
+) -> JsResult<Value> {
+    if let Value::Obj(id) = this.clone() {
+        if id == e.protos.regexp {
+            return Ok(Value::Undefined);
+        }
+    }
+    let re = re_get(e, this)?;
+    Ok(Value::Bool(f(&re)))
 }
 pub(crate) fn re_ignore_case_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.ignore_case))
+    re_flag(e, this, |r| r.ignore_case)
 }
 pub(crate) fn re_multiline_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.multiline))
+    re_flag(e, this, |r| r.multiline)
 }
 pub(crate) fn re_dot_all_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.dot_all))
+    re_flag(e, this, |r| r.dot_all)
 }
 pub(crate) fn re_sticky_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.sticky))
+    re_flag(e, this, |r| r.sticky)
 }
 pub(crate) fn re_unicode_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.unicode))
+    re_flag(e, this, |r| r.unicode)
 }
 pub(crate) fn re_unicode_sets_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.unicode_sets))
+    re_flag(e, this, |r| r.unicode_sets)
 }
 pub(crate) fn re_has_indices_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(re_get(e, this)?.has_indices))
+    re_flag(e, this, |r| r.has_indices)
 }
 
 pub(crate) fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {

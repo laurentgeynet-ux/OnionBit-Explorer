@@ -15363,6 +15363,37 @@ chaque gain rapporté contre les **deux** archétypes.
   RegExp+String **1 194 → 1 200/1 206** (+6). **Reste
   catalogué** : `poisoned-stdlib`, capture reset quantifié
   (limite fancy-regex), `match` `v`-flag ZWJ.
+- [x] **JS-C625 — notation `v`/unicodeSets : `unicodeSets`
+  214 → 292/304 (+78), adjacents `\s` FEFF, `flags`
+  observable, `RegExp.escape` ES2025, `.` LineTerminator**
+  (`regexp.rs` + `builtins/string.rs` + gate
+  `tests/c625_vsets_escape.rs` **6/6**). **Sous-parseur
+  `v_class`** : classes imbriquées, union juxtaposée,
+  intersection `&&` et différence `--` (abaissées en classes
+  natives `[a&&b]`/`a&&[^b]` quantifiables quand opérandes
+  corps, sinon lookahead/composé groupé `(?:…)`), strings
+  `\q{…}` (1 char = char, ≥2 = alternance),
+  `\p{Emoji_Keycap_Sequence}` fini (12 strings), négation
+  complément chars+strings, ponctuateurs réservés (`..`,
+  `&&`/`-`/`~`… hors op), opérande/opérateur stricts.
+  **Adjacents** : `flags` getter spec (Get/ToBoolean tout
+  objet) + `RegExpHasFlag` → `undefined` sur
+  `%RegExp.prototype%` ; `\s` += FEFF (NEL exclu), `.` =
+  `[^\n\r\u2028\u2029]`/`[\s\S]` ; `RegExp.escape` =
+  `EncodeForRegExpEscape` exact (`\x61` tête alpha/digit,
+  identités syntaxe+`/`, `\t\n\v\f\r`, `\xHH`/`\uXXXX`
+  ponctuateurs+ws+surrogates isolés, astrals littéraux UTF-16)
+  ; `index`/`input`/`groups`/`indices` énumérables.
+  **Mesures** : `unicodeSets` (152 fichiers) **214 →
+  292/304** — reste `\p{RGI_Emoji}` ×6 fichiers (12 modes,
+  table ~1500 séquences absente — catalogué) ; sous-ensemble
+  RegExp+String 609 fichiers stable 1 200/1 206 ; élargi
+  nogen (2 633 fichiers) 4 353 → **4 831/5 231** (+478).
+  Gates : c625 6/6, c622 7/7, c624 4/4, c617 12/12, c618
+  17/17, lib 54/54, clippy/fmt propres. **Reste catalogué** :
+  `property-escapes` non-générés (94), `regexp-modifiers`
+  `(?i:)` inline (54), `lookBehind` taille variable (24,
+  limite fancy-regex).
 - [x] **JS-C623 — `PromiseResolve`/`Await` spec-complet :
   reprise toujours par job + `constructor` lu par `Get` —
   sous-ensemble `for-await-of` soldé à 2 431/2 431**
