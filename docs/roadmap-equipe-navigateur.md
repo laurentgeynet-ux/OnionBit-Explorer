@@ -15171,3 +15171,42 @@ chaque gain rapporté contre les **deux** archétypes.
   ~170 fichiers d'échecs catalogués (même chantier que
   C617 : passer de `exec_all` natif à la boucle spec
   observable).
+
+- [x] **JS-C619 — mesure test262 `for-await-of` + résidus
+  `IteratorClose` : 2 266 → 2 376/2 431 passes-mode (+110,
+  55 échecs catalogués)** (`interp/{lazy,mod,exec}.rs` +
+  `parser.rs` + gate `tests/c619_iter.rs` **8/8**). Extraction
+  ciblée du corpus piné (commit `2e58f87d` — sparse-checkout
+  `statements/for-await-of` + `built-ins/`, 2 760 fichiers
+  locaux, 1 234 mesurés, `EXPLORER_TEST262_ONLY`/`-LIST`).
+  **`continue`/`break` labellé dans `GExec`** (dette C616) :
+  les boucles reçoivent leur label via `e.pending_labels`
+  (convention `exec.rs`) — `labeled_leads_to_loop` déwrappe
+  le `Block([…])` du lowering et traverse les `Labeled`
+  chaînés (`a: b: for` — `a` et `b` sont tous deux labels
+  de la boucle) ; avant, le label restait sur le frame `Seq`
+  → `continue outer` dépilait toute la pile. **Destructuration
+  `[…]` paresseuse** (`bind_pat` — spec `IteratorBinding-
+  Initialization`) : un `next()` par élément (trou `[,,]`
+  consommé), `rest` drainé, `IteratorClose` en fin de pattern
+  ou sur abrupt — avant, `iter_values` eager bouclait jusqu'au
+  cap heap sur itérateur non-finissant (~24 fichiers `heap
+  memory limit exceeded`). **`GetMethod` spec sur `return`** :
+  non-callable → `TypeError` (avant : ignoré → promesse
+  résolue au lieu de rejetée) — `exec.rs` + `lazy.rs`
+  alignés sur `it_close`. **Early errors parseur** :
+  `[...{x} = d]`/`[...r = d]`/`{...p = d}`/`f(...r = d)` →
+  SyntaxError (l'init était avalé comme défaut du pattern
+  interne → `Rest(Default)`) ; `no_in` restauré à `+In` dans
+  tout délimiteur (`[`,`(`,`{`,`${}`,args — `for await
+  ([x = a in b] of …)` valide). Gates : c619 8/8, c616
+  10/10, c615/c617/c611/c456/iter_lazy/agen/await/lazy_gen
+  verts. **Reste catalogué** : destructuration **async** par
+  item dans `for await` (`yield`/`await` dans les défauts LHS
+  exigent un bind suspendable — 14 fichiers `yield-expr` +
+  6 `close-skip`/`rtrn-close`), ordonnancement `PromiseResolve`
+  (`constructor` lu par Get + ticks d'await — 3 fichiers
+  `ticks-*` + `async-from-sync-continuation`), `escaped-of`
+  (flag « ident échappé » lexer — `o\u0066` doit être rejeté),
+  `unresolvable` sloppy propagé (~3 fichiers `no-strict`),
+  LHS `async function` en cible (`*-invalid`).

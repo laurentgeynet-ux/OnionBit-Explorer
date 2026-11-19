@@ -792,6 +792,36 @@ fn stmt_has_suspend_inner(s: &Stmt) -> bool {
     }
 }
 
+/// Corps effectif d'un `Labeled` : le lowering wrappe chaque
+/// corps dans un `Block` à une entrée (`outer: for` →
+/// `Labeled{outer, Block([for])}`) — déwrappé ici. Partagé
+/// `exec.rs`/`GExec` (JS-C619).
+pub(crate) fn labeled_inner(body: &Stmt) -> &Stmt {
+    match body {
+        Stmt::Block(l) if l.len() == 1 => &l[0],
+        s => s,
+    }
+}
+
+/// `true` si le corps d'un `Labeled` mène à une boucle —
+/// directe ou via un `Labeled` chaîné (`a: b: for` : `a` et
+/// `b` sont tous deux labels de la boucle, `continue a` la
+/// vise — spec, vérifié par le parseur). Le `Block([…])` du
+/// lowering est transparent ; un vrai bloc utilisateur est
+/// soit multi-statements soit `Block([Block…])` — jamais un
+/// loop nu.
+pub(crate) fn labeled_leads_to_loop(body: &Stmt) -> bool {
+    match labeled_inner(body) {
+        Stmt::While { .. }
+        | Stmt::DoWhile { .. }
+        | Stmt::For { .. }
+        | Stmt::ForIn { .. }
+        | Stmt::ForOf { .. } => true,
+        Stmt::Labeled { body, .. } => labeled_leads_to_loop(body),
+        _ => false,
+    }
+}
+
 /// Descente récursive : chaque sous-statement composé est
 /// loweré à son tour (les corps de if/while/try…).
 fn lower_list(list: &[Stmt], cx: &mut LowerCx) -> Vec<Stmt> {
@@ -1541,16 +1571,21 @@ impl GExec {
     }
 
     /// `IteratorClose` sync (`for-of`) : `it.return()` —
-    /// absent/non-callable → no-op ; abrupt ou résultat
-    /// non-objet → plié dans `u` ([`fold_close`] : une throw
-    /// externe garde sa valeur, spec §7.4.6).
+    /// nullish → no-op ; non-callable → `TypeError` pliée
+    /// (`GetMethod`, JS-C619) ; abrupt ou résultat non-objet
+    /// → plié dans `u` ([`fold_close`] : une throw externe
+    /// garde sa valeur, spec §7.4.6).
     fn close_iter_sync(e: &mut Engine, iter: &Value, u: Unwind) -> Unwind {
         let ret = match e.get_prop_value(iter.clone(), "return") {
             Ok(r) => r,
             Err(Thrown(v)) => return fold_close(u, v),
         };
-        if !e.is_callable(ret.clone()) {
+        if matches!(ret, Value::Undefined | Value::Null) {
             return u;
+        }
+        if !e.is_callable(ret.clone()) {
+            let Thrown(v) = e.type_error("iterator return is not callable");
+            return fold_close(u, v);
         }
         let r = match e.call_value(ret, iter.clone(), &[]) {
             Ok(r) => r,
@@ -1579,8 +1614,15 @@ impl GExec {
             Ok(r) => r,
             Err(Thrown(v)) => return Ok(Some(fold_close(u, v))),
         };
-        if !e.is_callable(ret.clone()) {
+        if matches!(ret, Value::Undefined | Value::Null) {
             return Ok(Some(u));
+        }
+        if !e.is_callable(ret.clone()) {
+            // `GetMethod` : `return` non-callable → `TypeError`
+            // pliée (JS-C619 — avant : ignorée → promesse
+            // résolue au lieu de rejetée).
+            let Thrown(v) = e.type_error("iterator return is not callable");
+            return Ok(Some(fold_close(u, v)));
         }
         let r = match e.call_value(ret, iter, &[]) {
             Ok(r) => r,
@@ -2127,24 +2169,30 @@ impl GExec {
                 Ok(GFlow::Adv)
             }
             Stmt::While { cond, body } => {
+                // JS-C619 — `outer: while…` : le label est posé
+                // par `Labeled` dans `e.pending_labels` (convention
+                // `exec.rs`) ; pris ici pour que `continue outer`
+                // trouve sa cible sur la frame de boucle.
+                let labels = std::mem::take(&mut e.pending_labels);
                 let c = e.eval_expr(env, self.this.clone(), cond)?;
                 if e.to_boolean(c) {
                     self.stack.push(GFrame {
                         list: Rc::new(Self::body_list(body)),
                         pc: 0,
                         env: Self::frame_env(e, env, body),
-                        labels: Vec::new(),
+                        labels,
                         kind: FKind::While { cond: cond.clone() },
                     });
                 }
                 Ok(GFlow::Adv)
             }
             Stmt::DoWhile { body, cond } => {
+                let labels = std::mem::take(&mut e.pending_labels);
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,
                     env: Self::frame_env(e, env, body),
-                    labels: Vec::new(),
+                    labels,
                     kind: FKind::While { cond: cond.clone() },
                 });
                 Ok(GFlow::Adv)
@@ -2155,6 +2203,7 @@ impl GExec {
                 update,
                 body,
             } => {
+                let labels = std::mem::take(&mut e.pending_labels);
                 if let Some(i) = init {
                     let st = match i {
                         crate::ast::ForInit::Expr(x) => Stmt::Expr(x.clone()),
@@ -2178,7 +2227,7 @@ impl GExec {
                         list: Rc::new(Self::body_list(body)),
                         pc: 0,
                         env: Self::frame_env(e, env, body),
-                        labels: Vec::new(),
+                        labels,
                         kind: FKind::For {
                             test: test.clone(),
                             update: update.clone(),
@@ -2193,6 +2242,7 @@ impl GExec {
                 body,
                 is_await,
             } => {
+                let labels = std::mem::take(&mut e.pending_labels);
                 let v = e.eval_expr(env, self.this.clone(), iter)?;
                 // `for await` — itérateur async, suspension par
                 // pas : le frame part « consommé » (`pc` en fin
@@ -2205,7 +2255,7 @@ impl GExec {
                         pc: list.len(),
                         list: Rc::new(list),
                         env: Self::frame_env(e, env, body),
-                        labels: Vec::new(),
+                        labels,
                         kind: FKind::ForAwait {
                             iter: it,
                             next,
@@ -2226,7 +2276,7 @@ impl GExec {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,
                     env: benv,
-                    labels: Vec::new(),
+                    labels,
                     kind: FKind::ForIter {
                         iter: it_obj,
                         items,
@@ -2242,6 +2292,7 @@ impl GExec {
                 body,
                 ..
             } => {
+                let labels = std::mem::take(&mut e.pending_labels);
                 let v = e.eval_expr(env, self.this.clone(), iter)?;
                 let items = match v {
                     Value::Obj(id) => e.enum_keys(id)?.into_iter().map(|k| e.str_val(k)).collect(),
@@ -2256,7 +2307,7 @@ impl GExec {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,
                     env: benv,
-                    labels: Vec::new(),
+                    labels,
                     kind: FKind::ForIter {
                         // `for-in` n'a pas d'itérateur à
                         // fermer (protocole d'énumération).
@@ -2290,6 +2341,22 @@ impl GExec {
                 Ok(GFlow::Adv)
             }
             Stmt::Labeled { name, body } => {
+                // JS-C619 — `outer: while…/for…` : le label est
+                // remis à la boucle enfant via `e.pending_labels`
+                // (convention `exec.rs`) — `continue outer` ne
+                // peut viser qu'une frame de boucle, le Seq
+                // l'avalait sans jamais l'atteindre.
+                if labeled_leads_to_loop(body) {
+                    e.pending_labels.push(name.clone());
+                    let r = self.exec_one(e, labeled_inner(body), env);
+                    // Défensif : nettoie le label si la boucle ne
+                    // l'a pas consommé (cond fausse, erreur
+                    // précoce — convention `exec.rs`).
+                    if let Some(pos) = e.pending_labels.iter().rposition(|l| **l == **name) {
+                        e.pending_labels.remove(pos);
+                    }
+                    return r;
+                }
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
                     pc: 0,

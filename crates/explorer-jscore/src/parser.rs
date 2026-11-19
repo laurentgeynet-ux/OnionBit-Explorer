@@ -1898,9 +1898,15 @@ impl Parser {
                 self.next();
                 let inner = self.pattern()?;
                 // `......x` : l'élément rest n'est pas lui-même
-                // un rest (spec `RestElement`).
-                if matches!(inner, Pat::Rest(_)) {
-                    return Err(self.err("rest element cannot be a rest element"));
+                // un rest (spec `RestElement`) ; `[...{a} = d]`
+                // `[...r = d]` : l'init a été avalé comme défaut
+                // du pattern interne — le corps du rest ne peut
+                // pas être un `Default` non plus (early error
+                // spec, JS-C619).
+                if matches!(inner, Pat::Rest(_) | Pat::Default(..)) {
+                    return Err(
+                        self.err("rest element cannot be a rest element or have an initializer")
+                    );
                 }
                 Pat::Rest(Box::new(inner))
             }
@@ -1941,7 +1947,13 @@ impl Parser {
                         break;
                     }
                     if self.eat_p(P::Ellipsis) {
-                        rest = Some(Box::new(self.pattern()?));
+                        let rp = self.pattern()?;
+                        // `{...{a} = d}` — même interdiction que
+                        // le rest tableau (JS-C619).
+                        if matches!(rp, Pat::Default(..)) {
+                            return Err(self.err("rest property cannot have an initializer"));
+                        }
+                        rest = Some(Box::new(rp));
                         self.expect_p(P::RBrace, "`}`")?;
                         break;
                     }
@@ -2887,14 +2899,14 @@ impl Parser {
             } else {
                 let callee = self.new_callee(no_in)?;
                 let args = if self.check_p(P::LParen) {
-                    self.args(no_in)?
+                    self.args()?
                 } else {
                     Vec::new()
                 };
                 Expr::New(Box::new(callee), args, new_pos)
             }
         } else {
-            self.primary(no_in)?
+            self.primary()?
         };
         let mut steps: Option<Vec<ChainStep>> = None;
         loop {
@@ -2930,7 +2942,7 @@ impl Parser {
                     }
                 }
                 if self.check_p(P::LParen) {
-                    let args = self.args(no_in)?;
+                    let args = self.args()?;
                     s.push(ChainStep::OptCall(args));
                 } else if self.eat_p(P::LBracket) {
                     let k = self.expr(false)?;
@@ -2951,7 +2963,7 @@ impl Parser {
                 // Position du `(` — site d'appel porté par
                 // `Expr::Call` (N1.1), lue avant `args()`.
                 let call_pos = self.pos_here();
-                let args = self.args(no_in)?;
+                let args = self.args()?;
                 match &mut steps {
                     Some(s) => s.push(ChainStep::Call(args)),
                     None => e = Expr::Call(Box::new(e), args, call_pos),
@@ -2965,7 +2977,7 @@ impl Parser {
                 let Tok::Tpl(parts) = self.next_clone() else {
                     return Err(self.err("malformed template literal"));
                 };
-                let (parts, raws, exprs) = self.template_parts(&parts, no_in)?;
+                let (parts, raws, exprs) = self.template_parts(&parts)?;
                 e = Expr::TaggedTemplate {
                     tag: Box::new(e),
                     parts,
@@ -2998,13 +3010,13 @@ impl Parser {
         let mut e = if self.eat_kw(Kw::New) {
             let callee = self.new_callee(no_in)?;
             let args = if self.check_p(P::LParen) {
-                self.args(no_in)?
+                self.args()?
             } else {
                 Vec::new()
             };
             Expr::New(Box::new(callee), args, new_pos)
         } else {
-            self.primary(no_in)?
+            self.primary()?
         };
         loop {
             if self.eat_p(P::Dot) {
@@ -3020,7 +3032,10 @@ impl Parser {
         }
     }
 
-    fn args(&mut self, no_in: bool) -> Result<Vec<Expr>> {
+    /// Arguments `(a, …)` — `no_in` est oublié ici : la spec
+    /// remet `+In` dès le `(` ouvrant (JS-C619 — `f(a in b)`
+    /// dans une tête de `for` refusait l'`in` interne).
+    fn args(&mut self) -> Result<Vec<Expr>> {
         self.expect_p(P::LParen, "`(`")?;
         let mut out = Vec::new();
         if self.eat_p(P::RParen) {
@@ -3035,9 +3050,9 @@ impl Parser {
             }
             // `f(...a)` spread arg — `Expr::Spread` marker.
             if self.eat_p(P::Ellipsis) {
-                out.push(Expr::Spread(Box::new(self.assign(no_in)?)));
+                out.push(Expr::Spread(Box::new(self.assign(false)?)));
             } else {
-                out.push(self.assign(no_in)?);
+                out.push(self.assign(false)?);
             }
             if self.eat_p(P::RParen) {
                 return Ok(out);
@@ -3046,7 +3061,7 @@ impl Parser {
         }
     }
 
-    fn primary(&mut self, no_in: bool) -> Result<Expr> {
+    fn primary(&mut self) -> Result<Expr> {
         match self.peek_clone() {
             Tok::Num(n) => {
                 if self.strict && self.cur().legacy_octal {
@@ -3084,7 +3099,7 @@ impl Parser {
             Tok::Kw(Kw::Super) => {
                 self.next();
                 if self.check_p(P::LParen) {
-                    let args = self.args(no_in)?;
+                    let args = self.args()?;
                     return Ok(Expr::SuperCall(args));
                 }
                 if self.eat_p(P::Dot) {
@@ -3134,7 +3149,7 @@ impl Parser {
             }
             Tok::Tpl(parts) => {
                 self.next();
-                self.template(&parts, no_in)
+                self.template(&parts)
             }
             Tok::Regex { body, flags } => {
                 self.next();
@@ -3154,7 +3169,7 @@ impl Parser {
             Tok::Kw(Kw::Import) => {
                 self.next();
                 if self.eat_p(P::LParen) {
-                    let spec = self.assign(no_in)?;
+                    let spec = self.assign(false)?;
                     self.expect_p(P::RParen, "`)`")?;
                     Ok(Expr::ImportCall(Box::new(spec)))
                 } else if self.eat_p(P::Dot) {
@@ -3171,13 +3186,14 @@ impl Parser {
                 self.expect_p(P::RParen, "`)`")?;
                 Ok(e)
             }
-            Tok::P(P::LBracket) => self.array_lit(no_in),
-            Tok::P(P::LBrace) => self.object_lit(no_in),
+            Tok::P(P::LBracket) => self.array_lit(),
+            Tok::P(P::LBrace) => self.object_lit(),
             _ => Err(self.err("expected expression")),
         }
     }
 
-    fn array_lit(&mut self, no_in: bool) -> Result<Expr> {
+    /// `[a, …]` — `+In` restauré entre crochets (JS-C619).
+    fn array_lit(&mut self) -> Result<Expr> {
         self.expect_p(P::LBracket, "`[`")?;
         let mut elems = Vec::new();
         loop {
@@ -3190,9 +3206,9 @@ impl Parser {
             }
             // `[...a]` spread element — `Expr::Spread` marker.
             if self.eat_p(P::Ellipsis) {
-                elems.push(Some(Expr::Spread(Box::new(self.assign(no_in)?))));
+                elems.push(Some(Expr::Spread(Box::new(self.assign(false)?))));
             } else {
-                elems.push(Some(self.assign(no_in)?));
+                elems.push(Some(self.assign(false)?));
             }
             if self.eat_p(P::Comma) {
                 continue;
@@ -3202,7 +3218,8 @@ impl Parser {
         }
     }
 
-    fn object_lit(&mut self, no_in: bool) -> Result<Expr> {
+    /// `{a: v, …}` — `+In` restauré entre accolades (JS-C619).
+    fn object_lit(&mut self) -> Result<Expr> {
         self.expect_p(P::LBrace, "`{`")?;
         let mut props = Vec::new();
         if self.eat_p(P::RBrace) {
@@ -3211,7 +3228,7 @@ impl Parser {
         loop {
             // `{...o}` spread.
             if self.eat_p(P::Ellipsis) {
-                props.push(ObjProp::Spread(self.assign(no_in)?));
+                props.push(ObjProp::Spread(self.assign(false)?));
             } else {
                 let kpos = self.pos_here();
                 // V8 : le source de la méthode part du premier
@@ -3321,7 +3338,7 @@ impl Parser {
                     }
                     None => {
                         if self.eat_p(P::Colon) {
-                            props.push(ObjProp::Prop(key, self.assign(no_in)?));
+                            props.push(ObjProp::Prop(key, self.assign(false)?));
                         } else if self.eat_p(P::Assign) {
                             // `{a = 1}` — destructuring-default shape;
                             // as a plain literal it just assigns then
@@ -3332,7 +3349,7 @@ impl Parser {
                                     return Err(self.err("bad `{…=…}` shorthand"))
                                 }
                             };
-                            let rhs = self.assign(no_in)?;
+                            let rhs = self.assign(false)?;
                             props.push(ObjProp::Prop(
                                 key,
                                 Expr::Assign(
@@ -3367,8 +3384,8 @@ impl Parser {
     }
 
     /// `` `t${e}t` `` — `parts.len() == exprs.len() + 1` enforced.
-    fn template(&mut self, parts: &[TplPart], no_in: bool) -> Result<Expr> {
-        let (lit_parts, _raws, exprs) = self.template_parts(parts, no_in)?;
+    fn template(&mut self, parts: &[TplPart]) -> Result<Expr> {
+        let (lit_parts, _raws, exprs) = self.template_parts(parts)?;
         Ok(Expr::Template {
             parts: lit_parts,
             exprs,
@@ -3378,10 +3395,11 @@ impl Parser {
     /// Chunks d'un template : `(cooked, raws, exprs)` — partagé
     /// entre `` `…` `` (`Expr::Template`) et `` tag`…` ``
     /// (`Expr::TaggedTemplate`, qui consomme aussi les raws).
+    /// `no_in` n'entre pas dans `${…}` — `+In` restauré
+    /// (JS-C619).
     fn template_parts(
         &mut self,
         parts: &[TplPart],
-        no_in: bool,
     ) -> Result<(Vec<String>, Vec<String>, Vec<Expr>)> {
         let mut lit_parts = Vec::new();
         let mut raws = Vec::new();
@@ -3423,7 +3441,7 @@ impl Parser {
                         sw_depth: self.sw_depth,
                         blk_depth: self.blk_depth,
                     };
-                    let e = sub.expr(no_in)?;
+                    let e = sub.expr(false)?;
                     self.priv_seq = self.priv_seq.max(sub.priv_seq);
                     if !sub.at_eof() {
                         return Err(self.err("trailing tokens in template substitution"));
@@ -3618,6 +3636,11 @@ impl Parser {
             loop {
                 let rest = self.eat_p(P::Ellipsis);
                 let pat = self.pattern()?;
+                // `f(...r = d)` — l'init a été avalé comme défaut
+                // du pattern : early error spec (JS-C619).
+                if rest && matches!(pat, Pat::Default(..)) {
+                    return Err(self.err("rest parameter cannot have an initializer"));
+                }
                 params.push(Param { pat, rest });
                 if rest {
                     break; // `...rest` must be last

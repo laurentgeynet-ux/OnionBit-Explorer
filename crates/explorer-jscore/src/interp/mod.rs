@@ -7676,6 +7676,14 @@ impl Engine {
                 self.bind_pat(env, this, p, v, mode)
             }
             Pat::Array(elems) => {
+                // JS-C619 — itérateur custom : tirage paresseux +
+                // `IteratorClose` (spec `IteratorBinding-
+                // Initialization`). La voie eager `iter_values`
+                // reste pour les valeurs sans itérateur
+                // observable (scalars — même erreur `TypeError`).
+                if let Some(it) = self.forof_iterator(v.clone())? {
+                    return self.bind_pat_array_iter(env, this, elems, it, mode);
+                }
                 let items = self.iter_values(v)?;
                 for (i, el) in elems.iter().enumerate() {
                     match el {
@@ -7725,6 +7733,104 @@ impl Engine {
                 Ok(())
             }
         }
+    }
+
+    /// Destructuration `[…]` paresseuse sur itérateur custom
+    /// (spec `IteratorBindingInitialization`, JS-C619) : un
+    /// `next()` par élément (un trou consomme un pas), `rest`
+    /// draine la fin, `IteratorClose` en fin de pattern ou sur
+    /// abrupt. Avant : `iter_values` eager — itérateur non-
+    /// finissant → boucle jusqu'au cap heap, et jamais de
+    /// `return()` observé (cluster test262 `*-init-iter-close`).
+    fn bind_pat_array_iter(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        elems: &[Option<Pat>],
+        it: Value,
+        mode: BindMode,
+    ) -> JsResult<()> {
+        let mut done = false;
+        match self.bind_pat_array_iter_run(env, this, elems, &it, &mut done, mode) {
+            // Abrupt du bind : la complétion d'origine prime —
+            // l'erreur éventuelle du close est écartée (spec
+            // §7.4.6 : une throw externe garde sa valeur).
+            Err(e) => {
+                if !done {
+                    let _ = crate::collections::it_close(self, &it);
+                }
+                Err(e)
+            }
+            r => {
+                if !done {
+                    crate::collections::it_close(self, &it)?;
+                }
+                r
+            }
+        }
+    }
+
+    /// Corps de [`Self::bind_pat_array_iter`] — isolé pour que
+    /// le close se pose une seule fois sur les deux issues.
+    fn bind_pat_array_iter_run(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        elems: &[Option<Pat>],
+        it: &Value,
+        done: &mut bool,
+        mode: BindMode,
+    ) -> JsResult<()> {
+        // `next` lu une fois — `GetIterator` fige le record
+        // (`[[NextMethod]]` n'est pas relu par pas).
+        let next = self.get_prop_value(it.clone(), "next")?;
+        if !self.is_callable(next.clone()) {
+            return Err(self.type_error("iterator next is not callable"));
+        }
+        for el in elems {
+            match el {
+                // Trou `[,,]` : un pas consommé, rien lié.
+                None => {
+                    self.iter_step_once(it, &next, done)?;
+                }
+                Some(Pat::Rest(p)) => {
+                    let mut items = Vec::new();
+                    while let Some(v) = self.iter_step_once(it, &next, done)? {
+                        items.push(v);
+                    }
+                    let rest = self.new_array(items);
+                    // Itérateur épuisé (`done` posé) — pas de
+                    // close : le `Ok` court-circuite le wrapper.
+                    return self.bind_pat(env, this, p, rest, mode);
+                }
+                Some(p) => {
+                    let v = self
+                        .iter_step_once(it, &next, done)?
+                        .unwrap_or(Value::Undefined);
+                    self.bind_pat(env, this.clone(), p, v, mode)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// `IteratorStep`+`IteratorValue` borné par `done` — `None`
+    /// quand l'itérateur est fini (aucun tirage après
+    /// `done:true`, la spec n'appelle plus `next()`).
+    fn iter_step_once(
+        &mut self,
+        it: &Value,
+        next: &Value,
+        done: &mut bool,
+    ) -> JsResult<Option<Value>> {
+        if *done {
+            return Ok(None);
+        }
+        let v = crate::collections::it_step(self, it, next)?;
+        if v.is_none() {
+            *done = true;
+        }
+        Ok(v)
     }
 
     /// Evaluate a `PropKey` to its string form.

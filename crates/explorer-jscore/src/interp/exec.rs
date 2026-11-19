@@ -1163,14 +1163,11 @@ impl Engine {
             // la boucle enfant via `pending_labels` ; `break lbl`
             // (même sur bloc) est avalé ici, tout le reste remonte.
             Stmt::Labeled { name, body } => {
-                if matches!(
-                    &**body,
-                    Stmt::While { .. }
-                        | Stmt::DoWhile { .. }
-                        | Stmt::For { .. }
-                        | Stmt::ForIn { .. }
-                        | Stmt::ForOf { .. }
-                ) {
+                // JS-C619 — `labeled_leads_to_loop` déwrappe le
+                // `Block([…])` du lowering et traverse les
+                // `Labeled` chaînés (`a: b: for`) — le `matches!`
+                // direct ne voyait que le corps nu pré-lowering.
+                if crate::interp::lazy::labeled_leads_to_loop(body) {
                     self.pending_labels.push(name.clone());
                 }
                 self.young_stack[yslot] = u64::MAX;
@@ -1334,7 +1331,7 @@ impl Engine {
     /// `for..of` paresseux (JS-C456). `None` = pas
     /// d'itérateur custom → voie `iter_values` (arrays/TA/
     /// strings — observablement identique, plus rapide).
-    fn forof_iterator(&mut self, v: Value) -> JsResult<Option<Value>> {
+    pub(crate) fn forof_iterator(&mut self, v: Value) -> JsResult<Option<Value>> {
         let Value::Obj(id) = v else { return Ok(None) };
         let Some(m) = self.get_prop(id, SYM_ITERATOR) else {
             return Ok(None);
@@ -1345,16 +1342,21 @@ impl Engine {
         Ok(Some(self.call_value(m, v, &[])?))
     }
 
-    /// `IteratorClose` (spec §13.7.5.14) — appelle
-    /// `it.return()` si présent/callable (lecture par Get —
-    /// un accesseur `get return` est honoré, JS-C603) ;
-    /// erreurs de `next` déjà propagées ailleurs.
+    /// `IteratorClose` (spec §7.4.6) — `GetMethod` : nullish
+    /// → rien, **non-callable → `TypeError`** (JS-C619 — avant
+    /// : ignoré), callable → `it.return()` ; lecture par Get —
+    /// un accesseur `get return` est honoré (JS-C603) ; erreurs
+    /// de `next` déjà propagées ailleurs.
     fn iterator_close(&mut self, it: &Value) -> JsResult<()> {
         if matches!(it, Value::Obj(_)) {
             let rf = self.get_prop_value(it.clone(), "return")?;
-            if self.is_callable(rf.clone()) {
-                self.call_value(rf, it.clone(), &[])?;
+            if matches!(rf, Value::Undefined | Value::Null) {
+                return Ok(());
             }
+            if !self.is_callable(rf.clone()) {
+                return Err(self.type_error("iterator return is not callable"));
+            }
+            self.call_value(rf, it.clone(), &[])?;
         }
         Ok(())
     }
