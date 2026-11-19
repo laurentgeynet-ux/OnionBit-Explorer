@@ -2229,87 +2229,396 @@ pub struct FontFeatureValues {
 }
 
 /// `@counter-style <nom>` — style de compteur nommé
-/// (css-counter-styles-3). R-221 — champs minimaux :
-/// `system`/`symbols`/`prefix`/`suffix`/`fallback` ;
-/// `pad`/`range`/`negative`/`extends` non portés (borne
-/// documentée — `fallback` vaut).
+/// (css-counter-styles-3). R-221 — champs initiaux ;
+/// R-303 — tous les descripteurs mesurables portés :
+/// `additive-symbols`, `negative`, `pad`, `range`,
+/// `system: fixed <N>` et `fallback` (chaîne résolue par
+/// [`CounterStyle::resolve`]). `extends`/`speak-as` restent
+/// non portés (borne documentée).
 #[derive(Debug, Clone, Default)]
 pub struct CounterStyle {
     /// `system` tel que déclaré (`symbolic`, `numeric`,
-    /// `alphabetic`, `cyclic`, `fixed`…). Vide = `symbolic`.
+    /// `alphabetic`, `cyclic`, `fixed`, `additive`…).
+    /// Vide = `symbolic` ; un éventuel entier `fixed <N>`
+    /// est extrait dans [`CounterStyle::fixed_first`].
     pub system: String,
     /// `symbols` — la liste de glyphes (chaînés).
     pub symbols: Vec<String>,
+    /// `additive-symbols` — tuples `(poids, symbole)` en
+    /// poids strictement décroissants (spec : tout autre
+    /// ordre invalide le descripteur → vide).
+    pub additive_symbols: Vec<(u32, String)>,
+    /// `system: fixed <N>` — valeur du premier symbole
+    /// (défaut 1).
+    pub fixed_first: i32,
+    /// `negative` — `(préfixe, suffixe)` enrobant la
+    /// représentation des valeurs négatives. `None` =
+    /// initiale spec `("-"` en préfixe, rien en suffixe) ;
+    /// un seul symbole déclaré = préfixe seul.
+    pub negative: Option<(String, String)>,
+    /// `pad` — `(longueur min, symbole)` : la
+    /// représentation est préfixée du symbole jusqu'à
+    /// la longueur (avant négatif/préfixe/suffixe).
+    pub pad: Option<(u32, String)>,
+    /// `range` — paires inclusives `(bas, haut)` ; les
+    /// bornes `infinite` sont `i64::MIN`/`i64::MAX`.
+    /// `None` = `auto` (portée du système).
+    pub ranges: Option<Vec<(i64, i64)>>,
     /// `prefix` — texte avant le label (vide par défaut).
     pub prefix: String,
     /// `suffix` — texte après le label (spec : ". ").
     pub suffix: String,
-    /// `fallback` — style de repli quand `n` sort du
-    /// système (défaut `decimal`).
+    /// `fallback` — nom du style de repli quand `n` est
+    /// hors portée ou irreprésentable (défaut `decimal`).
     pub fallback: String,
+    /// Repli `fallback` **nommé** pré-résolu par
+    /// [`CounterStyle::resolve`] (chaîne transitivée,
+    /// cycles coupés à la construction). `None` quand le
+    /// repli est un style prédéfini (produit par
+    /// `builtin_counter_rep`), absent du registre, ou que
+    /// le style n'a pas été résolu (`.get().cloned()`).
+    pub resolved_fallback: Option<Box<CounterStyle>>,
 }
 
+/// Longueur max d'une représentation (codepoints) — borne
+/// autorisée par css-counter-styles-3 §2.2 (« au moins 60,
+/// repli permis au-delà »). Protège `symbolic`/`additive`/
+/// `pad` contre des représentations linéaires en `n`
+/// (contenu hostile).
+const MAX_COUNTER_REP: usize = 60;
+
 impl CounterStyle {
-    /// Label du marqueur pour l'ordinal `n` (1-based) —
-    /// `prefix + corps + suffix`. Systèmes non portés
-    /// (`additive`, `extends`, `fixed` hors portée) →
-    /// repli `decimal` via le corps numérique.
+    /// Résout un style nommé en clonant sa chaîne de repli
+    /// : chaque `fallback` pointant un autre style du
+    /// registre est incarné dans `resolved_fallback` —
+    /// cycles coupés par l'ensemble des noms visités et
+    /// profondeur bornée (le repli d'un nœud coupé retombe
+    /// sur son nom → `builtin_counter_rep` → `decimal`).
+    /// C'est le point d'entrée à utiliser à la place de
+    /// `registry.get(name).cloned()`.
     #[must_use]
-    pub fn label(&self, n: i32) -> String {
-        // `n` est un ordinal : négatif → 1 pour le cycle
-        // (arithmétique usize, aucun cast flottant).
-        let ni = usize::try_from(n.max(1)).unwrap_or(1);
-        let sym = |i: usize| self.symbols.get(i).cloned().unwrap_or_default();
-        let body = match self.system.as_str() {
-            "numeric" => {
-                if self.symbols.len() >= 10 {
-                    n.to_string()
-                        .chars()
-                        .filter_map(|c| c.to_digit(10).map(|d| sym(d as usize)))
-                        .collect::<String>()
-                } else {
-                    n.to_string()
-                }
+    pub fn resolve(
+        registry: &std::collections::HashMap<String, CounterStyle>,
+        name: &str,
+    ) -> Option<CounterStyle> {
+        fn chain(
+            reg: &std::collections::HashMap<String, CounterStyle>,
+            name: &str,
+            seen: &mut std::collections::HashSet<String>,
+        ) -> Option<CounterStyle> {
+            // 8 sauts suffisent aux chaînes réelles ; au-delà
+            // on dégrade (le nœud conserve son nom de repli).
+            if seen.len() >= 8 || !seen.insert(name.to_string()) {
+                return None;
             }
-            "alphabetic" => {
+            let mut cs = reg.get(name)?.clone();
+            cs.resolved_fallback = chain(reg, &cs.fallback, seen).map(Box::new);
+            Some(cs)
+        }
+        chain(registry, name.trim(), &mut std::collections::HashSet::new())
+    }
+
+    /// Le système « utilise un signe négatif » (spec §3.2) :
+    /// `symbolic`, `alphabetic`, `numeric`, `additive` —
+    /// jamais `cyclic`/`fixed` (qui n'encodent pas le signe).
+    fn uses_negative_sign(&self) -> bool {
+        matches!(
+            self.system.as_str(),
+            "symbolic" | "alphabetic" | "numeric" | "additive"
+        )
+    }
+
+    /// Portée `auto` du système (spec §3.5) quand `ranges`
+    /// n'est pas déclaré : `cyclic`/`numeric`/`fixed` =
+    /// ±∞ ; `alphabetic`/`symbolic` = 1..∞ ; `additive` =
+    /// 0..∞. Système inconnu (tolérance `symbolic`) = 1..∞.
+    fn in_range(&self, n: i32) -> bool {
+        let v = i64::from(n);
+        match &self.ranges {
+            Some(rs) => rs.iter().any(|(lo, hi)| v >= *lo && v <= *hi),
+            None => match self.system.as_str() {
+                "cyclic" | "numeric" | "fixed" => true,
+                "additive" => v >= 0,
+                _ => v >= 1,
+            },
+        }
+    }
+
+    /// Représentation du style de repli : chaîne résolue →
+    /// sa représentation (récursif, profondeur bornée par
+    /// la construction) ; sinon style prédéfini par nom ;
+    /// sinon `decimal`. La représentation du repli ne porte
+    /// PAS ses propres préfixe/suffixe (spec §2.2 : ils
+    /// viennent toujours du style spécifié).
+    fn fallback_rep(&self, n: i32, depth: u8) -> String {
+        if depth < 8 {
+            if let Some(fb) = &self.resolved_fallback {
+                return fb.representation(n, depth + 1);
+            }
+        }
+        builtin_counter_rep(&self.fallback, n).unwrap_or_else(|| n.to_string())
+    }
+
+    /// Corps du label (spec §2.2 étapes 2-5) : portée →
+    /// représentation initiale (de |n| si signe) → `pad` →
+    /// enrobage `negative`. Hors portée ou irreprésentable
+    /// (et > [`MAX_COUNTER_REP`] codepoints) → repli.
+    #[allow(clippy::too_many_lines)]
+    fn representation(&self, n: i32, depth: u8) -> String {
+        if !self.in_range(n) {
+            return self.fallback_rep(n, depth);
+        }
+        let neg = n < 0 && self.uses_negative_sign();
+        let abs = i64::from(n).abs();
+        let len = i64::try_from(self.symbols.len()).unwrap_or(i64::MAX);
+        let sym = |i: i64| {
+            self.symbols
+                .get(usize::try_from(i).unwrap_or(usize::MAX))
+                .cloned()
+                .unwrap_or_default()
+        };
+        // Compte saturé : la seule question est « > 60 ? ».
+        let over_bound = |reps: i64, sym_len: usize, cur: usize| {
+            usize::try_from(reps)
+                .unwrap_or(usize::MAX)
+                .saturating_mul(sym_len)
+                .saturating_add(cur)
+                > MAX_COUNTER_REP
+        };
+        let Some(mut body) = (match self.system.as_str() {
+            "cyclic" => {
                 if self.symbols.is_empty() {
-                    n.to_string()
+                    None
                 } else {
-                    let base = self.symbols.len();
-                    let mut v = ni;
-                    let mut s = Vec::new();
-                    while v > 0 {
-                        v -= 1;
-                        s.push(sym(v % base));
-                        v /= base;
-                    }
-                    s.into_iter().rev().collect()
+                    // Cycle sur tous les entiers — les
+                    // négatifs bouclent sans signe (spec).
+                    Some(sym((i64::from(n) - 1).rem_euclid(len)))
                 }
             }
             "fixed" => {
-                if ni <= self.symbols.len() {
-                    sym(ni - 1)
+                let idx = i64::from(self.fixed_first);
+                if i64::from(n) >= idx && i64::from(n) < idx + len {
+                    Some(sym(i64::from(n) - idx))
                 } else {
-                    n.to_string()
+                    None
+                }
+            }
+            "numeric" => {
+                if self.symbols.len() >= 2 {
+                    // Base-N positionnelle (spec : ≥2 symboles
+                    // = chiffres 0..base).
+                    if abs == 0 {
+                        Some(sym(0))
+                    } else {
+                        let mut v = abs;
+                        let mut s = Vec::new();
+                        while v > 0 {
+                            s.push(sym(v % len));
+                            v /= len;
+                        }
+                        Some(s.into_iter().rev().collect())
+                    }
+                } else {
+                    // <2 symboles = règle invalide par spec ;
+                    // tolérance : chiffres décimaux.
+                    Some(abs.to_string())
+                }
+            }
+            "alphabetic" => {
+                if self.symbols.is_empty() || abs == 0 {
+                    None
+                } else {
+                    let mut v = abs;
+                    let mut s = Vec::new();
+                    while v > 0 {
+                        v -= 1;
+                        s.push(sym(v % len));
+                        v /= len;
+                    }
+                    Some(s.into_iter().rev().collect())
+                }
+            }
+            "additive" => {
+                // Décomposition gloutonne par poids
+                // décroissants (spec §3.1.6) — échec si un
+                // reste subsiste ou si 0 sans poids 0.
+                let mut v = abs;
+                let mut s = String::new();
+                for (w, sy) in &self.additive_symbols {
+                    let w = i64::from(*w);
+                    if w == 0 {
+                        if v == 0 && s.is_empty() {
+                            s.push_str(sy);
+                        }
+                        continue;
+                    }
+                    if w > v {
+                        continue;
+                    }
+                    let reps = v / w;
+                    // Borne longueur avant construction.
+                    if over_bound(reps, sy.chars().count(), s.chars().count()) {
+                        return self.fallback_rep(n, depth);
+                    }
+                    for _ in 0..reps {
+                        s.push_str(sy);
+                    }
+                    v -= w * reps;
+                    if v == 0 {
+                        break;
+                    }
+                }
+                if v == 0 && !s.is_empty() {
+                    Some(s)
+                } else {
+                    None
                 }
             }
             _ => {
-                // `symbolic`/`cyclic` (défaut) : cycle sur
-                // les symboles — sinon repli numérique pur.
-                if self.symbols.is_empty() {
-                    n.to_string()
+                // `symbolic` (défaut + inconnus tolérés) :
+                // index cyclé, symbole répété à chaque tour
+                // (spec §3.1.3 — `"*"` → `*`, `**`, `***`…).
+                if self.symbols.is_empty() || abs == 0 {
+                    None
                 } else {
-                    sym((ni - 1) % self.symbols.len())
+                    let reps = (abs - 1) / len + 1;
+                    let sy = sym((abs - 1) % len);
+                    if over_bound(reps, sy.chars().count(), 0) {
+                        return self.fallback_rep(n, depth);
+                    }
+                    Some(sy.repeat(usize::try_from(reps).unwrap_or(1)))
                 }
             }
+        }) else {
+            return self.fallback_rep(n, depth);
         };
+        if body.chars().count() > MAX_COUNTER_REP {
+            return self.fallback_rep(n, depth);
+        }
+        // `pad` : la cible compte les clusters de la
+        // représentation + ceux du signe si négatif (spec
+        // §3.6) — une cible > borne = repli (budget).
+        if let Some((min, psym)) = &self.pad {
+            let neg_len = if neg { self.negative_len() } else { 0 };
+            let cur = body.chars().count() + neg_len;
+            if (*min as usize) > MAX_COUNTER_REP {
+                return self.fallback_rep(n, depth);
+            }
+            if (*min as usize) > cur {
+                body = format!("{}{}", psym.repeat(*min as usize - cur), body);
+            }
+        }
+        if neg {
+            let (pre, suf) = self.negative_signs();
+            body = format!("{pre}{body}{suf}");
+        }
+        body
+    }
+
+    /// Symboles `negative` effectifs — défaut `("-", "")`.
+    fn negative_signs(&self) -> (String, String) {
+        self.negative
+            .clone()
+            .unwrap_or_else(|| ("-".to_string(), String::new()))
+    }
+
+    /// Clusters consommés par l'enrobage `negative` (pad §3.6).
+    fn negative_len(&self) -> usize {
+        let (pre, suf) = self.negative_signs();
+        pre.chars().count() + suf.chars().count()
+    }
+
+    /// Label du marqueur pour l'ordinal `n` —
+    /// `prefix + représentation + suffix` (spec §2.2 : le
+    /// préfixe/suffixe viennent toujours du style spécifié,
+    /// même quand le corps vient du repli).
+    #[must_use]
+    pub fn label(&self, n: i32) -> String {
         let suffix = if self.suffix.is_empty() {
             "."
         } else {
             &self.suffix
         };
-        format!("{}{}{}", self.prefix, body, suffix)
+        format!("{}{}{}", self.prefix, self.representation(n, 0), suffix)
     }
+}
+
+/// Représentation d'un style de compteur **prédéfini**
+/// (`decimal`, alpha, romain, glyphes symboliques) — corps
+/// seul, sans suffixe. `None` = nom inconnu du prédéfini.
+fn builtin_counter_rep(name: &str, n: i32) -> Option<String> {
+    let body = match name {
+        "decimal" => n.to_string(),
+        "decimal-leading-zero" => {
+            if (0..10).contains(&n) {
+                format!("0{n}")
+            } else {
+                n.to_string()
+            }
+        }
+        "lower-alpha" | "lower-latin" => counter_alpha_rep(n, false),
+        "upper-alpha" | "upper-latin" => counter_alpha_rep(n, true),
+        "lower-roman" => counter_roman_rep(n).to_lowercase(),
+        "upper-roman" => counter_roman_rep(n),
+        "disc" => "\u{2022}".to_string(),
+        "circle" => "\u{25e6}".to_string(),
+        "square" => "\u{25aa}".to_string(),
+        _ => return None,
+    };
+    Some(body)
+}
+
+/// Colonne de lettres (1→a…26→z, 27→aa…) — miroir de
+/// `explorer_layout`'s `alpha_label` (explorer-css ne peut
+/// pas dépendre du layout — duplication assumée, ~20 lignes).
+fn counter_alpha_rep(n: i32, upper: bool) -> String {
+    if n <= 0 {
+        return n.to_string();
+    }
+    let mut s = Vec::new();
+    let mut v = n;
+    while v > 0 {
+        v -= 1;
+        s.push((b'a' + u8::try_from(v % 26).unwrap_or(0)) as char);
+        v /= 26;
+    }
+    let s: String = s.into_iter().rev().collect();
+    if upper {
+        s.to_uppercase()
+    } else {
+        s
+    }
+}
+
+/// Chiffres romains subtractifs (≤ 3999 — au-delà, décimal).
+fn counter_roman_rep(n: i32) -> String {
+    const T: &[(i32, &str)] = &[
+        (1000, "M"),
+        (900, "CM"),
+        (500, "D"),
+        (400, "CD"),
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ];
+    if !(0..4000).contains(&n) {
+        return n.to_string();
+    }
+    let mut s = String::new();
+    let mut v = n;
+    for (val, sym) in T {
+        while v >= *val {
+            s.push_str(sym);
+            v -= *val;
+        }
+    }
+    s
 }
 
 #[derive(Default)]
@@ -3044,11 +3353,24 @@ impl StyleEngine {
                             // layout (StyleMap.counter_styles).
                             let mut cs = CounterStyle {
                                 suffix: ".".to_string(),
+                                fixed_first: 1,
                                 ..CounterStyle::default()
                             };
                             for d in declarations {
                                 match d.name.as_str() {
-                                    "system" => cs.system = d.value.trim().to_string(),
+                                    "system" => {
+                                        // `fixed <N>` : l'entier
+                                        // optionnel = valeur du
+                                        // premier symbole (défaut 1).
+                                        let mut t = d.value.split_whitespace();
+                                        cs.system = t.next().unwrap_or_default().to_string();
+                                        if cs.system == "fixed" {
+                                            cs.fixed_first = t
+                                                .next()
+                                                .and_then(|s| s.parse::<i32>().ok())
+                                                .unwrap_or(1);
+                                        }
+                                    }
                                     "symbols" => {
                                         cs.symbols = d
                                             .value
@@ -3057,6 +3379,99 @@ impl StyleEngine {
                                                 t.trim_matches('"').trim_matches('\'').to_string()
                                             })
                                             .collect();
+                                    }
+                                    // R-303 — `additive-symbols:
+                                    // <poids> <symbole>, …` en poids
+                                    // strictement décroissants (spec :
+                                    // sinon descripteur invalide).
+                                    "additive-symbols" => {
+                                        let mut ok = true;
+                                        let mut prev = u32::MAX;
+                                        let mut out = Vec::new();
+                                        for pair in d.value.split(',') {
+                                            let mut t = pair.split_whitespace();
+                                            let w = t.next().and_then(|s| s.parse::<u32>().ok());
+                                            let sy = t.next();
+                                            match (w, sy) {
+                                                (Some(w), Some(sy)) if w < prev => {
+                                                    prev = w;
+                                                    out.push((
+                                                        w,
+                                                        sy.trim_matches('"')
+                                                            .trim_matches('\'')
+                                                            .to_string(),
+                                                    ));
+                                                }
+                                                _ => {
+                                                    ok = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if ok && !out.is_empty() {
+                                            cs.additive_symbols = out;
+                                        }
+                                    }
+                                    // `negative: <sym> [<sym>]`
+                                    // — un seul = préfixe seul
+                                    // (initiale `"-"`).
+                                    "negative" => {
+                                        let mut t = d.value.split_whitespace().map(|s| {
+                                            s.trim_matches('"').trim_matches('\'').to_string()
+                                        });
+                                        if let Some(pre) = t.next() {
+                                            cs.negative = Some((pre, t.next().unwrap_or_default()));
+                                        }
+                                    }
+                                    // `pad: <entier≥0> <symbole>`.
+                                    "pad" => {
+                                        let mut t = d.value.split_whitespace();
+                                        let min = t.next().and_then(|s| s.parse::<u32>().ok());
+                                        let psym = t.next().map(|s| {
+                                            s.trim_matches('"').trim_matches('\'').to_string()
+                                        });
+                                        if let (Some(min), Some(psym)) = (min, psym) {
+                                            cs.pad = Some((min, psym));
+                                        }
+                                    }
+                                    // `range: auto` (défaut) |
+                                    // `<borne> <borne>, …` — borne
+                                    // `infinite` = ±∞ ; une paire
+                                    // inversée invalide TOUT le
+                                    // descripteur (spec §3.5).
+                                    "range" => {
+                                        let v = d.value.trim();
+                                        if !v.eq_ignore_ascii_case("auto") {
+                                            let bound = |s: Option<&str>, inf: i64| {
+                                                s.and_then(|s| {
+                                                    if s == "infinite" {
+                                                        Some(inf)
+                                                    } else {
+                                                        s.parse::<i64>().ok()
+                                                    }
+                                                })
+                                            };
+                                            let mut ok = true;
+                                            let mut out = Vec::new();
+                                            for pair in v.split(',') {
+                                                let mut t = pair.split_whitespace();
+                                                match (
+                                                    bound(t.next(), i64::MIN),
+                                                    bound(t.next(), i64::MAX),
+                                                ) {
+                                                    (Some(lo), Some(hi)) if lo <= hi => {
+                                                        out.push((lo, hi));
+                                                    }
+                                                    _ => {
+                                                        ok = false;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            if ok && !out.is_empty() {
+                                                cs.ranges = Some(out);
+                                            }
+                                        }
                                     }
                                     "prefix" => {
                                         cs.prefix = d.value.trim().trim_matches('"').to_string();

@@ -3093,7 +3093,14 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     {
         s.to_string()
     } else {
-        explorer_layout::marker_label(ty, bx.marker_ordinal)
+        // R-303 — `@counter-style` nommé prioritaire sur
+        // les natifs, même forme que `inject_inside_markers`
+        // (le marqueur `outside` l'ignorait : retombait sur
+        // le repli decimal — constat oracle `check atrulev`).
+        bx.counter.as_ref().map_or_else(
+            || explorer_layout::marker_label(ty, bx.marker_ordinal),
+            |cs| cs.label(bx.marker_ordinal),
+        )
     };
     let baseline_y = bx.lines.first().map_or_else(
         || {

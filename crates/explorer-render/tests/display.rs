@@ -2015,6 +2015,39 @@ fn markers_textuels_decimal_roman_emis() {
 }
 
 #[test]
+fn counter_style_nomme_marqueur_outside() {
+    // R-303 — demande PIPE journalisée (étape 303, oracle
+    // `check atrulev`) : `emit_text_marker` ignorait
+    // `bx.counter` → le style nommé retombait sur `decimal`
+    // en `list-style-position:outside` (il n'atteignait que
+    // le rail `inside`).
+    let (_d, _b, items) = dl(
+        "<ol><li>a</li><li>b</li></ol>",
+        "@counter-style t{system:cyclic;symbols:\"◆\" \"■\"} ol{list-style-type:t}",
+    );
+    let texts: Vec<&str> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::MarkerText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["◆.", "■."], "style nommé en outside");
+    // `inside` conserve le même label (rail déjà câblé).
+    let (_d, _b, items) = dl(
+        "<ol><li>a</li><li>b</li></ol>",
+        "@counter-style t{system:cyclic;symbols:\"◆\" \"■\"} \
+         ol{list-style-type:t;list-style-position:inside}",
+    );
+    // `inside` : pas de `MarkerText` externe (la puce est
+    // le `Text` injecté en tête de ligne — rail déjà câblé).
+    let inside = items
+        .iter()
+        .all(|i| !matches!(i, DisplayItem::MarkerText { .. }));
+    assert!(inside, "aucun marqueur externe en inside");
+}
+
+#[test]
 fn marker_list_style_string_litteral() {
     // R-112 — `list-style-type:"*"` : la chaîne EST le
     // marqueur (css-lists §3.3) — datatracker IETF peignait

@@ -3619,8 +3619,11 @@ fn atrulev_probe(rule: &str, desc: &str) -> Option<AtProbe> {
              .x{list-style-type:t;list-style-position:inside}"
                 .into(),
         ),
+        // `negative` n'agit que sur valeurs négatives —
+        // `start="-1"` produit les ordinaux -1,0,1,2 : le
+        // premier est enrobé `!n` vs `-n` par défaut.
         ("counter-style", "negative") => mk(
-            OL,
+            "<body><ol class=x start=\"-1\"><li>a<li>b<li>c<li>d</ol></body>",
             "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
             "@counter-style t{system:numeric;negative:\"!\"}\
              .x{list-style-type:t;list-style-position:inside}"
@@ -3636,10 +3639,14 @@ fn atrulev_probe(rule: &str, desc: &str) -> Option<AtProbe> {
             "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
             "@counter-style t{system:numeric;prefix:\"§\"}.x{list-style-type:t;list-style-position:inside}".into(),
         ),
+        // `range` hors portée → repli : il faut des symboles
+        // pour distinguer l'en-portée (base-4 → γ/δ) du
+        // repli décimal (1/4) — sans eux tout est décimal
+        // dans les deux feuilles (sonde aveugle).
         ("counter-style", "range") => mk(
             OL,
-            "@counter-style t{system:numeric}.x{list-style-type:t;list-style-position:inside}",
-            "@counter-style t{system:numeric;range:2 3}.x{list-style-type:t;list-style-position:inside}".into(),
+            "@counter-style t{system:numeric;symbols:\"α\" \"β\" \"γ\" \"δ\"}.x{list-style-type:t;list-style-position:inside}",
+            "@counter-style t{system:numeric;symbols:\"α\" \"β\" \"γ\" \"δ\";range:2 3}.x{list-style-type:t;list-style-position:inside}".into(),
         ),
         ("counter-style", "suffix") => mk(
             OL,
@@ -4750,11 +4757,23 @@ mod tests {
     fn atrulev_descripteurs_verdicts() {
         use super::atrulev_verdict;
         // Descripteurs `CounterStyle` câblés dans `label()`
-        // (chemin `inside`, R-221) → delta marqueurs réel.
-        assert_eq!(atrulev_verdict("counter-style:symbols"), Some(true));
-        assert_eq!(atrulev_verdict("counter-style:prefix"), Some(true));
-        // `fallback` enregistré mais jamais lu → miss honnête.
-        assert_eq!(atrulev_verdict("counter-style:fallback"), Some(false));
+        // (R-303 — additive/negative/pad/range/fallback +
+        // marqueur `outside`) → delta marqueurs réel.
+        for d in [
+            "symbols",
+            "prefix",
+            "additive-symbols",
+            "fallback",
+            "negative",
+            "pad",
+            "range",
+        ] {
+            assert_eq!(
+                atrulev_verdict(&format!("counter-style:{d}")),
+                Some(true),
+                "{d}"
+            );
+        }
         // Feature MQ évaluée sous `StyleEnv::default`.
         assert_eq!(atrulev_verdict("media:width"), Some(true));
         // `(faux) or (faux)` : la contre-sonde écarte la

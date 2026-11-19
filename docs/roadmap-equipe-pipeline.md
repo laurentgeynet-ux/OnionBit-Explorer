@@ -4587,3 +4587,25 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   `MAX_DEFER_CLIPS=128`. Compteur `EmitStats::clips_dedup`.
   Verrous `r302_clips` ×7, suites render vertes, pixels
   inchangés.
+- [x] **R-303 — `@counter-style` : les 5 descripteurs
+  mesurables portés + style nommé en marqueur `outside`**
+  (`explorer-css`/`explorer-layout`/`explorer-render`,
+  demande PIPE journalisée 2026-11-16 + exécution
+  `css.atd` 34→39/58). `emit_text_marker` consulte
+  `bx.counter` (fin du trou `outside`). `label()` =
+  algorithme spec §2.2 complet : `additive-symbols`
+  (glouton, ordre strict décroissant validé),
+  `negative` (signe des systèmes qui en usent),
+  `pad` (cible clusters, signe déduit), `range`
+  (union explicite / auto par système), `fallback`
+  chaîné via `CounterStyle::resolve` (cycles coupés,
+  prédéfini via `builtin_counter_rep`) ; `fixed <N>`
+  honoré ; systèmes corrigés : `numeric` base-N,
+  `symbolic` répétitif, `cyclic` modulaire négatifs.
+  Borne hostile : représentation > 60 codepoints →
+  repli (autorisé spec §2.2). Verrous :
+  `tests/counter_style.rs` ×14, marqueur outside
+  `◆`/`■` (display.rs), `atrulev` counter-style 9/9.
+  Bornes restantes : `extends`/`speak-as` non portés,
+  `counter()/counters()` nommés non résolus (canal
+  `format_counter` sans registre — file NAV).

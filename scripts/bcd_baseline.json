@@ -8,7 +8,7 @@
     "api": 3501,
     "css.values": 1146,
     "html.elem": 119,
-    "css.atd": 34
+    "css.atd": 39
   },
   "families": {
     "css.values": {
@@ -358,7 +358,7 @@
       "z-index": 1
     },
     "css.atd": {
-      "counter-style": 4,
+      "counter-style": 9,
       "media": 27,
       "property": 2,
       "supports": 1

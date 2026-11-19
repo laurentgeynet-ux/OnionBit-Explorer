@@ -467,9 +467,10 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         b.marker_style = styles.pseudo(root, PseudoElement::Marker).cloned();
         // R-221 — `list-style-type: <nom>` nommé : le
         // `@counter-style` correspondant voyage avec la
-        // boîte pour la génération de marqueur.
+        // boîte pour la génération de marqueur. R-303 —
+        // `resolve` incarne la chaîne `fallback` nommée.
         if let Some(ty) = b.style.get("list-style-type") {
-            b.counter = styles.counter_styles.get(ty.trim()).cloned();
+            b.counter = explorer_css::CounterStyle::resolve(&styles.counter_styles, ty.trim());
         }
         b.first_line = styles.pseudo(root, PseudoElement::FirstLine).cloned();
         b.first_letter = styles.pseudo(root, PseudoElement::FirstLetter).cloned();
@@ -787,8 +788,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         // boîte pour la génération de marqueur.
         counter: style
             .get("list-style-type")
-            .and_then(|ty| styles.counter_styles.get(ty.trim()))
-            .cloned(),
+            .and_then(|ty| explorer_css::CounterStyle::resolve(&styles.counter_styles, ty.trim())),
         flow_mode: explorer_css::value::WritingMode::HorizontalTb,
         may_escape: true,
     };
