@@ -42,7 +42,7 @@ const VIEW_H: f32 = 600.0;
 /// comptés sont des trous moteur documentés (marqueur outside
 /// alignement/image, `::marker` styling, strings rtl) —
 /// à monter à chaque progrès moteur.
-const WPT_BASELINE: usize = 202;
+const WPT_BASELINE: usize = 203;
 
 /// Tolérance AA : pixels dont le delta maximal de canal est
 /// ≤ [`FUZZY_CHANNEL`] comptent « doux » ; au-delà « dur ».

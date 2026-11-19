@@ -2685,6 +2685,59 @@ fn layout_block_inner(
     // ne dépasse pas le contenu, la marge traverse
     // normalement — `-003`, `margin-collapse-037`).
     bx.height_raised = used_h > content_h;
+    // R-309 — `align-content` sur conteneur bloc (css-align-3
+    // §5.1.1) : le contenu entier est aligné **comme une
+    // unité** sur l'axe bloc quand la boîte de contenu excède
+    // le contenu (`outside-marker-with-align-content`). Les
+    // `<content-distribution>` `space-*` retombent sur leur
+    // fallback (between→start, around/evenly→center) ; sans
+    // `<overflow-position>` l'alignement est *safe* — un
+    // décalage qui ferait déborder (surplus négatif) retombe
+    // à `start`, `unsafe` l'autorise. Toute valeur ≠ `normal`
+    // fait de la boîte un contexte de formatage indépendant
+    // (marges des descendants et flottants contenus — le
+    // mécanisme `fc_root` des items flex/grid couvre exactement
+    // ça). Les posés `absolute`/`fixed` sont hors flux : exclus.
+    // Conteneurs flex/grid **exclus** : leur `align-content`
+    // est déjà consommé par `flow_flex_children`/
+    // `flow_grid_children` (une seconde application décalait
+    // leurs items — régression `flexbox-column-row-gap-001`).
+    let non_block_flow = matches!(
+        st.get("display"),
+        Some("flex" | "inline-flex" | "grid" | "inline-grid")
+    );
+    if !non_block_flow {
+        if let Some(ac) = st.get("align-content").map(str::trim) {
+            if ac != "normal" {
+                bx.fc_root = true;
+            }
+            let free = used_h - content_h;
+            let kw = ac.split_whitespace().last().unwrap_or("start");
+            let dy = match kw {
+                "center" | "space-around" | "space-evenly" => free / 2.0,
+                "end" | "self-end" | "flex-end" => free,
+                _ => 0.0,
+            };
+            let dy = if dy > 0.0 || ac.starts_with("unsafe") {
+                dy
+            } else {
+                0.0
+            };
+            if dy != 0.0 {
+                for c in &mut bx.children {
+                    if !matches!(c.position, Position::Absolute | Position::Fixed) {
+                        crate::flex::translate_subtree(c, 0.0, dy);
+                    }
+                }
+                for l in &mut bx.lines {
+                    l.rect.y += dy;
+                    for f in &mut l.fragments {
+                        f.rect.y += dy;
+                    }
+                }
+            }
+        }
+    }
     // La boîte de contenu est déjà bornée par `min|max-width`
     // en amont de la pose des enfants — le rect suit.
     bx.rect.width = bl + pl + content_w + pr + br;

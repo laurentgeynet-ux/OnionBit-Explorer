@@ -3850,3 +3850,90 @@ fn list_item_avec_texte_pas_de_ligne_fantome() {
     assert!(li_bx.lines.is_empty(), "pas de doublon fantôme");
     assert!(approx(li_bx.rect.height, 10.0), "h={:?}", li_bx.rect);
 }
+
+// ── R-309 : `align-content` sur conteneur bloc ─────────────
+
+/// R-309 — css-align §5.1.1 : `align-content:center` sur un
+/// bloc à hauteur définie décale le contenu entier de
+/// `free/2` (sujet = contenu comme une unité).
+#[test]
+fn align_content_bloc_centre_le_contenu() {
+    let (dom, bx) = laid(
+        "<html><body><div id=c><p>x</p></div></body></html>",
+        "div { height: 100px; align-content: center } \
+         p { height: 20px; margin: 0 }",
+    );
+    let c = find(&bx, by_tag(&dom, "div"));
+    let p = find(&bx, by_tag(&dom, "p"));
+    // free = 100 − 20 = 80 → offset 40 sous le bord contenu.
+    let content_top = c.rect.y + c.children[0].rect.y - p.rect.y;
+    assert!(
+        approx(p.rect.y - c.rect.y, 40.0),
+        "p décalé de free/2 : {:?} (c={:?})",
+        p.rect,
+        c.rect
+    );
+    let _ = content_top;
+}
+
+/// `end` pousse le contenu au bas ; `space-between` retombe
+/// sur son fallback `start` (bloc = unité unique, pas de
+/// gouttière distribuée entre enfants).
+#[test]
+fn align_content_bloc_end_et_fallback_space_between() {
+    let (dom, bx) = laid(
+        "<html><body><div id=c><p>x</p></div></body></html>",
+        "div { height: 100px; align-content: end } \
+         p { height: 20px; margin: 0 }",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let c = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(p.rect.y - c.rect.y, 80.0), "end : {:?}", p.rect);
+    let (dom2, bx2) = laid(
+        "<html><body><div id=c><p>x</p><p>y</p></div></body></html>",
+        "div { height: 100px; align-content: space-between } \
+         p { height: 20px; margin: 0 }",
+    );
+    let c2 = find(&bx2, by_tag(&dom2, "div"));
+    let p0 = &c2.children[0];
+    let p1 = &c2.children[1];
+    assert!(approx(p0.rect.y - c2.rect.y, 0.0), "between→start : {p0:?}");
+    assert!(approx(p1.rect.y - p0.rect.y, 20.0), "soudés : {p1:?}");
+}
+
+/// Régression `flexbox-column-row-gap-001` : `align-content`
+/// d'un conteneur **flex** est consommé par
+/// `flow_flex_children` — le rail bloc ne doit PAS le
+/// rejouer (sinon double décalage des items).
+#[test]
+fn align_content_bloc_ignore_conteneur_flex() {
+    let (dom, bx) = laid(
+        "<html><body><div id=f><i>a</i></div></body></html>",
+        "div { display: flex; height: 200px; align-content: center } \
+         i { height: 20px; margin: 0 }",
+    );
+    let f = find(&bx, by_tag(&dom, "div"));
+    let item = &f.children[0];
+    // nowrap : le rail flex laisse la ligne en haut —
+    // tout décalage prouverait la double application.
+    assert!(
+        approx(item.rect.y - f.rect.y, 0.0),
+        "item flex en haut : {:?} (f={:?})",
+        item.rect,
+        f.rect
+    );
+}
+
+/// Toute valeur ≠ `normal` fait du bloc un contexte de
+/// formatage indépendant (`fc_root`) — les marges des
+/// descendants ne s'échappent plus.
+#[test]
+fn align_content_force_contexte_independant() {
+    let (dom, bx) = laid(
+        "<html><body><div id=c><p>x</p></div></body></html>",
+        "div { height: 100px; align-content: center } \
+         p { height: 20px; margin: 0 }",
+    );
+    let c = find(&bx, by_tag(&dom, "div"));
+    assert!(c.fc_root, "align-content ≠ normal → IFC");
+}

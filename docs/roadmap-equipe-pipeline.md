@@ -4793,3 +4793,22 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   échec compté : `outside-marker-with-align-content`
   (`align-content` bloc — file). Verrou :
   `marker_texte_ancre_end_ltr_et_start_rtl` (display).
+- [x] **R-309 — `align-content` sur conteneurs bloc
+  (css-align §5.1.1) — WPT 203/203 (100 %)**
+  (layout + harnais WPT — solde le dernier échec compté :
+  `outside-marker-with-align-content`). Contenu aligné
+  **comme une unité** sur l'axe bloc : `center`/`end` +
+  fallbacks spec (`space-between`→start, `around`/`evenly`
+  →center, `stretch`/`baseline`→start), alignement *safe*
+  (débordement→start, `unsafe` honoré), `fc_root` pour
+  toute valeur ≠ `normal` (IFC — marges et flottants
+  contenus). **Garde** : `display:flex|grid` exclus —
+  leur `align-content` est déjà consommé par
+  `flow_flex_children`/`flow_grid_children` (double
+  application = régression `flexbox-column-row-gap-001`,
+  interceptée au gate). Hors-flux exclus. **Mesure
+  203/203** — cliquet 202→203 ; le manifeste curé est
+  soldé, les trous restants vivent hors corpus
+  (`css-align/blocks/` — 21 reftests prospectés via
+  `wpt-scan` pour la suite). Verrous : `align_content_bloc_*`
+  (block ×4).
