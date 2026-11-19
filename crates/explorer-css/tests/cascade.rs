@@ -1138,6 +1138,49 @@ fn ua_bloc_legacy() {
 }
 
 #[test]
+fn ua_liste_nichee_sans_marge() {
+    // HTML Rendering §Lists : `li dir|dl|menu|ol|ul` → marge
+    // nulle — une liste nichée sous `li` ne cumule pas le 1em
+    // UA. Sans la règle, un `ul` inline-block dans un `li`
+    // gonflait sa line box de sa margin-box (+32 px — écart
+    // mesuré terrain sur lobste.rs : stories 89 px vs ref 59).
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let ul_top = el(&mut dom, f.body, "ul", &[]);
+    let li = el(&mut dom, f.body, "li", &[]);
+    let ul_nested = el(&mut dom, li, "ul", &[]);
+    let ol_nested = el(&mut dom, li, "ol", &[]);
+    let dl_nested = el(&mut dom, li, "dl", &[]);
+    // Un nœud hors `li` ne matche pas la règle d'imbrication.
+    let div = el(&mut dom, f.body, "div", &[]);
+    let ul_autre = el(&mut dom, div, "ul", &[]);
+    for (n, nom) in [
+        (ul_top, "ul racine"),
+        (ul_nested, "ul niché"),
+        (ol_nested, "ol niché"),
+        (dl_nested, "dl niché"),
+        (ul_autre, "ul hors li"),
+    ] {
+        let s = e.compute(&dom, n, &env());
+        let (mt, mb) = (s.get("margin-top"), s.get("margin-bottom"));
+        if matches!(nom, "ul niché" | "ol niché" | "dl niché") {
+            assert_eq!(
+                (mt, mb),
+                (Some("0"), Some("0")),
+                "{nom} doit perdre ses marges nichées"
+            );
+        } else {
+            assert_eq!(
+                (mt, mb),
+                (Some("1em"), Some("1em")),
+                "{nom} conserve la marge UA 1em"
+            );
+        }
+    }
+}
+
+#[test]
 fn ua_center_porte_webkit_center() {
     let f = fixture();
     let e = StyleEngine::new();

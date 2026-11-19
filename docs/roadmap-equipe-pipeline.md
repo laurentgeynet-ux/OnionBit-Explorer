@@ -4863,3 +4863,25 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   (overflow h/v, float/clear LTR+RTL, match-parent ×2) ;
   `computedv_expansion_vs_inertie_verbatim` recalé
   (`overflow-block` résolu, plus verbatim). Cliquet vert.
+
+- [x] **R-310 — Feuille UA : marges des listes nichées sous `li`
+  (HTML Rendering §Lists) — anomalie terrain lobste.rs soldée**
+  (`explorer-css`, pilotage vol/geodiff — pas la jauge BCD).
+  **Signature** : chaque `.story_liner` mesurait 89 px vs 59 px
+  référence Chrome (~×25 stories) → doc 2 534 px vs 1 757
+  (+44 %). Bissection sur la feuille réelle : un `ul` niché
+  dans un `li` gardait le `margin-block:1em` UA — rendu
+  inline-block (`li .tags`), sa margin-box gonflait la line
+  box de +32 px. La feuille UA de référence porte `li dir,
+  li dl, li menu, li ol, li ul { margin-block: 0 }` — absente
+  ici. **Fix** : la règle ajoutée à la feuille UA
+  (`cascade.rs`). **Mesure post-fix (binaire frais)** :
+  lobste.rs doc 2 534→1 780 px vs ref 1 757 (+1,3 %),
+  stories 89→57 px (ref 59), divergents geodiff 97,4→95,5 %
+  des boîtes matchées ; csszengarden inchangé, HN ~stable.
+  **Constat annexe §B-141** (dom peuplé → 1 boîte) :
+  reproduit et diagnostiqué — `.app_loading{display:none}`
+  inline UA-conforme sur `body` non hydraté, trou JS de
+  mount, **pas** pipeline. Verrou :
+  `ua_liste_nichee_sans_marge` (cascade — `ul`/`ol`/`dl`
+  sous `li` → 0, hors `li` → 1em conservé).
