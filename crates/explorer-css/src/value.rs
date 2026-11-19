@@ -972,6 +972,11 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
                     | "-moz-available"
             ) || len_or_pct(v)
                 || v.trim_start().starts_with("anchor-size(")
+                // `fit-content(<length-percentage>)` — forme
+                // fonction css-sizing-3 §4.1 (BCD-1) ; le
+                // layout résout `min(max-content,
+                // max(min-content, limite))`.
+                || v.trim_start().starts_with("fit-content(")
         }
         // R-254 — `anchor()`/`anchor-size()` dans les insets
         // (css-anchor-position-1) : fonction à résolution
@@ -1714,7 +1719,11 @@ fn expand_columns(value: &str) -> Vec<(String, String)> {
 /// example.com — fond `#f0f0f2` perdu, R-219).
 fn color_like(part: &str) -> bool {
     parse_color(part).is_some()
-        || part == "currentcolor"
+        // `eq_ignore_ascii_case` : les sérialisations
+        // camelCase (`currentColor`) sont légales en
+        // entrée — `color()` résout la casse en aval
+        // (BCD-1 : `background:currentColor` refusé).
+        || part.eq_ignore_ascii_case("currentcolor")
         || part.starts_with("light-dark(")
         || part.starts_with("var(")
 }
@@ -1922,11 +1931,17 @@ fn parse_bg_layer(layer: &str) -> Option<Vec<(String, String)>> {
 struct BgParts {
     color: Option<String>,
     image: Option<String>,
-    repeat: Option<String>,
+    /// `<repeat-style>` = 1-2 mots-clés (css-backgrounds-3
+    /// §3.5 — `round space` légal, comme `mask-repeat`).
+    repeat: Vec<String>,
     attachment: Option<String>,
     position: Vec<String>,
     size: Vec<String>,
     boxes: Vec<String>,
+    /// Clip `<visual-box>` sans équivalent d'origine
+    /// (css-b-4 §3.8 : `border-area`/`text` — clip seuls,
+    /// jamais `background-origin`).
+    clip: Option<String>,
     /// `background-blend-mode` (R-184) — keyword `<blend-mode>`
     /// de la couche, `normal` par défaut.
     blend: Option<String>,
@@ -1955,21 +1970,51 @@ impl BgParts {
         if bg_image_token(part) {
             return self.image.replace(part.to_string()).is_none();
         }
-        if matches!(part, "repeat" | "repeat-x" | "repeat-y" | "no-repeat") {
-            return self.repeat.replace(part.to_string()).is_none();
+        if matches!(
+            part,
+            "repeat" | "repeat-x" | "repeat-y" | "no-repeat" | "space" | "round"
+        ) && self.repeat.len() < 2
+        {
+            self.repeat.push(part.to_string());
+            return true;
         }
         if matches!(part, "fixed" | "scroll" | "local") {
             return self.attachment.replace(part.to_string()).is_none();
         }
-        if matches!(part, "border-box" | "padding-box" | "content-box") && self.boxes.len() < 2 {
+        // `border-area`/`text` : valeurs de clip sans origine
+        // (css-b-4) — un clip déjà posé ou deux `<box>` réels
+        // rendent la déclaration invalide (trois valeurs de
+        // boîte au total).
+        if matches!(part, "border-area" | "text") && self.boxes.len() < 2 {
+            return self.clip.replace(part.to_string()).is_none();
+        }
+        if matches!(part, "border-box" | "padding-box" | "content-box")
+            && self.boxes.len() < 2
+            // Un clip `text`/`border-area` déjà posé n'admet
+            // qu'une seule `<coord-box>` (l'origine).
+            && (self.clip.is_none() || self.boxes.is_empty())
+        {
             self.boxes.push(part.to_string());
             return true;
         }
         if BG_BLEND_TOKENS.contains(&part) {
             return self.blend.replace(part.to_string()).is_none();
         }
-        if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
-            || parse_length(part).is_some()
+        if (matches!(
+            part,
+            // `x-start`/`x-end`/`y-start`/`y-end` : positions
+            // logiques css-b-4 §3.6 (résolues par le render —
+            // display.rs les mappe déjà, BCD-1).
+            "left"
+                | "right"
+                | "top"
+                | "bottom"
+                | "center"
+                | "x-start"
+                | "x-end"
+                | "y-start"
+                | "y-end"
+        ) || parse_length(part).is_some()
             || part.ends_with('%'))
             && self.position.len() < 4
         {
@@ -1993,7 +2038,11 @@ impl BgParts {
             ),
             (
                 "background-repeat".to_string(),
-                self.repeat.unwrap_or_else(|| "repeat".to_string()),
+                if self.repeat.is_empty() {
+                    "repeat".to_string()
+                } else {
+                    self.repeat.join(" ")
+                },
             ),
             (
                 "background-attachment".to_string(),
@@ -2016,8 +2065,10 @@ impl BgParts {
                 },
             ),
             // Une `<box>` seule couvre origin + clip (spec) ;
-            // deux → origin puis clip. La peinture les ignore
-            // encore — émis pour complétude de la cascade.
+            // deux → origin puis clip. `border-area`/`text`
+            // posent le clip seul (jamais l'origine). La
+            // peinture les ignore encore — émis pour
+            // complétude de la cascade.
             (
                 "background-origin".to_string(),
                 self.boxes
@@ -2027,9 +2078,8 @@ impl BgParts {
             ),
             (
                 "background-clip".to_string(),
-                self.boxes
-                    .last()
-                    .cloned()
+                self.clip
+                    .or_else(|| self.boxes.last().cloned())
                     .unwrap_or_else(|| "border-box".to_string()),
             ),
             (
@@ -2133,8 +2183,21 @@ fn parse_mask_layer(layer: &str) -> Option<Vec<(String, String)>> {
             {
                 acc.boxes.push(part.to_string());
                 true
-            } else if (matches!(part, "left" | "right" | "top" | "bottom" | "center")
-                || parse_length(part).is_some()
+            } else if (matches!(
+                part,
+                // Positions logiques css-b-4 (BCD-1 — mêmes
+                // mots-clés que `background`, résolution
+                // partagée au render).
+                "left"
+                    | "right"
+                    | "top"
+                    | "bottom"
+                    | "center"
+                    | "x-start"
+                    | "x-end"
+                    | "y-start"
+                    | "y-end"
+            ) || parse_length(part).is_some()
                 || part.ends_with('%'))
                 && acc.position.len() < 4
             {

@@ -1389,7 +1389,14 @@ fn context_css(name: &str) -> &'static str {
                 "border-style:solid"
             }
         } else {
-            "border:2px solid black;width:100px;height:80px;background:blue"
+            // `navy` ≠ `currentColor` (`color:red` hérité par
+            // `.x`) : les sondes couleur `currentColor`/
+            // `transparent` sont discriminables — avant, la
+            // bordure noire absorbait `currentColor` (BCD-1 :
+            // le token, invalide en `color_like`, partait en
+            // `border-*-width` et tuait la bordure — un `ok`
+            // par retrait du ctx, faux positif).
+            "border:2px solid navy;width:100px;height:80px;background:blue;color:red"
         }
     } else if n.starts_with("mask") {
         // Les longhands `mask-*` n'ont d'effet que sur une
@@ -3358,6 +3365,15 @@ fn paint_subfeature(name: &str, v: &str) -> Option<String> {
         ("background" | "border-image-source" | "list-style" | "list-style-image", "url")
         | ("background-image" | "mask" | "mask-image" | "shape-outside", "url" | "image")
         | ("content", "url" | "image" | "content_replacement") => url(),
+        // `mask` + position logique css-b-4 (BCD-1) : le
+        // brut `x-end` seul expande `mask-image:none` — inerte
+        // par construction (le shorthand resette l'image du
+        // ctx). La capacité mesurée est la résolution de la
+        // position AVEC une source servie.
+        ("mask", "x-end") => format!("{} x-end", url()),
+        ("mask", "x-start") => format!("{} x-start", url()),
+        ("mask", "y-end") => format!("{} y-end", url()),
+        ("mask", "y-start") => format!("{} y-start", url()),
         ("background-image" | "content" | "shape-outside", "image-set") => {
             format!("image-set({} 1x)", url())
         }

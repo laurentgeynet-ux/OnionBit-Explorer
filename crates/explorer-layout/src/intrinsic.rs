@@ -24,7 +24,9 @@
 //! - marges/paddings des enfants ignorés, sauf le padding
 //!   propre porté par l'appelant (`width` = content box).
 
-use crate::block::{box_size_to_content, css_px, font_size_px, measure_fn, side_px, BlockCtx};
+use crate::block::{
+    box_size_to_content, css_px, font_size_px, measure_fn, raw_length_px, side_px, BlockCtx,
+};
 use crate::boxtree::{BoxKind, LayoutBox};
 use explorer_css::ComputedStyle;
 
@@ -66,6 +68,19 @@ pub(crate) fn intrinsic_size_px(
         "stretch" | "fill-available" | "-webkit-fill-available" | "-moz-available" => Some(avail),
         "fit-content" => {
             Some(max_content_px(bx, fs, ctx).min(min_content_px(bx, fs, ctx).max(avail)))
+        }
+        // `fit-content(<length-percentage>)` (css-sizing-3
+        // §4.1, BCD-1) : `min(max-content, max(min-content,
+        // limite))` — la limite se résout comme une taille
+        // normale : `%` sur le bloc conteneur (`basis`),
+        // `calc`/`min`/`clamp`/`em` via `raw_length_px`.
+        s if s.starts_with("fit-content(") => {
+            let inner = s
+                .strip_prefix("fit-content(")
+                .and_then(|r| r.strip_suffix(')'))
+                .map(str::trim)?;
+            let limit = raw_length_px(inner, basis, fs, ctx)?.max(0.0);
+            Some(max_content_px(bx, fs, ctx).min(min_content_px(bx, fs, ctx).max(limit)))
         }
         _ => None,
     }

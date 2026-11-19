@@ -5,7 +5,9 @@
 //! Tests des valeurs typées, expansion des shorthands et
 //! pseudo-classes dynamiques (étape 16).
 
-use explorer_css::value::{expand_shorthand, parse_color, parse_length, Color, Unit};
+use explorer_css::value::{
+    expand_shorthand, parse_color, parse_length, value_is_valid_for, Color, Unit,
+};
 use explorer_css::{matches_with_state, parse_selector_list, Origin, StyleEngine, StyleEnv};
 use explorer_dom::{Dom, NodeId};
 
@@ -113,6 +115,63 @@ fn shorthand_border() {
     let e = expand_shorthand("border-width", "1px 2px").unwrap();
     assert_eq!(e.len(), 4);
     assert_eq!(e[1].1, "2px");
+}
+
+#[test]
+fn shorthand_background_bcd1() {
+    // BCD-1 — les mots-clés que le shorthand refusait alors
+    // que les consommateurs les gèrent : `round`/`space`
+    // (repeat), positions logiques css-b-4, clips
+    // `<visual-box>`, couleur camelCase.
+    let e = expand_shorthand("background", "linear-gradient(red,blue) round").unwrap();
+    assert!(e.contains(&("background-repeat".into(), "round".into())));
+    // Deux mots-clés repeat (spec `<repeat-style>{1,2}`).
+    let e = expand_shorthand("background", "url(a.png) round space").unwrap();
+    assert!(e.contains(&("background-repeat".into(), "round space".into())));
+    // Positions logiques.
+    let e = expand_shorthand("background", "url(a.png) x-end y-start").unwrap();
+    assert!(e.contains(&("background-position".into(), "x-end y-start".into())));
+    // Clips sans origine : `text` seul → clip, origine
+    // initiale.
+    let e = expand_shorthand("background", "linear-gradient(red,blue) text").unwrap();
+    assert!(e.contains(&("background-clip".into(), "text".into())));
+    assert!(e.contains(&("background-origin".into(), "padding-box".into())));
+    let e = expand_shorthand("background", "linear-gradient(red,blue) border-area").unwrap();
+    assert!(e.contains(&("background-clip".into(), "border-area".into())));
+    // `<coord-box>` + clip étendu : première = origine,
+    // seconde = clip.
+    let e = expand_shorthand("background", "url(a.png) content-box text").unwrap();
+    assert!(e.contains(&("background-origin".into(), "content-box".into())));
+    assert!(e.contains(&("background-clip".into(), "text".into())));
+    // Couleur seule, sérialisation camelCase.
+    let e = expand_shorthand("background", "currentColor").unwrap();
+    assert!(e.contains(&("background-color".into(), "currentColor".into())));
+    // Gardes : troisième valeur de boîte, deuxième clip,
+    // troisième repeat → invalides.
+    assert!(expand_shorthand("background", "text padding-box border-box").is_none());
+    assert!(expand_shorthand("background", "text border-area").is_none());
+    assert!(expand_shorthand("background", "round space repeat").is_none());
+}
+
+#[test]
+fn shorthand_mask_et_fit_content_bcd1() {
+    // BCD-1 — `mask` accepte les mêmes positions logiques.
+    let e = expand_shorthand("mask", "url(a.png) x-start y-end").unwrap();
+    assert!(e.contains(&("mask-position".into(), "x-start y-end".into())));
+    // `fit-content(<len-pct>)` valide sur les props de
+    // sizing — le mot-clé et la fonction sont distincts.
+    for prop in [
+        "width",
+        "height",
+        "min-width",
+        "min-height",
+        "max-width",
+        "max-height",
+    ] {
+        assert!(value_is_valid_for(prop, "fit-content(60px)"), "{prop}");
+        assert!(value_is_valid_for(prop, "fit-content(50%)"), "{prop}");
+        assert!(value_is_valid_for(prop, "fit-content"), "{prop}");
+    }
 }
 
 #[test]

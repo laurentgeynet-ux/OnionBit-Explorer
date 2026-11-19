@@ -4746,3 +4746,31 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   `pseudo_marker_content_substitution` (layout/block).
   Demande NAV journalisée : fetch `content:url(http…)` →
   `content_images` + `url_sizes`.
+
+- [x] **BCD-1 — Littéraux-invalides soldés : `background`/`mask`
+  css-b-4 + `fit-content(<len>)`** (`explorer-css`/`explorer-
+  layout`/`explorer-cli`, piste jauge BCD — worktree
+  `pipeline/bcd-invalid-literals`, `css.values`
+  1149→1166/1751, 66,6 %). `BgParts` : `round`/`space` en
+  repeat (Vec ≤2, spec §3.5), positions logiques
+  `x-start`/`x-end`/`y-start`/`y-end`, clips `<visual-box>`
+  `border-area`/`text` en slot dédié (jamais d'origine),
+  `currentColor` débloqué (`color_like` était sensible à la
+  casse) ; `mask` reçoit les positions logiques ; le render
+  consommait déjà tout — les trous étaient purement
+  parseur. `fit-content(<len-pct>)` validé + résolu
+  (`intrinsic_size_px` : `min(max-content, max(min-content,
+  limite))`, `%`/`calc`/`min`/`clamp` via `raw_length_px`).
+  Piège corrigé : `border:currentColor` était `ok` par
+  retrait du ctx (le token partait en `border-*-width`
+  invalide) — ctx `border` passé à `navy` + `color:red`,
+  la capacité est mesurée pour de vrai. Sondes
+  `mask:x-*`/`y-*` : `url(HARNESS_IMG) <pos>` (le brut
+  seul = `mask-image:none`, inerte) → 4 `ok`. Flips :
+  `background` 20→29/29, `mask` 0→4/30, `width`/`max-
+  width` `fit-content_function` ; `height`/`min-*`/`max-
+  height` restent des misses honnêtes (clamp non liant
+  sous les fixtures partagées). Verrous : `shorthand_
+  background_bcd1`, `shorthand_mask_et_fit_content_bcd1`,
+  `width_fit_content_fonction_bcd1` — `bcd_audit --fast`
+  0 constat, cliquet vert.

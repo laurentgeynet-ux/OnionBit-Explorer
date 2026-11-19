@@ -318,6 +318,45 @@ fn width_fit_content_borne_par_disponible() {
 }
 
 #[test]
+fn width_fit_content_fonction_bcd1() {
+    // `fit-content(<len-pct>)` (BCD-1, css-sizing-3 §4.1) :
+    // `min(max-content, max(min-content, limite))` — sur
+    // « aaa bbbb » : max-content 8 car ≈ 70.4, min-content
+    // = mot le plus long « bbbb » ≈ 35.2.
+    // Limite 60 entre les deux → 60.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"width:fit-content(60px)\">aaa bbbb</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 60.0), "limite {}", d.rect.width);
+    // Limite sous le min-content → min-content gagne.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"width:fit-content(30px)\">aaa bbbb</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 4.0 * 8.8), "min {}", d.rect.width);
+    // `%` du bloc conteneur (50 % de 800 = 400) > max-content
+    // → max-content.
+    let (dom, bx) = laid(
+        "<!doctype html><div style=\"width:fit-content(50%)\">aaa bbbb</div>",
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 8.0 * 8.8), "max {}", d.rect.width);
+    // `max-width:fit-content(…)` — même résolution sur la
+    // borne : contenu long borné par la limite, pas par 800.
+    let long = "aaaa ".repeat(50);
+    let (dom, bx) = laid(
+        &format!("<!doctype html><div style=\"max-width:fit-content(100px)\">{long}</div>"),
+        "",
+    );
+    let d = find(&bx, by_tag(&dom, "div"));
+    assert!(approx(d.rect.width, 100.0), "borne {}", d.rect.width);
+}
+
+#[test]
 fn max_content_via_enfant_bloc_a_largeur_fixe() {
     // Le max-content d'un conteneur inclut ses enfants bloc :
     // un fils à `width: 120px` impose 120px même si le texte
