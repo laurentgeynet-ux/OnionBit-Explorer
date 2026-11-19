@@ -15306,6 +15306,42 @@ chaque gain rapporté contre les **deux** archétypes.
   propres. **Reste catalogué** : noms de groupes non-BMP,
   `poisoned-stdlib`, capture reset quantifié,
   `builtin-infer-unicode`.
+- [x] **JS-C623 — `PromiseResolve`/`Await` spec-complet :
+  reprise toujours par job + `constructor` lu par `Get` —
+  sous-ensemble `for-await-of` soldé à 2 431/2 431**
+  (`interp/lazy.rs` + gate `tests/c623_promise.rs` **6/6**).
+  **`arm_await`** refait sur le modèle spec : `Await(v)` =
+  `PromiseResolve(%Promise%, v)` (`v` promesse →
+  `v.constructor` lu par `Get` — observable ; `=== %Promise%`
+  → `v`, autre → capability+résolution ; thenable étranger →
+  adoption, non-objet → promesse résolue) puis
+  `PerformPromiseThen` — la reprise est **toujours** un job
+  enfilé, jamais de livraison synchrone sur promesse déjà
+  réglée (`ticks-*`). **`AsyncFromSyncIterator`** enfin
+  fidèle (`afs` 0/1 sur `ForAwait`/`DstrAwait`) :
+  `PromiseResolve(value)` → `PerformPromiseThen(vw,
+  unwrap→cap)` armée **à l'émission** (natives
+  `afs_unwrap`/`afs_reject` bound `[cap, done]`) →
+  `Await(cap)` — 2 gets `constructor` + 2 jobs par
+  `next()` ; toute étape abrupte =
+  `IfAbruptRejectPromise` → rejet de `cap` propagé par
+  l'`Await` en job, jamais de jet synchrone
+  (`continuation-abrupt-completion` : `catch` après
+  `tick 2`). **Deadlock latent résorbé** : `agen_pump`
+  lisait `pend = pending_await()` alors que `resume`
+  était posée — le bras `resume.is_some()` de la pompe
+  était inatteignable ; `pend` ne compte désormais que
+  sans reprise en attente (exposé par l'await-toujours-
+  job — `c601_await_en_pleine_requete`). Mesures : corpus
+  extrait 6 038/6 279 — 241 échecs = résidus catalogués
+  (`built-ins/Iterator` helpers ×136, `for-of` scope/TDZ/
+  typedarray-resizable ×99, `labeled`/`types` ×6), aucun
+  `for-await-of`, aucune régression async. Gates : c623
+  6/6, c616 10/10, c619 8/8, c620 11/11, c621 6/6,
+  agen_queue 12/12, await_thenable 18/18, promise_species
+  10/10, c611/c613/c615/c617/c96/c348/c456/c458/iter_lazy/
+  lazy_gen verts, hostile 12/12 release, lib 54/54,
+  clippy/fmt/doc propres.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

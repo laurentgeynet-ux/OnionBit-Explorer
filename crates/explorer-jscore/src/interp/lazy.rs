@@ -1128,6 +1128,12 @@ enum FKind {
         target: ForTarget,
         issued: bool,
         sync_iter: bool,
+        /// JS-C623 — livraison `AsyncFromSyncIterator` en
+        /// vol : 0 = aucun ; 1 = attente du `{value,done}` de
+        /// la continuation (`PromiseResolve(value)` →
+        /// `then(unwrap→cap)` → `Await(cap)` — observable :
+        /// 2 gets `constructor` + 2 jobs par `next()`).
+        afs: u8,
     },
     /// `for await ([…] of it)` — destructuration par item via
     /// le protocole **async** (JS-C620, spec
@@ -1150,6 +1156,9 @@ enum FKind {
         closing: bool,
         rest: Vec<Value>,
         mode: BindMode,
+        /// JS-C623 — même machine `afs` que `ForAwait`
+        /// (0/1 — livraison `AsyncFromSyncIterator` en vol).
+        afs: u8,
     },
     /// `try` — throw → throw → catch si présent ; `finally`
     /// toujours.
@@ -1954,14 +1963,16 @@ impl GExec {
                 target,
                 issued,
                 sync_iter,
+                afs,
             } => {
-                let (env, it, next, target, issued, sync_iter) = (
+                let (env, it, next, target, issued, sync_iter, afs) = (
                     f.env.clone(),
                     iter.clone(),
                     next.clone(),
                     target.clone(),
                     *issued,
                     *sync_iter,
+                    *afs,
                 );
                 if !issued {
                     // `issued=true` pendant toute la mécanique
@@ -1979,21 +1990,62 @@ impl GExec {
                         Err(Thrown(v)) => return self.throw_into(e, v),
                     };
                     let awaited = if sync_iter {
-                        // `AsyncFromSyncIterator` : `r` =
-                        // `{value,done}` sync — `done` lu à
-                        // plat, c'est `value` qui est awaited.
-                        let Value::Obj(id) = r else {
+                        // `AsyncFromSyncIterator` (JS-C623,
+                        // spec `AsyncFromSyncIteratorContinuation`)
+                        // : `PromiseResolve(value)` →
+                        // `PerformPromiseThen(vw, unwrap→cap)`
+                        // — la chaîne est armée **à l'émission**
+                        // (`constructor` de `value` lu ici, celui
+                        // de `cap` à l'`arm_await` — deux gets
+                        // synchrones avant tout tick). Toute
+                        // étape abrupte = `IfAbruptRejectPromise`
+                        // → rejet de `cap` propagé par l'`Await`
+                        // en job, jamais de jet synchrone
+                        // (`continuation-abrupt-completion`).
+                        let cap = e.new_promise();
+                        let abrupt = if let Value::Obj(id) = r {
+                            let sd = e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d));
+                            match e.get_prop_value(Value::Obj(id), "value") {
+                                Ok(val) => match Self::promise_resolve(e, val) {
+                                    Ok(vw) => {
+                                        let unwrap = e.bound_native(
+                                            "afs unwrap",
+                                            afs_unwrap as NativeFn,
+                                            vec![Value::Obj(cap), Value::Bool(sd)],
+                                        );
+                                        let rej = e.bound_native(
+                                            "afs reject",
+                                            afs_reject as NativeFn,
+                                            vec![Value::Obj(cap)],
+                                        );
+                                        let discard = e.new_promise();
+                                        if let Value::Obj(vwid) = vw {
+                                            e.attach_then(
+                                                vwid,
+                                                unwrap,
+                                                rej,
+                                                crate::promise::ThenSink::Native(discard),
+                                            );
+                                        }
+                                        None
+                                    }
+                                    Err(Thrown(v)) => Some(v),
+                                },
+                                Err(Thrown(v)) => Some(v),
+                            }
+                        } else {
                             let Thrown(v) = e.type_error("iterator result is not an object");
-                            return self.throw_into(e, v);
+                            Some(v)
                         };
-                        if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
-                            self.stack.pop();
-                            return Ok(());
+                        if let Some(v) = abrupt {
+                            e.reject_promise(cap, v);
                         }
-                        match e.get_prop_value(Value::Obj(id), "value") {
-                            Ok(v) => v,
-                            Err(Thrown(v)) => return self.throw_into(e, v),
+                        if let Some(fr) = self.stack.last_mut() {
+                            if let FKind::ForAwait { afs, .. } = &mut fr.kind {
+                                *afs = 1;
+                            }
                         }
+                        Value::Obj(cap)
                     } else {
                         r
                     };
@@ -2007,7 +2059,26 @@ impl GExec {
                 // `__awaitit` : résultat `{value,done}` (async)
                 // ou valeur unwrapped (`sync_iter`) — lié
                 // inline ou par `liver` à la reprise.
-                let r = e.env_get(&env, "__awaitit").unwrap_or(Value::Undefined);
+                let mut r = e.env_get(&env, "__awaitit").unwrap_or(Value::Undefined);
+                if sync_iter && afs != 0 {
+                    // Livraison AFS — `r` = `{value,done}` de la
+                    // continuation (JS-C623) : reset du stade,
+                    // `done`/`value` lus à plat.
+                    if let Some(fr) = self.stack.last_mut() {
+                        if let FKind::ForAwait { afs, .. } = &mut fr.kind {
+                            *afs = 0;
+                        }
+                    }
+                    let Value::Obj(id) = r.clone() else {
+                        let Thrown(v) = e.type_error("iterator result is not an object");
+                        return self.throw_into(e, v);
+                    };
+                    if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
+                        self.stack.pop();
+                        return Ok(());
+                    }
+                    r = e.get_prop(id, "value").unwrap_or(Value::Undefined);
+                }
                 let val = if sync_iter {
                     r
                 } else {
@@ -2058,6 +2129,7 @@ impl GExec {
                             closing: false,
                             rest: Vec::new(),
                             mode,
+                            afs: 0,
                         },
                     });
                     return Ok(());
@@ -2088,9 +2160,21 @@ impl GExec {
                 closing,
                 rest,
                 mode,
+                afs,
             } => {
                 let env = f.env.clone();
-                let (it, next, elems, mut idx, mut done, mut issued, mut closing, mut rest, mode) = (
+                let (
+                    it,
+                    next,
+                    elems,
+                    mut idx,
+                    mut done,
+                    mut issued,
+                    mut closing,
+                    mut rest,
+                    mode,
+                    mut afs,
+                ) = (
                     it.clone(),
                     next.clone(),
                     elems.clone(),
@@ -2100,6 +2184,7 @@ impl GExec {
                     *closing,
                     rest.clone(),
                     *mode,
+                    *afs,
                 );
                 let sync_iter = *sync_iter;
                 macro_rules! wb {
@@ -2111,10 +2196,11 @@ impl GExec {
                                 issued: s,
                                 closing: c,
                                 rest: r,
+                                afs: a,
                                 ..
                             } = &mut fr.kind
                             {
-                                (*i, *d, *s, *c) = (idx, done, issued, closing);
+                                (*i, *d, *s, *c, *a) = (idx, done, issued, closing, afs);
                                 r.clone_from(&rest);
                             }
                         }
@@ -2200,20 +2286,53 @@ impl GExec {
                             Err(Thrown(v)) => return self.throw_into(e, v),
                         };
                         let awaited = if sync_iter {
-                            let Value::Obj(id) = r else {
+                            // `AsyncFromSyncIterator` (JS-C623)
+                            // — chaîne `PromiseResolve(value)`
+                            // → `then(unwrap→cap)` armée à
+                            // l'émission, `cap` awaited ;
+                            // abrupt → `IfAbruptRejectPromise`
+                            // (rejet de `cap`, jamais synchrone).
+                            let cap = e.new_promise();
+                            let abrupt = if let Value::Obj(id) = r {
+                                let sd = e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d));
+                                match e.get_prop_value(Value::Obj(id), "value") {
+                                    Ok(val) => match Self::promise_resolve(e, val) {
+                                        Ok(vw) => {
+                                            let unwrap = e.bound_native(
+                                                "afs unwrap",
+                                                afs_unwrap as NativeFn,
+                                                vec![Value::Obj(cap), Value::Bool(sd)],
+                                            );
+                                            let rej = e.bound_native(
+                                                "afs reject",
+                                                afs_reject as NativeFn,
+                                                vec![Value::Obj(cap)],
+                                            );
+                                            let discard = e.new_promise();
+                                            if let Value::Obj(vwid) = vw {
+                                                e.attach_then(
+                                                    vwid,
+                                                    unwrap,
+                                                    rej,
+                                                    crate::promise::ThenSink::Native(discard),
+                                                );
+                                            }
+                                            None
+                                        }
+                                        Err(Thrown(v)) => Some(v),
+                                    },
+                                    Err(Thrown(v)) => Some(v),
+                                }
+                            } else {
                                 let Thrown(v) = e.type_error("iterator result is not an object");
-                                return self.throw_into(e, v);
+                                Some(v)
                             };
-                            if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
-                                done = true;
-                                issued = false;
-                                wb!();
-                                continue 'steps;
+                            if let Some(v) = abrupt {
+                                e.reject_promise(cap, v);
                             }
-                            match e.get_prop_value(Value::Obj(id), "value") {
-                                Ok(v) => v,
-                                Err(Thrown(v)) => return self.throw_into(e, v),
-                            }
+                            afs = 1;
+                            wb!();
+                            Value::Obj(cap)
                         } else {
                             r
                         };
@@ -2224,7 +2343,7 @@ impl GExec {
                         continue 'steps;
                     }
                     // Livraison `__awaitit`.
-                    let r = e.env_get(&env, "__awaitit").unwrap_or(Value::Undefined);
+                    let mut r = e.env_get(&env, "__awaitit").unwrap_or(Value::Undefined);
                     if closing {
                         // `AsyncIteratorClose` — le résultat
                         // awaited doit être un objet.
@@ -2234,6 +2353,23 @@ impl GExec {
                         }
                         self.stack.pop();
                         return Ok(());
+                    }
+                    if sync_iter && afs != 0 {
+                        // Livraison AFS — `r` = `{value,done}`
+                        // de la continuation (JS-C623).
+                        afs = 0;
+                        wb!();
+                        let Value::Obj(id) = r.clone() else {
+                            let Thrown(v) = e.type_error("iterator result is not an object");
+                            return self.throw_into(e, v);
+                        };
+                        if e.get_prop(id, "done").is_some_and(|d| e.to_boolean(d)) {
+                            done = true;
+                            issued = false;
+                            wb!();
+                            continue 'steps;
+                        }
+                        r = e.get_prop(id, "value").unwrap_or(Value::Undefined);
                     }
                     let val = if sync_iter {
                         r
@@ -2305,6 +2441,46 @@ impl GExec {
     /// settled → livre ou jette immédiatement ; non-promesse
     /// → livre la valeur. Partagé avec `for await` (le
     /// `next()` awaited, `into = __awaitit`).
+    /// `PromiseResolve(%Promise%, v)` (JS-C623) : `v`
+    /// promesse → `v.constructor` lu par `Get` (observable —
+    // `*-constructor-lookup` ; `=== %Promise%` → `v` direct,
+    /// autre → capability+résolution) ; objet non-promesse →
+    /// wrapper adopté (`then` callable) ou résolu ;
+    /// non-objet → promesse résolue.
+    fn promise_resolve(e: &mut Engine, v: Value) -> JsResult<Value> {
+        match v.clone() {
+            Value::Obj(_) if e.is_promise(v.clone()) => {
+                let c = e.get_prop_value(v.clone(), "constructor")?;
+                if matches!(c, Value::Obj(cid) if cid == e.protos.promise_ctor) {
+                    Ok(v)
+                } else {
+                    // `NewPromiseCapability(%Promise%)` +
+                    // `resolve` — adoption/thenable internes.
+                    let wrapper = e.new_promise();
+                    e.resolve_promise(wrapper, v.clone());
+                    Ok(Value::Obj(wrapper))
+                }
+            }
+            Value::Obj(_) => {
+                // Thenable étranger (polyfill `Promise` des
+                // bundles, jQuery Deferred, `IDBRequest` pont-
+                // thenable — JS-C278, mur §B-14) : adoption par
+                // `then` callable, appel différé en job ;
+                // non-thenable → fulfill direct avec `v`.
+                let wrapper = e.new_promise();
+                if !e.adopt_thenable(wrapper, v.clone()) {
+                    e.settle_promise(wrapper, crate::promise::PromiseState::Fulfilled, v.clone());
+                }
+                Ok(Value::Obj(wrapper))
+            }
+            _ => {
+                let wrapper = e.new_promise();
+                e.settle_promise(wrapper, crate::promise::PromiseState::Fulfilled, v.clone());
+                Ok(Value::Obj(wrapper))
+            }
+        }
+    }
+
     fn arm_await(
         &mut self,
         e: &mut Engine,
@@ -2312,58 +2488,35 @@ impl GExec {
         env: &EnvRef,
         into: Option<Rc<str>>,
     ) -> JsResult<GFlow> {
-        let mut awaited = v.clone();
-        if matches!(v, Value::Obj(_)) && !e.is_promise(v.clone()) {
-            // Thenable étranger (polyfill `Promise` des bundles,
-            // jQuery Deferred, `IDBRequest` pont-thenable —
-            // JS-C278, mur §B-14) : spec `await v` =
-            // `PromiseResolve(%Promise%, v)` — adoption par
-            // `then` callable, appel différé en job. Le wrapper
-            // est Pending (adoption en file) ou Rejected
-            // (getter `then` abrupt → jeté au site ci-dessous) ;
-            // non-thenable → fulfill direct avec `v`.
-            let wrapper = e.new_promise();
-            if !e.adopt_thenable(wrapper, v.clone()) {
-                e.settle_promise(wrapper, crate::promise::PromiseState::Fulfilled, v.clone());
+        // JS-C623 — spec `Await` : `PromiseResolve` puis
+        // `PerformPromiseThen(promise, resume)` — la reprise
+        // est **toujours un job enfilé** (jamais de livraison
+        // synchrone — `ticks-*`).
+        let awaited = match Self::promise_resolve(e, v.clone()) {
+            Ok(p) => p,
+            Err(Thrown(t)) => {
+                self.throw_into(e, t)?;
+                return Ok(GFlow::Susp);
             }
-            awaited = Value::Obj(wrapper);
-        }
-        if let Value::Obj(pid) = awaited {
-            let st = e.heap.obj(pid).and_then(|o| match &o.kind {
-                ObjKind::Promise(p) => Some((p.state, p.result.clone())),
-                _ => None,
-            });
-            if let Some((state, result)) = st {
-                match state {
-                    crate::promise::PromiseState::Pending => {
-                        return Ok(self.arm_promise(e, pid, into));
-                    }
-                    crate::promise::PromiseState::Fulfilled => {
-                        if let Some(n) = into {
-                            Engine::env_put(env, &n, result, true);
-                        }
-                    }
-                    crate::promise::PromiseState::Rejected => {
-                        // Catch trouvée → frames remplacées →
-                        // pas d'avance pc (le `get_mut(depth-1)`
-                        // viserait la catch poussée).
-                        self.throw_into(e, result)?;
-                        return Ok(GFlow::Susp);
-                    }
-                }
-                return Ok(GFlow::Adv);
+        };
+        let Value::Obj(pid) = awaited else {
+            // Inatteignable (`promise_resolve` rend toujours
+            // un objet) — repli synchrone.
+            if let Some(n) = into {
+                Engine::env_put(env, &n, v, true);
             }
-        }
-        if let Some(n) = into {
-            Engine::env_put(env, &n, v, true);
-        }
-        Ok(GFlow::Adv)
+            return Ok(GFlow::Adv);
+        };
+        Ok(self.arm_promise(e, pid, into))
     }
 
     /// Réactions `async_resume` boundées `[gen_obj, outer]`
     /// sur `pid` + `pending = Await{into}` armé — partagé par
     /// `arm_await` et l'`iter.return()` awaited d'
-    /// `AsyncIteratorClose` (JS-C616).
+    /// `AsyncIteratorClose` (JS-C616). JS-C622 : passe par
+    /// `attach_then` (spec `PerformPromiseThen`) — promesse
+    /// **déjà réglée → `Job::Reaction` enfilé** : la reprise
+    /// est toujours un tick, jamais synchrone.
     fn arm_promise(&mut self, e: &mut Engine, pid: ObjId, into: Option<Rc<str>>) -> GFlow {
         // `BoundNative` prépose bound aux args →
         // `async_resume_ok(gen, outer, v)`.
@@ -2371,15 +2524,7 @@ impl GExec {
         let next = e.new_promise();
         let ok_f = bound_resume(e, gen.clone(), self.outer, true);
         let err_f = bound_resume(e, gen, self.outer, false);
-        if let Some(o) = e.heap.obj_mut(pid) {
-            if let ObjKind::Promise(p) = &mut o.kind {
-                p.reactions.push(crate::promise::Reaction {
-                    on_fulfilled: ok_f,
-                    on_rejected: err_f,
-                    next: crate::promise::ThenSink::Native(next),
-                });
-            }
-        }
+        e.attach_then(pid, ok_f, err_f, crate::promise::ThenSink::Native(next));
         self.pending = Some(Pending::Await { into, prom: pid });
         GFlow::Adv
     }
@@ -2724,6 +2869,7 @@ impl GExec {
                             target: target.clone(),
                             issued: false,
                             sync_iter,
+                            afs: 0,
                         },
                     });
                     return Ok(GFlow::Adv);
@@ -3037,6 +3183,34 @@ pub(crate) fn gen_lazy_obj(e: &mut Engine, env: EnvRef, this: Value, body: Rc<Ve
     v
 }
 
+/// JS-C623 — continuation `AsyncFromSyncIterator` : la
+/// valeur déballée reconstruit `{value, done}` et règle la
+/// promesse de pas (`bound = [cap, done]`).
+fn afs_unwrap(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(cap) = arg(args, 0) else {
+        return Ok(Value::Undefined);
+    };
+    let result = e.new_object();
+    e.set_own(result, "value", arg(args, 2), true);
+    e.set_own(result, "done", arg(args, 1), true);
+    e.settle_promise(
+        cap,
+        crate::promise::PromiseState::Fulfilled,
+        Value::Obj(result),
+    );
+    Ok(Value::Undefined)
+}
+
+/// Rejet `AsyncFromSyncIterator` — propagé à la promesse de
+/// pas (`bound = [cap]`).
+fn afs_reject(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(cap) = arg(args, 0) else {
+        return Ok(Value::Undefined);
+    };
+    e.reject_promise(cap, arg(args, 2));
+    Ok(Value::Undefined)
+}
+
 /// `BoundNative(async_resume_*)` boundé `[gen_obj, outer]` —
 /// la réaction `then` d'un `await` pendante.
 fn bound_resume(e: &mut Engine, gen: Value, outer: Option<ObjId>, ok: bool) -> Value {
@@ -3213,7 +3387,12 @@ pub(crate) fn agen_pump(e: &mut Engine, exec: &Rc<RefCell<GExec>>) {
                 return;
             };
             let done = g.done;
-            let pend = g.pending_await();
+            // JS-C623 — `resume` posée = une settlement
+            // d'`await` arrive : la suspension n'est plus en
+            // vol, le drive doit la livrer (`pending_await`
+            // seule bloquait la pompe — deadlock exposé par
+            // l'await-toujours-job de C623).
+            let pend = g.pending_await() && g.resume.is_none();
             let Some(st) = &mut g.agen else { return };
             if done {
                 st.executing = false;
