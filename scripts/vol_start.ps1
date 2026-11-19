@@ -14,7 +14,9 @@
        ouvert en `CreateNew` (O_EXCL) — le premier écrivain
        possède le numéro ; plus de course `ls → max+1 → claim`
        entre pistes parallèles sur corpus partagé (jonction).
-       Un claim vivant = CLAIMED.json sans `DONE` (`vol_status`
+       Un claim vivant = CLAIMED.json sans `DONE` ; seuls les
+       >2 h sont affichés au départ (`zombie?`), les vols en
+       cours d'autrui ne concernent pas l'agent (`vol_status`
        est imprimé en tête de sortie — pas de fichier à tenir).
     2. Arbre : le sha de référence est `git rev-parse main`
        (jamais HEAD — un worktree détaché le fige). Par défaut
@@ -105,12 +107,15 @@ foreach ($d in Get-ChildItem $vols -Directory -ErrorAction SilentlyContinue) {
     try {
       $j = Get-Content $cj -Raw | ConvertFrom-Json
       if ($j.port) { $usedPorts[[int]$j.port] = $true }
-      # claim > 2 h sans DONE = probable zombie (session morte) —
-      # la règle « >2 h » est mécanisée ici, pas mémorisée.
+      # Règle opérateur : les claims d'autrui ne concernent pas
+      # le départ — seuls les >2 h (zombies présumés, session
+      # morte) sont affichés. Les ports sont collectés pour
+      # tous sans distinction (sécurité du fallback).
       $age = [DateTimeOffset]::Now.ToUnixTimeSeconds() - [long]$j.claimed_at
-      $z = if ($age -gt 7200) { ' (zombie? >2h)' } else { '' }
-      Write-Output ("actif : {0} agent={1} port={2} mission={3}{4}" -f `
-        $d.Name, $j.agent, $j.port, $j.mission, $z)
+      if ($age -gt 7200) {
+        Write-Output ("zombie? : {0} agent={1} port={2} mission={3} (>2h sans DONE)" -f `
+          $d.Name, $j.agent, $j.port, $j.mission)
+      }
     } catch { }
   }
 }
