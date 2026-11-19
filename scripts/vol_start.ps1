@@ -31,11 +31,13 @@
        target/ LOCAL de l'arbre de build (config cargo par
        défaut : un target par arbre, plus de `CARGO_TARGET_DIR`
        partagé ni de sous-dossier <triple> ; sccache amortit
-       le premier build). Réutilisation : si le claim d'un
-       vol précédent prouve (sha_main + exe + worktree) que
-       le sha courant est déjà buildé, l'exe est repris tel
-       quel via `spawn_daemon -Exe` — pas de rebuild en
-       chaîne de campagne. `EXPLORER_DATA` est épinglé au
+       le premier build). Réutilisation : la campagne épingle
+       le sha de départ — le claim le plus récent dont l'exe
+       vit encore fournit le binaire via `spawn_daemon -Exe`,
+       quels que soient les commits d'entre-temps (moteur
+       compris : ils attendent la campagne suivante). Le
+       `vol_clean` du worktree donneur rompt l'épinglage →
+       rebuild au main courant. `EXPLORER_DATA` est épinglé au
        corpus du repo du script — `data_root()` du daemon ne
        dépend plus du lieu du worktree.
     4. Spawn : `spawn_daemon.ps1` (watchdog cmd caché, canal
@@ -200,25 +202,27 @@ if (-not $explicitRepo) {
   if ($NoBuild) {
     Stop-VolClaim '-NoBuild sans -Repo : le worktree frais n''a pas de binaire — passer -Repo <arbre buildé>'
   }
-  # Réutilisation : le claim d'un vol précédent prouve
-  # (sha_main + exe + worktree) que CE sha est déjà buildé —
-  # ~9 min de rebuild épargnées par vol enchaîné à sha
-  # constant. L'exe reste dans l'ancien worktree tant que le
-  # daemon tourne (vol_clean dessus échouerait proprement —
-  # fichier verrouillé).
+  # Réutilisation : la campagne ÉPINGLE le sha de départ — le
+  # claim le plus récent dont l'exe existe encore fournit le
+  # binaire, sans comparer les diffs : les commits d'entre-
+  # temps (moteur compris) attendent la campagne suivante.
+  # L'exe vit dans le worktree donneur ; `vol_clean` du
+  # donneur = fin de l'épinglage → rebuild au main courant.
+  $reusedFrom = 0
   foreach ($d in Get-ChildItem $vols -Directory -Filter 'vol*' | Sort-Object Name -Descending) {
     $cj = Join-Path $d.FullName 'CLAIMED.json'
     if (-not (Test-Path $cj)) { continue }
     try { $j = Get-Content $cj -Raw | ConvertFrom-Json } catch { continue }
-    if (-not ($j.exe -and $j.sha_main -and (Test-Path $j.exe))) { continue }
-    # Binaire-équivalent ≠ commit-identique : un commit
-    # scripts/docs change `rev-parse main` sans toucher le
-    # moteur. On compare les CHEMINES qui produisent l'exe.
-    git -C $refRepo diff --quiet $j.sha_main $sha -- crates/ Cargo.toml Cargo.lock
-    if ($LASTEXITCODE -eq 0) { $exeOverride = $j.exe; break }
+    if ($j.exe -and $j.sha_main -and (Test-Path $j.exe)) {
+      $exeOverride = $j.exe; $reusedFrom = [int]$j.vol
+      $sha = $j.sha_main
+      break
+    }
   }
   if ($exeOverride) {
-    Write-Output "binaire réutilisé : $exeOverride (sha $sha déjà buildé — pas de rebuild)"
+    Write-Claim @{ sha_main = $sha; reuse_from = $reusedFrom }
+    Write-Output "binaire réutilisé : $exeOverride (vol$reusedFrom — sha $sha épinglé, pas de rebuild)"
+    if ($head -ne $sha) { Write-Output "note : main est à $head — la campagne reste épinglée à $sha" }
   } else {
     $leaf = Split-Path -Leaf $refRepo
     $wt = Join-Path (Split-Path -Parent $refRepo) "$leaf-vol$N-wt"
