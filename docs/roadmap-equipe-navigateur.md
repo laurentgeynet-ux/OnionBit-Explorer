@@ -15746,6 +15746,18 @@ chaque gain rapporté contre les **deux** archétypes.
   modifier/word-char. **Écarts catalogués restants** :
   `\P{P}`+i sur props à pré-image de fold non triviale,
   `\d` Unicode fancy (`character-class-digit-*`).
+- [x] **JS-C636 — §B-202 : `AbortController is not a
+  constructor` en realm iframe — `install_abort` conserve le
+  ctor existant, repli constructible** (`xhr.rs`, verrou
+  `abort_controller_survit_a_install_xhr` dom.rs). Verbatim ×3
+  sites vols 956-958 (linkedin/naver/bandlab) : `install_dom_ctx`
+  enchaîne `install_dom` (ctor à `prototype`) puis `install_xhr`
+  → ré-installation `native_fn` nu → `is_constructor` faux →
+  `new` TypeError. `install_abort` saute la ré-installation si
+  le global porte déjà un constructeur ; la voie repli (worker)
+  pose `prototype` FIXED + `constructor`, et le ctor chaîne
+  l'instance à `ctor.prototype` (`instanceof` honnête).
+  Site réel naver release : verbatim **0**.
 - [x] **JS-C635 — §B-187 : collision sentinelle surrogate dans
   les classes multi-plages (units réels `U+F0000..F07FF` lus
   comme bornes astrales → plages renversées) + `\p{Cs}`/`\P{Cs}`

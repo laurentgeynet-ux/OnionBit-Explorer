@@ -2592,6 +2592,46 @@ fn dom_interface_constructors() {
     );
 }
 
+/// §B-202 — ordre `install_dom_ctx` (realm iframe) : `install_dom`
+/// pose le ctor riche puis `install_xhr` ré-installait une fonction
+/// sans `prototype` → `new AbortController()` non-constructible
+/// (verbatim linkedin/naver/bandlab vols 956-958). La version riche
+/// doit survivre à la ré-installation ; la version repli (worker,
+/// pas de `install_dom`) doit être elle-même constructible.
+#[test]
+fn abort_controller_survit_a_install_xhr() {
+    {
+        let mut e = engine_with(PAGE);
+        e.install_xhr(Rc::new(explorer_jscore::NullTransport));
+        assert_eq!(
+            match e.eval(
+                "var c=new AbortController();c.abort();\
+                 (c instanceof AbortController) +'|'+c.signal.aborted+'|'+typeof c.signal.addEventListener"
+            ) {
+                Ok(v) => e.describe(v),
+                Err(err) => panic!("{err}"),
+            },
+            "true|true|function"
+        );
+    }
+    // Voie repli (worker, pas de `install_dom`) : le ctor minimal
+    // doit lui-même être constructible + instanceof.
+    {
+        let mut e = Engine::new();
+        e.install_xhr(Rc::new(explorer_jscore::NullTransport));
+        assert_eq!(
+            match e.eval(
+                "var c=new AbortController();c.abort();\
+                 (c instanceof AbortController) +'|'+c.signal.aborted"
+            ) {
+                Ok(v) => e.describe(v),
+                Err(err) => panic!("{err}"),
+            },
+            "true|true"
+        );
+    }
+}
+
 /// Surface des events *dispatchés* (host object, JS-C59 — trou
 /// remonté par github.com : `composedPath is not a function`) :
 /// chemin réel, phases, trusted, flags — le chemin script-créé

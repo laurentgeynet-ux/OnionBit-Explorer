@@ -2809,27 +2809,38 @@ impl Engine {
     /// transfert en vol, seul le rejet si déjà aborted est câblé).
     fn install_abort(&mut self) {
         let g = self.global;
-        let ac = self.native_fn("AbortController", abort_controller_ctor);
-        if let Value::Obj(cid) = ac {
-            // `AbortController.prototype` — `is_constructor`
-            // (JS-C609) n'arme `new` sur une native que si
-            // `prototype` est own ; sans lui `new
-            // AbortController()` jetait « not a constructor »
-            // (cliquet BCD api 3501→3496). `abort` sur le proto
-            // comme spec — l'instance garde son bound lié à son
-            // propre signal (ctor ci-dessous).
-            let p = self.new_object();
-            let f = self.native_fn("abort", controller_abort_method);
-            self.set_own(p, "abort", f, true);
-            self.set_own(p, "constructor", ac.clone(), false);
-            self.set_own_attrs(
-                cid,
-                "prototype",
-                Value::Obj(p),
-                crate::heap::PropAttrs::FIXED,
-            );
+        // §B-202 — `install_dom` a déjà posé un `AbortController`
+        // riche (proto + `signal` listeners) : ne pas l'écraser —
+        // `install_dom_ctx` enchaîne `install_dom` puis `install_
+        // xhr` et la version repli sans `prototype` rendait `new
+        // AbortController()` non-constructible dans les realms
+        // iframe (verbatim linkedin/naver/bandlab vols 956-958).
+        let already = self
+            .get_prop(g, "AbortController")
+            .is_some_and(|v| self.is_constructor(v));
+        if !already {
+            let ac = self.native_fn("AbortController", abort_controller_ctor);
+            if let Value::Obj(cid) = ac {
+                // `AbortController.prototype` — `is_constructor`
+                // (JS-C609) n'arme `new` sur une native que si
+                // `prototype` est own ; sans lui `new
+                // AbortController()` jetait « not a constructor »
+                // (cliquet BCD api 3501→3496). `abort` sur le proto
+                // comme spec — l'instance garde son bound lié à son
+                // propre signal (ctor ci-dessous).
+                let p = self.new_object();
+                let f = self.native_fn("abort", controller_abort_method);
+                self.set_own(p, "abort", f, true);
+                self.set_own(p, "constructor", ac.clone(), false);
+                self.set_own_attrs(
+                    cid,
+                    "prototype",
+                    Value::Obj(p),
+                    crate::heap::PropAttrs::FIXED,
+                );
+            }
+            self.set_own(g, "AbortController", ac, true);
         }
-        self.set_own(g, "AbortController", ac, true);
         let asig = self.native_fn("AbortSignal", abort_signal_ctor);
         if let Value::Obj(cid) = asig {
             // `AbortSignal.prototype` — `sig instanceof
@@ -3114,6 +3125,15 @@ fn abort_signal_any_propagate(e: &mut Engine, _t: Value, args: &[Value]) -> JsRe
 fn abort_controller_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let signal = abort_signal_value(e);
     let ctrl = e.new_object();
+    // `c instanceof AbortController` — l'objet rendu remplace
+    // `this` : sa proto doit être `ctor.prototype` explicitement.
+    if let Some(Value::Obj(cid)) = e.get_prop(e.global, "AbortController") {
+        if let Some(p @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+            if let Some(o) = e.heap.obj_mut(ctrl) {
+                o.set_proto(p);
+            }
+        }
+    }
     e.set_own(ctrl, "signal", signal.clone(), true);
     let f = e.bound_native("abort", controller_abort, vec![signal]);
     e.set_own(ctrl, "abort", f, false);
