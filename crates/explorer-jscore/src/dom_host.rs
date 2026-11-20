@@ -16083,6 +16083,22 @@ fn geom_position(dom: &DomRef, node: NodeId) -> &'static str {
         .map_or("static", |eg| eg.position.as_str())
 }
 
+/// Valeur calculée bornée publiée pour `node` (§B-193) —
+/// allowlist (`font-size`…) + custom `--*` collectées au
+/// commit layout (`GeometryMap.computed`). `None` sans table
+/// injectée (harnais), nœud sans boîte (`display:none`),
+/// ou prop hors borne — l'appelant garde `""` alors.
+fn geom_computed(dom: &DomRef, node: NodeId, prop: &str) -> Option<String> {
+    let (map, path) = {
+        let d = dom.borrow();
+        d.geometry.clone().zip(d.element_path(node))
+    }?;
+    let g = map.lock().ok()?;
+    g.computed
+        .get(&path)
+        .and_then(|list| list.iter().find(|(k, _)| k == prop).map(|(_, v)| v.clone()))
+}
+
 /// `positioned` publié pour `node` (JS-C97) — `true` si une
 /// boîte contributrice a `position` ≠ `static`.
 fn geom_positioned(dom: &DomRef, node: NodeId) -> bool {
@@ -17575,7 +17591,61 @@ fn custom_state_set(e: &mut Engine) -> Value {
     Value::Obj(o)
 }
 
+/// §B-193 — validation CSSOM à l'écriture, bornée : une
+/// propriété à grammaire **numérique** (`<number>`/
+/// `<integer>` ± mots-clés) ne peut jamais prendre un
+/// token-artefact JS (`NaN`, `±Infinity`, `undefined` —
+/// préfixe accepté : `NaNpx` est tout aussi impossible).
+/// Ces chaînes ne sortent que d'un calcul JS cassé ; Chrome
+/// ignore silencieusement l'écriture (`style.zIndex = NaN`,
+/// galerie apple ×34). Les props à ident arbitraire
+/// (`font-family: NaN` est un ident légal) sont épargnées
+/// — liste bornée aux numériques pures.
+fn is_numeric_css_prop(prop: &str) -> bool {
+    matches!(
+        prop,
+        "opacity"
+            | "z-index"
+            | "font-weight"
+            | "line-height"
+            | "flex-grow"
+            | "flex-shrink"
+            | "order"
+            | "orphans"
+            | "widows"
+            | "column-count"
+            | "zoom"
+            | "tab-size"
+    )
+}
+
+/// `value` commence-t-elle par un token-artefact JS
+/// (`NaN`/`Infinity`/`undefined`, casse libre) ? Toute
+/// suite derrière ne change rien : `NaNpx` ne parse pas
+/// mieux qu'`NaN` sur une grammaire numérique.
+fn is_js_number_artifact(value: &str) -> bool {
+    let v = value.trim_start();
+    ["nan", "infinity", "-infinity", "+infinity", "undefined"]
+        .iter()
+        .any(|t| v.len() >= t.len() && v[..t.len()].eq_ignore_ascii_case(t))
+}
+
+/// La déclaration `prop: value` est-elle rejetée à
+/// l'écriture CSSOM ? (Chrome ignore `setProperty`/`cssText`/
+/// setter nommé sur valeur invalide — ici borné aux
+/// artefacts numériques, `setAttribute('style')` reste
+/// verbatim comme le vrai DOM.)
+fn decl_write_rejected(prop: &str, value: &str) -> bool {
+    !prop.starts_with("--") && is_numeric_css_prop(prop) && is_js_number_artifact(value)
+}
+
 fn style_set(dom: &mut Dom, node: NodeId, key: &str, value: &str) {
+    // §B-193 — écriture invalide ignorée (Chrome : le
+    // setter nommé/`setProperty` valident la valeur) —
+    // la déclaration existante est préservée.
+    if decl_write_rejected(key, value) {
+        return;
+    }
     let mut map = style_map(dom, node);
     if let Some((_, v)) = map.iter_mut().find(|(k, _)| k == key) {
         *v = value.to_string();
@@ -17686,9 +17756,20 @@ impl Host for StyleHost {
         // (harnais, `display:none`) → `"static"`, valeur
         // initiale spec. Inline prime toujours ; `el.style`
         // (computed=false) reste pur inline.
-        let v = match (v, self.computed && kebab == "position") {
+        // §B-193 — le calculé borné (`--*` + allowlist
+        // polices/couleur/display publiés au commit) est servi
+        // avant le repli `position` historique : apple lit
+        // `--r-globalnav-font-size`/`fontSize` pour son ratio
+        // de zoom — `""` produisait `NaN` en inline ×89.
+        let v = match (v, self.computed) {
             (Some(v), _) => v,
-            (None, true) => geom_position(&self.dom, self.node).to_string(),
+            (None, true) => geom_computed(&self.dom, self.node, &kebab).unwrap_or_else(|| {
+                if kebab == "position" {
+                    geom_position(&self.dom, self.node).to_string()
+                } else {
+                    String::new()
+                }
+            }),
             (None, false) => String::new(),
         };
         Ok(Some(e.str_val(v)))
@@ -17701,7 +17782,13 @@ impl Host for StyleHost {
         // `css-text: …` laisserait `visibility:hidden` en
         // place et la page anti-FOUC resterait invisible.
         if key == "cssText" {
-            let map = parse_decls(&val);
+            // §B-193 — comme `setProperty`/le setter nommé,
+            // `cssText` valide les valeurs : les déclarations
+            // à artefact numérique JS sont ignorées.
+            let map: Vec<_> = parse_decls(&val)
+                .into_iter()
+                .filter(|(k, v)| !decl_write_rejected(k, v))
+                .collect();
             let mut d = self.dom.borrow_mut();
             if map.is_empty() {
                 d.remove_attr(self.node, "style");
@@ -17743,14 +17830,18 @@ impl Host for StyleHost {
                         .find(|(kk, _)| kk == &k)
                         .map(|(_, v)| v)
                 };
-                // CAP-196 — même repli `position`←géométrie que
-                // `get` : les deux accesseurs restent cohérents.
-                let v = match (v, self.computed && k == "position") {
+                // CAP-196 + §B-193 — même replis que `get`
+                // (calculé borné puis `position`←géométrie) :
+                // les deux accesseurs restent cohérents.
+                let v = match (v, self.computed) {
                     (Some(v), _) => v,
-                    (None, true) => match element_geom(&self.dom, self.node) {
-                        Some((_, true, _, _)) => "fixed".to_string(),
-                        _ => String::new(),
-                    },
+                    (None, true) => geom_computed(&self.dom, self.node, &k).unwrap_or_else(|| {
+                        if k == "position" {
+                            geom_position(&self.dom, self.node).to_string()
+                        } else {
+                            String::new()
+                        }
+                    }),
                     (None, false) => String::new(),
                 };
                 Ok(Some(e.str_val(v)))
@@ -17925,7 +18016,13 @@ impl Host for StyleMapHost {
                     map.retain(|(kk, _)| kk != &k);
                 }
                 for v in vals {
-                    map.push((k.clone(), v));
+                    // §B-193 — même validation d'écriture que
+                    // `style_set` : artefacts numériques JS
+                    // ignorés (Chrome les rejette aussi sur
+                    // `StyleMap.set`).
+                    if !decl_write_rejected(&k, &v) {
+                        map.push((k.clone(), v));
+                    }
                 }
                 style_map_write(&mut d, self.node, &map);
                 Ok(Some(Value::Undefined))

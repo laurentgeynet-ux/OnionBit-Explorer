@@ -8242,6 +8242,67 @@ MCP = adaptateur, jamais la base.
   `DONE` libère le claim, commit ciblé du corpus.
   `SKILL.md` 412→111 lignes ; `vol-protocole.md` ne garde
   que signatures de mort + règles dures ; CLAIMS.md legacy.
+- [x] **Étape 320. §B-175 : l'import map du document commis
+  arme les modules dynamiques — `spawn_dyn_module_graph`
+  reçoit `Tab::import_specs` (gelée/restaurée bfcache)**.
+  Chaîne : le clone `text/mrtnlazyloadscript` → `type=module`
+  de marmiton importait `'app'`/`'js/front/user.js'` — bare
+  specifiers résolus par l'importmap au runtime mais jamais
+  réécrits au prefetch (`import_specs` passé `&[]`) →
+  « module non chargé » ×2 → lazysizes mort → 212 images
+  `data-src` sans intrinsèque (`header__menu-*` dh −205/
+  −221 attribué CSS à tort, corrigé FILE.md). Mesure site
+  réel : `cannot load module` 0, clones activés (`src=`
+  posé), modules chargés. Verrou e2e
+  `b175_dyn_module_importe_bare_via_importmap` (inline +
+  externe). Reliquat : windy `@leafletGl` = bare sans
+  entrée de carte — « unresolvable » honnête (à vérifier).
+- [x] **Étape 322. §B-193 soldée : `getComputedStyle` sert le
+  calculé borné publié au commit (`--*` + allowlist) —
+  apple `NaN` inline 89 → 0** (`GeometryMap.computed` +
+  `decl_write_rejected`). Chaîne : `ac-globalnav` lisait
+  `cs['--r-globalnav-font-size']`/`cs.fontSize` → `""` →
+  `parseInt` = `NaN` propagé en variables inline ×89. Fix 1 :
+  `collect_geometry` publie `element_path → props` depuis
+  `bx.style` (allowlist font/display/opacity/z-index/
+  transform + `--*` effectives) ; `StyleHost::get`/
+  `getPropertyValue` la sert quand `computed` après l'inline
+  (géométriques `width`/`height` exclus — Chrome sert
+  l'usée). Fix 2 : galerie `parseInt(cs['z-index'])` →
+  `NaN` comme Chrome, mais l'écriture `style.zIndex = NaN`
+  y est rejetée (grammaire numérique) — `decl_write_rejected`
+  borne le refus aux tokens-artefacts JS sur props
+  numériques (`--*`/idents/`setAttribute` conservés).
+  Verrous : `computed_published_at_relayout`,
+  `b193_getcomputedstyle_sert_le_calcule_publie` (e2e),
+  `b193_style_write_rejette_les_artefacts_numeriques_js`.
+- [x] **Étape 321. §B-175-bis : cibles d'import map résolues
+  contre la base du document — windy `@leafletGl` soldé**
+  (`module.rs` `resolve_bare` + `session/scripts.rs`
+  `merge_import_maps`). Le reliquat « sans entrée de carte »
+  était faux : la carte portait `@leafletGl` →
+  `v/51.4.4.ind.c444/leaflet-gl.js`, mais la cible se
+  résolvait contre le référent `v/x/index.js` → chemin
+  doublé → 404 → « module non chargé ». Spec : la cible
+  s'enregistre absolue contre la base de la carte (document)
+  — `merge_import_maps(maps, base)` et `resolve_bare` vs
+  `page_url` convergent sur la même URL. Mesure site réel :
+  `leaflet-gl.js` chargé et exécuté, mur suivant honnête =
+  `Failed to initialize WebGL`. Verrou :
+  `import_map_target_resout_contre_base_document` (lang.rs).
+- [x] **Étape 319. `geo_diff` : filtre état-de-page +
+  top-20 orphelins — lecture des vrais trous sans bruit
+  d'appariement** (`scripts/geo_diff.mjs`, agrégation vols
+  919-939). (1) `page_state` : `|dy|`/`|dh|` >
+  `--pagestate-tol` (2 000 px) = appariement entre deux
+  états de page (pub/lazy-load/DOM divergent), flag +
+  `class:"page-state"` + compteur + pattern + console —
+  reste dans le score mais sort du bruit (sofascore :
+  1 935/2 266 paires qualifiées) ; (2) `eng_only_top`/
+  `ref_only_top` top 20 clés — un `ref_only` massif = mur
+  JS lisible d'un coup (MDN : 103/128 orphelins réf =
+  internes SVG `tspan`/`path`/`text`, asymétrie
+  d'énumération réf à traiter, pas trou moteur).
 - [x] **Étape 318. Artefacts d'outillage vol : endpoint
   `/styles`, flag viewport bloquant, scrollbar réf
   stabilisée** (`explorer-api` route additive +

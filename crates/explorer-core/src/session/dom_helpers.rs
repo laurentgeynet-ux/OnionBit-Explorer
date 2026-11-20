@@ -72,6 +72,30 @@ pub(crate) fn element_path(dom: &Dom, node: NodeId) -> Option<Vec<(String, u32)>
 /// n'ont pas de path mais leurs enfants sont marchés.
 /// Appelée à chaque commit paint : jamais sur arbre en
 /// mutation.
+/// §B-193 — props calculées publiées au JS en plus des
+/// custom `--*` : la lecture `getComputedStyle` mesure des
+/// scripts réels (apple `ac-globalnav` :
+/// `parseInt(cs.fontSize) / parseInt(cs['--…-font-size'])`
+/// — `""` produisait `NaN` propagé en variables inline ×89).
+/// Borné : seules des props dont la valeur calculée coïncide
+/// avec l'usage navigateur (polices/couleur/display/
+/// opacité/z-index/transform — les galeries lisent ces bases
+/// pour interpoler : `parseInt(cs['z-index'])`) — les
+/// géométriques (`width`/`height`) restent `""` car Chrome
+/// sert l'**usée**, pas la calculée ; extension additive.
+const JS_COMPUTED_PROPS: &[&str] = &[
+    "font-size",
+    "font-family",
+    "font-weight",
+    "line-height",
+    "color",
+    "display",
+    "visibility",
+    "opacity",
+    "z-index",
+    "transform",
+];
+
 pub(crate) fn collect_geometry(
     dom: &Dom,
     bx: &LayoutBox,
@@ -81,6 +105,19 @@ pub(crate) fn collect_geometry(
     let fixed = fixed || bx.position == explorer_layout::Position::Fixed;
     if let Some(n) = bx.node {
         if let Some(path) = element_path(dom, n) {
+            // §B-193 — style calculé borné : allowlist + `--*`
+            // effectives. Les boîtes d'un même nœud partagent
+            // le style — première occurrence par clé retenue.
+            let entry = out.computed.entry(path.clone()).or_default();
+            for (k, v) in JS_COMPUTED_PROPS
+                .iter()
+                .filter_map(|p| bx.style.get(p).map(|v| (*p, v)))
+                .chain(bx.style.iter().filter(|(k, _)| k.starts_with("--")))
+            {
+                if entry.iter().all(|(ek, _)| *ek != k) {
+                    entry.push((k.to_string(), v.to_string()));
+                }
+            }
             let e = out.rects.entry(path).or_default();
             e.rect = e.rect.union(explorer_js::GeoRect {
                 x: bx.rect.x,

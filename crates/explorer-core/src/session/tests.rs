@@ -3962,6 +3962,36 @@ fn geometry_published_at_relayout() {
     assert!(geom.lock().unwrap().rects.is_empty());
 }
 
+/// §B-193 — `rebuild_geometry` publie aussi la table de style
+/// calculé **borné** (`--*` effectives + allowlist
+/// `font-size`/…) clé `element_path` — `getComputedStyle`
+/// miroir la sert quand l'inline est muet (apple
+/// `--r-globalnav-font-size`/`fontSize` → `NaN` sinon).
+#[test]
+fn computed_published_at_relayout() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.dom = Some(test_dom(
+            "<style>#a{--tok:17px;font-size:21px}</style><div id=a>x</div>",
+        ));
+        e.url = Some(Url::parse("http://h.test/cs").unwrap());
+    }
+    s.relayout(tab).unwrap();
+    let geom = s.tabs.get(&tab).unwrap().geom.clone();
+    let path = vec![
+        ("html".to_string(), 0u32),
+        ("body".to_string(), 0),
+        ("div".to_string(), 0),
+    ];
+    let g = geom.lock().unwrap();
+    let list = g.computed.get(&path).expect("style calculé publié");
+    let get = |k: &str| list.iter().find(|(kk, _)| kk == k).map(|(_, v)| v.as_str());
+    assert_eq!(get("--tok"), Some("17px"));
+    assert_eq!(get("font-size"), Some("21px"));
+}
+
 /// Sonde `/eval` — `eval_shared` évalue dans le
 /// contexte top-level de l'onglet avec le même contrat de
 /// détachement que la pompe : valeur sérialisée rendue,

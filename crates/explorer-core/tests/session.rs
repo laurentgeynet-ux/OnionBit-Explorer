@@ -8695,6 +8695,109 @@ async fn importmap_reecrit_bare_au_prefetch_et_eval() {
     );
 }
 
+/// §B-175 — un `<script type="module">` **inséré par JS**
+/// qui importe un bare specifier : la carte du document
+/// commis doit réécrire ses deps au prefetch du graphe
+/// dynamique (`spawn_dyn_module_graph`), sinon `load_source`
+/// jette « module non chargé » (mesuré marmiton : clones
+/// `text/mrtnlazyloadscript` → `import 'app'` +
+/// `import 'js/front/user.js'` depuis un chunk externe —
+/// inline ET externe couverts, même chemin aval).
+#[tokio::test]
+async fn b175_dyn_module_importe_bare_via_importmap() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    t.route(
+        "/",
+        200,
+        concat!(
+            "<!doctype html><html><body><p id=d>-</p><p id=e>-</p>",
+            "<script type=\"importmap\">{\"imports\":{\"pkg\":\"./real-pkg.js\"}}</script>",
+            // Cas 1 — clone inline (marmiton : le bootstrap
+            // recopie textContent dans un vrai type=module).
+            "<script>var el=document.createElement('script');",
+            "el.type='module';el.textContent=\"import 'pkg';\";",
+            "document.body.appendChild(el);</script>",
+            // Cas 2 — module externe dynamique dont la dep
+            // est bare (header-user → 'js/front/user.js').
+            "<script>var s2=document.createElement('script');",
+            "s2.type='module';s2.src='/mod.js';",
+            "document.body.appendChild(s2);</script>",
+            "</body></html>"
+        ),
+    );
+    t.route_bin(
+        "/mod.js",
+        200,
+        b"import 'pkg';document.getElementById('e').innerText='MOD'+'OK';".to_vec(),
+    );
+    t.route_bin(
+        "/real-pkg.js",
+        200,
+        b"document.getElementById('d').innerText='MAP'+'DEP';".to_vec(),
+    );
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/").await.unwrap();
+    for _ in 0..8 {
+        s.pump_net().await;
+        s.pump_timers(a);
+    }
+    assert_eq!(
+        s.find_in_page(a, "mapdep"),
+        1,
+        "la dep bare du module inline dynamique doit être fetchée via la carte — fetches : {:?}",
+        t.paths()
+    );
+    assert_eq!(
+        s.find_in_page(a, "modok"),
+        1,
+        "le module externe dynamique doit exécuter — sa dep bare est seedée via la carte"
+    );
+}
+
+/// §B-193 — `getComputedStyle` sert le calculé borné publié
+/// au commit layout : les custom `--*` de la feuille +
+/// `font-size` rejoignent le miroir (apple `ac-globalnav` :
+/// `parseInt(cs['--…-font-size'])` et `parseInt(cs.fontSize)`
+/// — `""` produisait `NaN` propagé en variables inline ×89).
+#[tokio::test]
+async fn b193_getcomputedstyle_sert_le_calcule_publie() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/cs",
+        200,
+        "<!doctype html><html><head>\
+         <style>#a{--tok:17px;font-size:21px}</style>\
+         </head><body><div id=a>x</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let sess = std::sync::Arc::new(tokio::sync::Mutex::new(s));
+    let id = {
+        let mut g = sess.lock().await;
+        let id = g.open_tab();
+        g.navigate(id, "http://h.test/cs").await.unwrap();
+        id
+    };
+    explorer_core::drain_applies_shared(&sess, id).await;
+    let explorer_core::EvalReply::Done { value, .. } = explorer_core::eval_shared(
+        &sess,
+        id,
+        "var cs=getComputedStyle(document.getElementById('a'));\
+         cs.getPropertyValue('--tok')+'|'+cs.fontSize+'|'+\
+         cs.getPropertyValue('font-size')"
+            .to_string(),
+    )
+    .await
+    else {
+        panic!("éval indisponible");
+    };
+    assert_eq!(
+        value.as_deref().unwrap_or_default(),
+        "17px|21px|21px",
+        "custom `--*` et `font-size` doivent venir du calculé publié : {value:?}"
+    );
+}
+
 /// Issue #6 bis — un module **importé via bare specifier**
 /// s'enregistre chez jscore sous son nom brut (`'pkg'`) : ses
 /// propres imports doivent résoudre contre **son** URL

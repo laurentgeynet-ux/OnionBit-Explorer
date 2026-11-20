@@ -1909,6 +1909,41 @@ fn toggle_attribute() {
     );
 }
 
+#[test]
+fn b193_style_write_rejette_les_artefacts_numeriques_js() {
+    // §B-193 — galerie apple : `style.zIndex = NaN` doit être
+    // ignoré (grammaire numérique — Chrome rejette à
+    // l'écriture, l'existant est préservé).
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.zIndex='3'; m.style.zIndex=NaN; m.style.getPropertyValue('z-index')"),
+        "3"
+    );
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.setProperty('opacity', NaN); m.getAttribute('style')||''"),
+        ""
+    );
+    // `NaNpx`/`Infinity`/`undefined` sont tout aussi impossibles.
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.cssText='z-index:NaNpx;opacity:Infinity;color:red'; m.getAttribute('style')"),
+        "color: red"
+    );
+    // Les custom `--*` gardent tout token stream (légal).
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.setProperty('--x','NaN'); m.style.getPropertyValue('--x')"),
+        "NaN"
+    );
+    // Et `font-family: NaN` reste un ident légal — conservé.
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.setProperty('font-family','NaN'); m.style.getPropertyValue('font-family')"),
+        "NaN"
+    );
+    // Les valeurs numériques normales écrivent toujours.
+    assert_eq!(
+        ev("var m=document.getElementById('main'); m.style.opacity='.5'; m.style.getPropertyValue('opacity')"),
+        ".5"
+    );
+}
+
 /// Issue #20 — `style.setProperty` : les propriétés custom
 /// `--*` gardent leur casse (css-variables-1 §2.1 — miroir
 /// du fix cascade R-92), les standard sont minuscules.

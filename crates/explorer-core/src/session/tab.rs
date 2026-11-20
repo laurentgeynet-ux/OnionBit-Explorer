@@ -318,6 +318,7 @@ impl Tab {
             return;
         };
         g.rects.clear();
+        g.computed.clear();
         g.scroll_x = 0.0;
         g.scroll_y = self.scroll_y;
         g.doc_w = 0.0;

@@ -142,6 +142,16 @@ pub struct GeometryMap {
     /// même tag — monnaie `DomMutation`, calculable des deux
     /// côtés dès le parse) → géométrie union du nœud.
     pub rects: HashMap<Vec<(String, u32)>, ElementGeom>,
+    /// §B-193 — style **calculé borné** par `element_path` :
+    /// allowlist de props (`font-size`, `font-family`,
+    /// `font-weight`, `line-height`, `color`, `display`,
+    /// `visibility`) + toutes les custom `--*` effectives
+    /// (sentinelle guaranteed-invalid filtrée à la cascade).
+    /// Servi par `getComputedStyle` quand l'inline est muet —
+    /// le bridge JS ne cascade pas, la session publie les
+    /// valeurs après layout. Borné : pas la liste complète
+    /// spec, extension additive au fil des lectures réelles.
+    pub computed: ComputedMap,
     /// Scroll courant — à soustraire aux coords document pour
     /// passer en coords viewport (`fixed` : déjà dedans).
     /// Mis à jour sans rebuild au scroll input.
@@ -155,6 +165,10 @@ pub struct GeometryMap {
     /// le `doc_h` de session).
     pub doc_h: f32,
 }
+
+/// Style calculé borné par `element_path` (§B-193) —
+/// `prop → valeur` ordonné par allowlist + custom `--*`.
+pub type ComputedMap = HashMap<Vec<(String, u32)>, Vec<(String, String)>>;
 
 /// Référence partagée session ↔ moteur. `Arc` (pas `Rc`) : la
 /// map est écrite sur le thread session et lue sur le worker
