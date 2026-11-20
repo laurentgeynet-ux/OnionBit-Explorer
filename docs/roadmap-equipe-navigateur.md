@@ -8298,6 +8298,18 @@ MCP = adaptateur, jamais la base.
   (position spec). Verrous :
   `init_ui_event_carries_view_and_detail` +
   `init_ui_event_on_ctor_path`.
+- [x] **Étape 325. §B-201 soldée : `srcset` — la virgule
+  *interne* à l'URL d'un candidat ne borne plus le
+  candidat** (`explorer-core` `dom_helpers.rs` —
+  qualification pilotée par les geodiffs vols 952/954 :
+  deviantart 34/34 404 wixmp, flipboard cloudinary).
+  Le `split(',')` naïf élisait le préfixe `w_417` au lieu de
+  `…/w_417,h_700,…/x.jpg` — grille d'images vide. Scanner
+  spec « parse a srcset attribute » : URL = code points
+  non-espace (virgules internes CDN/`data:` incluses), URL
+  terminée par virgules = candidat nu, descripteurs jusqu'à
+  la virgule de fin de candidat. Verrou :
+  `pick_srcset_url_a_virgule_interne_cdn`.
 - [x] **Étape 321. §B-175-bis : cibles d'import map résolues
   contre la base du document — windy `@leafletGl` soldé**
   (`module.rs` `resolve_bare` + `session/scripts.rs`

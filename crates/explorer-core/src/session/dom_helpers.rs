@@ -854,6 +854,67 @@ fn srcset_desc(tok: &str) -> Option<SrcsetDesc> {
     }
 }
 
+/// Candidats `(url, descripteur)` scannés selon « parse a
+/// srcset attribute » : l'URL collecte les code points
+/// non-espace — les virgules *internes* au chemin (CDN à
+/// transformations dans l'URL `w_417,h_700`, `data:` base64)
+/// font partie de l'URL ; une URL terminée par des virgules
+/// est un candidat nu (virgules retirées). Les descripteurs
+/// suivent l'URL après espace, jusqu'à la virgule qui borne
+/// le candidat. §B-201 : le `split(',')` naïf élisait le
+/// préfixe `w_417` (34/34 404 wixmp deviantart, cloudinary
+/// flipboard).
+fn srcset_candidates(srcset: &str) -> Vec<(String, SrcsetDesc)> {
+    let b = srcset.as_bytes();
+    let n = b.len();
+    let mut pos = 0usize;
+    let mut cands = Vec::new();
+    while pos < n {
+        while pos < n && (b[pos] == b',' || b[pos].is_ascii_whitespace()) {
+            pos += 1;
+        }
+        if pos >= n {
+            break;
+        }
+        let url_start = pos;
+        while pos < n && !b[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+        let raw = &srcset[url_start..pos];
+        let url = raw.trim_end_matches(',');
+        let mut desc = SrcsetDesc::X(1.0);
+        if !raw.ends_with(',') {
+            // Descripteurs : tokens espacés jusqu'à la
+            // virgule de fin de candidat ; le dernier fait
+            // foi (un token inconnu borne à 1x, inchangé).
+            let mut last = "";
+            while pos < n && b[pos] != b',' {
+                while pos < n && b[pos].is_ascii_whitespace() {
+                    pos += 1;
+                }
+                let dstart = pos;
+                while pos < n && !b[pos].is_ascii_whitespace() && b[pos] != b',' {
+                    pos += 1;
+                }
+                if dstart < pos {
+                    last = &srcset[dstart..pos];
+                }
+            }
+            if pos < n {
+                pos += 1;
+            }
+            desc = srcset_desc(last).unwrap_or(SrcsetDesc::X(1.0));
+        }
+        // `data:` borné : le peintre inline indexe par
+        // `src` — l'ignorer évite la désynchronisation
+        // fetch/peinture.
+        if !url.is_empty() && !url.starts_with("data:") {
+            cands.push((url.to_string(), desc));
+        }
+    }
+    cands
+}
+
 /// Candidat `srcset` choisi (CAP-157) — sélection bornée de
 /// la spec « select an image source » : descripteurs `x`
 /// → plus petit `x ≥ dpr`, sinon le plus grand ; `w` → plus
@@ -864,32 +925,7 @@ fn srcset_desc(tok: &str) -> Option<SrcsetDesc> {
 /// le peintre inline `collect_data_images` indexe par `src`,
 /// les ignorer évite la désynchronisation fetch/peinture).
 pub(crate) fn pick_srcset(srcset: &str, eff_w: f32, dpr: f32) -> Option<String> {
-    let mut cands: Vec<(String, SrcsetDesc)> = Vec::new();
-    // Queue d'une URL `data:` découpée sur sa virgule
-    // interne — le segment suivant est sa fin (+desc), pas
-    // un candidat.
-    let mut data_tail = false;
-    for part in srcset.split(',') {
-        let p = part.trim();
-        if p.is_empty() {
-            continue;
-        }
-        if data_tail {
-            data_tail = false;
-            continue;
-        }
-        let (url, desc) = match p.rsplit_once(char::is_whitespace) {
-            Some((u, d)) if !u.trim().is_empty() => {
-                (u.trim(), srcset_desc(d).unwrap_or(SrcsetDesc::X(1.0)))
-            }
-            _ => (p, SrcsetDesc::X(1.0)),
-        };
-        if url.starts_with("data:") {
-            data_tail = true;
-            continue;
-        }
-        cands.push((url.to_string(), desc));
-    }
+    let cands = srcset_candidates(srcset);
     if cands.is_empty() {
         return None;
     }

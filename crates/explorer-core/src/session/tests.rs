@@ -4320,6 +4320,44 @@ fn collect_images_parses_lazy_data_srcset() {
     assert_eq!(srcs, vec!["/w92.webp"]);
 }
 
+/// §B-201 deviantart/flipboard — la virgule *interne* à
+/// l'URL d'un candidat (CDN à transformations
+/// `w_417,h_700,…?token=`) ne borne pas le candidat : le
+/// `split(',')` naïf élisait le préfixe `w_417` → 34/34 404
+/// wixmp, grille vide. Scanner spec « parse a srcset
+/// attribute » : URL = non-espaces, descripteurs jusqu'à la
+/// virgule suivante.
+#[test]
+fn pick_srcset_url_a_virgule_interne_cdn() {
+    let dom = test_dom(
+        r#"<img srcset="https://cdn.example.com/w_417,h_700,f_auto/x.jpg 417w, https://cdn.example.com/w_800,h_900,f_auto/y.jpg 800w">"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, &test_env(400.0, 1.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(
+        srcs,
+        vec!["https://cdn.example.com/w_417,h_700,f_auto/x.jpg"]
+    );
+    // URL `data:` à virgule interne : candidat borné (peintre
+    // inline indexé par `src`), le suivant reste éligible.
+    let dom = test_dom(r#"<img srcset="data:image/png;base64,AAAA 1x, /b.png 2x">"#);
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 2.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/b.png"]);
+    // Candidat nu terminé par une virgule = bare (spec) —
+    // la virgule suivante ouvre le candidat d'après.
+    let dom = test_dom(r#"<img srcset="/a.jpg, /b.jpg 2x">"#);
+    let srcs: Vec<String> = collect_images(&dom, &test_env(800.0, 2.0))
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/b.jpg"]);
+}
+
 // ===== R-195 — `<picture><source>` + `srcset` densité/taille =====
 
 /// La `<source>` élue prime sur les attributs de l'`<img>`
