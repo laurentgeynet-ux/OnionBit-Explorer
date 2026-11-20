@@ -100,6 +100,7 @@ impl Tab {
                 .take()
                 .map(|(t, u)| (t.saturating_duration_since(std::time::Instant::now()), u)),
             csp: std::mem::take(&mut self.csp),
+            import_specs: std::mem::take(&mut self.import_specs),
             // Les contextes JS des cadres gèlent **dans le
             // moteur** (`js` emporté au-dessus) — la table de
             // liaison suit pour garder le routage `ctx` à la
@@ -235,6 +236,7 @@ impl Tab {
             .refresh
             .map(|(d, u)| (std::time::Instant::now() + d, u));
         self.csp = snap.csp;
+        self.import_specs = snap.import_specs;
         self.frame_ctxs = snap.frame_ctxs;
         // Étape 133 : les corps compressés reviennent vivants
         // (re-gelables) — le re-décodage des bitmaps est fait

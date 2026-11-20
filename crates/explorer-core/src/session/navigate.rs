@@ -1236,6 +1236,10 @@ impl Session {
             // tardifs (fonts, fonds, modules) et aux
             // intentions (formes, `fetch` JS).
             entry.csp.clone_from(&csp);
+            // Import maps (issue #6, §B-175) — la résolution
+            // des bare specifiers des modules insérés
+            // dynamiquement après le commit s'appuie dessus.
+            entry.import_specs.clone_from(&import_specs);
             // `Clear-Site-Data` (CAP-147) : vidage au commit
             // — la page servie tourne déjà sans identifiants
             // (spec : l'effacement suit la réponse, avant que

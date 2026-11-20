@@ -1986,8 +1986,13 @@ impl Session {
     /// dépendances sont fetchées hors session
     /// (`fetch_module_sources`, `max_inflight`/`max_modules`)
     /// avant envoi `dyn_module` → `eval_module_graph` +
-    /// `load`/`error`. `import_specs` vide : un module
-    /// dynamique à bare specifier hors import map est
+    /// `load`/`error`. §B-175 : les `import_specs` de l'onglet
+    /// (import maps du document commis) réécrivent les bare
+    /// specifiers ici aussi — les modules insérés par JS
+    /// (clones `text/mrtnlazyloadscript` marmiton) pouvaient
+    /// importer `'app'`/`'js/front/user.js'` sans qu'aucune
+    /// dep ne soit fetchée (« module non chargé » au
+    /// `load_source`). Un bare hors carte reste
     /// « unresolvable » honnête (issue #6).
     #[allow(clippy::too_many_arguments)]
     fn spawn_dyn_module_graph(
@@ -2007,6 +2012,11 @@ impl Session {
         let max_inflight = self.max_inflight;
         let max_modules = self.max_modules;
         let req_url = entry_base.clone();
+        let import_specs = self
+            .tabs
+            .get(&tab)
+            .map(|e| e.import_specs.clone())
+            .unwrap_or_default();
         let j = tokio::spawn(async move {
             let t0 = std::time::Instant::now();
             let mut graph = crate::session::net_items::ModuleGraph {
@@ -2023,7 +2033,7 @@ impl Session {
                 &csp,
                 &entry_base,
                 &entry_src,
-                &[],
+                &import_specs,
                 &[],
                 &mut graph,
                 Some(&mut net_evs),

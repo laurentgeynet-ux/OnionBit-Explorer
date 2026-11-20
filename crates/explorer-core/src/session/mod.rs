@@ -270,6 +270,15 @@ pub(crate) struct Tab {
     /// formulaire (`form-action`) et aux `fetch()`/`XHR`
     /// JS (`connect-src`). Vide = aucune politique.
     csp: Vec<explorer_net::csp::CspPolicy>,
+    /// `imports` des `<script type="importmap">` du document
+    /// commis, fusionnées (issue #6, §B-175) : la résolution
+    /// des bare specifiers des modules **dynamiques**
+    /// (`spawn_dyn_module_graph` — scripts insérés par JS
+    /// comme les clones `text/mrtnlazyloadscript` de
+    /// marmiton) s'appuie dessus. Une carte vit avec son
+    /// document (spec : enregistrée avant le premier module
+    /// évalué) — gelée/restaurée avec le bfcache.
+    import_specs: Vec<(String, String)>,
     /// Position dans `hist`.
     hist_idx: usize,
     /// La page **affichée** provient d'une navigation `push`
@@ -931,6 +940,10 @@ pub(crate) struct PageSnapshot {
     /// les mêmes restrictions (une politique vit avec son
     /// document, pas avec l'onglet).
     csp: Vec<explorer_net::csp::CspPolicy>,
+    /// Import maps de la page gelée (§B-175) — même durée de
+    /// vie que le document : la restauration les réarme pour
+    /// les insertions de modules dynamiques ultérieures.
+    import_specs: Vec<(String, String)>,
 }
 
 /// Session : transport + fontes injectés, onglets, viewport,
@@ -1812,6 +1825,7 @@ impl Session {
                 auto_nav_since: None,
                 auto_nav_busy_warned: false,
                 csp: Vec::new(),
+                import_specs: Vec::new(),
                 hist_idx: 0,
                 hist_pending: false,
                 pending_push: Vec::new(),
