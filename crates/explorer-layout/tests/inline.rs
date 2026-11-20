@@ -1893,3 +1893,106 @@ fn ruby_overhang_spaces_borne_aux_espaces() {
         "spaces → borné avant les lettres (x={x_spaces} vs auto {x_auto})"
     );
 }
+
+/// R-315 — `vertical-align` sémantique spec (css-inline /
+/// §10.8.1) : baseline d'inline-block = sa **dernière ligne
+/// box** (plus le bord bas), `middle` centre sur baseline +
+/// x-height/2 (plus le centre de ligne), `text-top`/
+/// `text-bottom` ancrent à l'em box parente (plus aux bords
+/// de ligne), `first-baseline`/`last-baseline` distincts,
+/// `%` sur la line-height de l'élément.
+#[test]
+fn vertical_align_semantique_spec() {
+    // Ahem : ascent 8 / descent 2 (fs=10) — strut lh 30 →
+    // base = (30-10)/2 + 8 = 18 ; xh repli 0.5em = 5.
+    let base_line = |bx: &LayoutBox, dom: &Dom| {
+        let p = find(bx, by_tag(dom, "p"));
+        let line = &p.children[0].lines[0];
+        (line.rect.y + line.baseline, line.rect.y)
+    };
+
+    // 1) Inline-block multi-lignes : baseline = dernière
+    // ligne box (12 + 9 = 21), pas le bord bas (24).
+    let (dom, bx) = laid(
+        "<p><span id=tx>x</span><span id=ib>a<br>b</span></p>",
+        "p{font-size:10px;line-height:30px}\
+         #ib{display:inline-block;font-size:10px;line-height:12px;width:60px}",
+    );
+    let (base, line_y) = base_line(&bx, &dom);
+    let p = find(&bx, by_tag(&dom, "p"));
+    let atom = p.children[0].lines[0]
+        .fragments
+        .iter()
+        .find(|f| f.atomic)
+        .expect("fragment atomique");
+    let lb = 12.0 + 9.0; // dernière ligne : 2e ligne (12) + sa baseline (9)
+    assert!(
+        (atom.rect.y - (base - lb)).abs() < 1.5,
+        "baseline inline-block : y={} attendu≈{} (bord bas donnerait {})",
+        atom.rect.y,
+        base - lb,
+        base - 24.0
+    );
+    let _ = line_y;
+
+    // 2) `middle` : milieu de la margin box à base + xh/2 —
+    // pas centré dans la ligne ((30-10)/2 = 10 vs 8+2.5).
+    let (dom2, bx2) = laid(
+        "<p><span id=ib>a</span></p>",
+        "p{font-size:10px;line-height:30px}\
+         #ib{display:inline-block;font-size:10px;height:10px;vertical-align:middle}",
+    );
+    let ib = find(&bx2, by_id(&dom2, "ib"));
+    let p2 = find(&bx2, by_tag(&dom2, "p"));
+    let l0 = &p2.children[0].lines[0];
+    let b2 = l0.rect.y + l0.baseline;
+    let mid = ib.rect.y + ib.rect.height / 2.0;
+    assert!(
+        (mid - (b2 + 2.5)).abs() < 2.5,
+        "middle : centre={} attendu≈{} (centre de ligne = {})",
+        mid,
+        b2 + 2.5,
+        l0.rect.y + l0.rect.height / 2.0
+    );
+
+    // 3) `text-top` : haut de la margin box à base - ascent
+    // parent (= 10), pas au bord haut de la ligne (0).
+    let (dom3, bx3) = laid(
+        "<p><span id=ib>a</span></p>",
+        "p{font-size:10px;line-height:30px}\
+         #ib{display:inline-block;font-size:10px;height:10px;vertical-align:text-top}",
+    );
+    let ib3 = find(&bx3, by_id(&dom3, "ib"));
+    let p3 = find(&bx3, by_tag(&dom3, "p"));
+    let l3 = &p3.children[0].lines[0];
+    let b3 = l3.rect.y + l3.baseline;
+    assert!(
+        (ib3.rect.y - (b3 - 8.0)).abs() < 2.5,
+        "text-top : y={} attendu≈{} (bord de ligne = {})",
+        ib3.rect.y,
+        b3 - 8.0,
+        l3.rect.y
+    );
+
+    // 4) `first-baseline` vs `last-baseline` : Δ = une hauteur
+    // de ligne interne (12 px) — première ligne = base 9.
+    let mk = |va: &str| {
+        let (d, b) = laid(
+            "<p><span id=ib>a<br>b</span></p>",
+            &format!(
+                "p{{font-size:10px;line-height:30px}}\
+                 #ib{{display:inline-block;font-size:10px;line-height:12px;width:60px;vertical-align:{va}}}"
+            ),
+        );
+        let _ = d;
+        let ib = find(&b, by_id(&d, "ib"));
+        ib.rect.y
+    };
+    let y_first = mk("first-baseline");
+    let y_last = mk("last-baseline");
+    assert!(
+        (y_first - y_last - 12.0).abs() < 2.0,
+        "first vs last baseline : Δ={} attendu≈12",
+        y_first - y_last
+    );
+}

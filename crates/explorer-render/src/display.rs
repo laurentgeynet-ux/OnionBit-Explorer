@@ -6865,6 +6865,7 @@ mod tests {
                 descent: -2.0,
                 line_gap: 0.0,
                 units_per_em: 1000,
+                x_height: 5.0,
             },
             fallback_spans: Vec::new(),
             ink: None,

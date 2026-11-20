@@ -102,6 +102,10 @@ pub struct FontMetrics {
     pub line_gap: f32,
     /// Unités par em de la fonte.
     pub units_per_em: u16,
+    /// x-height (`OS/2.sxHeight`, R-315) — ancre de
+    /// `vertical-align:middle` (§10.8.1 : centre sur
+    /// baseline + xh/2). Repli `0.5 em` sans métrique.
+    pub x_height: f32,
 }
 
 impl FontMetrics {
@@ -851,6 +855,9 @@ fn metrics_of(face: &ttf_parser::Face<'_>, size_px: f32) -> Option<FontMetrics> 
         descent: f32::from(face.descender()) * scale,
         line_gap: f32::from(face.line_gap()) * scale,
         units_per_em: face.units_per_em(),
+        x_height: face
+            .x_height()
+            .map_or(0.5 * size_px, |xh| f32::from(xh) * scale),
     })
 }
 

@@ -4938,3 +4938,75 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   WPT cliquet 203/203, smoke 7 sites sans régression
   (lobste.rs R-310 tient : stories 57 vs 59). Verrou :
   `flottant_dans_inline_est_hisse_au_bfc` (block.rs).
+
+- [x] **R-314 — `justify-items`/`justify-self` sur boîtes
+  bloc : alignement axe inline (css-align-3 §6.1.1) — salve
+  css-align ciblée spec/BCD** (`explorer-layout`, pilotage
+  vol enrichi 926-930). **Périmètre normatif** — la lecture
+  spec avant code a écarté trois leurres BCD :
+  `justify-content` « does not apply » aux conteneurs bloc
+  (§5.1.1), `align-items`/`align-self` idem aux boîtes bloc
+  ordinaires (§6.2.1) — `na` honnêtes, non implémentés.
+  Reste `justify-self` (boîtes bloc, axe inline) +
+  `justify-items` (défaut parent) + shorthands
+  `place-items`/`place-self` (déjà expansés — value.rs).
+  **Sémantique** : auto-size non-normal → `fit-content`
+  approché par le fragment le plus large posé (ligne ou
+  enfant — rétrécit uniquement sur preuve de contenu plus
+  étroit, conservateur) ; résolution logique
+  `start`/`end`/`self-*`/`flex-*` sur `direction` de la
+  boîte, `left`/`right` physiques ; `safe` par défaut
+  (surplus négatif → start), `unsafe` autorisé ; marges
+  `auto` prioritaires (§10.3.3 absorbe déjà le libre) ;
+  `baseline`/`stretch`/`normal` → non-alignés. **Insertion**
+  : branche in-flow unique de `flow_children`, après pose
+  de l'enfant (BFC et non-BFC partagent le point) —
+  flottants/hors-flux/anonymes/cellules de table exclus en
+  amont ; `-webkit-center` cède devant `justify-self`
+  explicite (plus de double translation) ; `anchor-center`
+  des ancres intact. Verrou :
+  `justify_self_bloc_aligne_dans_le_conteneur` (center/end/
+  justify-items/rtl/marges-auto — 5 cas, block.rs).
+- [x] **R-315 — `vertical-align` : sémantique §10.8.1 sur
+  atomes — baselines réelles first/last, métriques parent
+  (x-height, ascent, descent), `%` sur la line-height de
+  l'élément — salve css-inline** (`explorer-layout`,
+  pilotage vol enrichi : `inline-measure` ×552 +
+  `line-metric` ×127 = premier signal CSS terrain).
+  **Baselines réelles des atomes** : `size_atomics_walk`
+  calcule désormais `(first, last)` baseline via
+  `block_line_baseline` — dernière ligne box en flux pour
+  `last-baseline` (§10.8.1 — plus le bord bas de margin
+  box pour tout le monde) ; repli bord bas si aucune
+  ligne en flux ou `overflow ≠ visible` (spec : bottom
+  margin edge). `FontMetrics` porte `x_height`
+  (`metrics.x_height`, repli `fs×0,5`) exposé à la ligne
+  via `LineAcc.p_xh` + `p_ascent`/`p_descent` de la fonte
+  **du conteneur** (strut) — pas du fragment. **`middle`
+  spécifié** : centre de la margin box sur
+  `baseline + x-height/2` (le centrage géométrique de
+  ligne, approximation historique, reste sur les runs
+  texte). **`text-top`/`text-bottom` spécifiés** : bords
+  de l'em box parente (`base − ascent` / `base +
+  descent`), plus assimilés aux bords de ligne.
+  **`first-baseline`/`last-baseline`** distincts sur
+  inline-block multi-lignes (Δ = une hauteur de ligne
+  interne mesurée). **`%` recalé** : résolu sur la
+  `line-height` de l'élément (§10.8), plus le strut
+  conteneur. **Correction structurelle** : `close()` en
+  deux passes — mesure de la hauteur requise (extension
+  margin-box des atomes sous `base`) puis placement ;
+  `max_base` accumule la vraie baseline de l'atome
+  (`mt + last-baseline`), pas son bord bas. **Borne
+  honnête** : les runs texte gardent la table historique
+  (`text-top` ≈ `top`, `middle` géométrique) — leur box
+  moteur n'est pas la content area centrée de la spec ;
+  y appliquer la formule atome gonflait la ligne
+  (régression `it.h=52,8` attrapée par la suite block).
+  Bug attrapé par le cliquet WPT : `mem::take` vidait
+  `atom_bl` à la première `close()` — lignes ≥2 sans
+  baseline d'atome (mc-014). Verrous :
+  `vertical_align_semantique_spec` (4 cas : baseline
+  atome réelle, `middle` x-height, `text-top` em box,
+  first/last distincts — inline.rs). Gates : block
+  146/146, inline 57/57, **WPT 203/203**, clippy/fmt.

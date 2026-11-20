@@ -454,7 +454,10 @@ pub(crate) fn layout_inline(
     // `aid` est l'ordre pré-ordre partagé avec
     // `collect_child`.
     let mut atomics: HashMap<usize, Rect> = HashMap::new();
-    size_atomics(bx, w, cb_h, ctx, fs, abs_cb, &mut atomics);
+    // `aid` → (first_baseline, last_baseline) de l'atome —
+    // distance depuis le haut de sa border box (§10.8.1).
+    let mut atom_bl: HashMap<usize, (f32, f32)> = HashMap::new();
+    size_atomics(bx, w, cb_h, ctx, fs, abs_cb, &mut atomics, &mut atom_bl);
 
     let mut items = collect_items(bx, para_lv, fs, ctx);
     // Strut du conteneur (§10.8.1) : `line-height` de la
@@ -507,9 +510,18 @@ pub(crate) fn layout_inline(
     } else {
         fl
     };
+    // Métriques de la fonte du conteneur (§10.8.1) :
+    // `middle` centre sur baseline + x-height/2,
+    // `text-top`/`text-bottom` ancrent aux bords de l'em box
+    // parente — pas aux bords de ligne.
+    let parent_m = ctx.fonts.and_then(|src| {
+        let req = font::request_of(&st, ctx);
+        ctx.font_cache.borrow_mut().metrics(src, &req, fs)
+    });
     let mut lines = break_into_lines(
         &items,
         &atomics,
+        &atom_bl,
         x,
         y,
         w,
@@ -517,6 +529,7 @@ pub(crate) fn layout_inline(
         fs,
         fl_eff,
         strut_lh,
+        parent_m,
         // `each-line` → indent toutes lignes ; `hanging` →
         // indent sauf la première (css-text-4) — le delta
         // première/suivantes est porté à la cassure et à
@@ -842,6 +855,7 @@ fn text_box_edges(
                 descent: -0.2 * fsf,
                 line_gap: 0.0,
                 units_per_em: 0,
+                x_height: 0.5 * fsf,
             },
             |s| s.metrics,
         );
@@ -1152,9 +1166,39 @@ fn size_atomics(
     fs: f32,
     abs_cb: Rect,
     atomics: &mut HashMap<usize, Rect>,
+    atom_bl: &mut HashMap<usize, (f32, f32)>,
 ) {
     let mut aid = 0usize;
-    size_atomics_walk(b, w, cb_h, ctx, fs, abs_cb, atomics, &mut aid);
+    size_atomics_walk(b, w, cb_h, ctx, fs, abs_cb, atomics, atom_bl, &mut aid);
+}
+
+/// §10.8.1 : la baseline d'une boîte = baseline de sa
+/// première (`first`) ou dernière ligne box **en flux** ;
+/// `None` si aucune (→ le bord bas de la margin box sert de
+/// baseline, remplacés et boîtes vides). Les rects sont posés
+/// en absolu dans l'espace de l'atome (layout à 0,0) — le
+/// résultat est directement la distance depuis son haut.
+fn block_line_baseline(b: &LayoutBox, first: bool) -> Option<f32> {
+    let pick = if first {
+        b.lines.first()
+    } else {
+        b.lines.last()
+    };
+    if let Some(l) = pick {
+        return Some(l.rect.y + l.baseline);
+    }
+    let mut iter: Box<dyn Iterator<Item = &LayoutBox> + '_> = if first {
+        Box::new(b.children.iter())
+    } else {
+        Box::new(b.children.iter().rev())
+    };
+    iter.find_map(|c| {
+        if c.out_of_flow() || matches!(c.style.get("float"), Some("left" | "right")) {
+            None
+        } else {
+            block_line_baseline(c, first)
+        }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1166,6 +1210,7 @@ fn size_atomics_walk(
     fs: f32,
     abs_cb: Rect,
     atomics: &mut HashMap<usize, Rect>,
+    atom_bl: &mut HashMap<usize, (f32, f32)>,
     aid: &mut usize,
 ) {
     for child in &mut b.children {
@@ -1236,11 +1281,32 @@ fn size_atomics_walk(
                 &mut FloatCtx::default(),
             );
             atomics.insert(*aid, child.rect);
+            // §10.8.1 : baseline de l'inline-block = baseline
+            // de sa dernière ligne box en flux (first = sa
+            // première) — SAUF si `overflow` ≠ `visible` ou
+            // aucune ligne en flux : le bord bas de la margin
+            // box fait office de baseline (remplacés, boîtes
+            // vidées). Les lignes sont posées à y=0 dans
+            // l'espace de l'atome → lecture directe.
+            let bl = if ["overflow", "overflow-x", "overflow-y"]
+                .iter()
+                .all(|p| child.style.get(p).map_or("visible", |v| v.trim()) == "visible")
+            {
+                let lb = block_line_baseline(child, false);
+                let fb = block_line_baseline(child, true);
+                (
+                    fb.or(lb).unwrap_or(child.rect.height),
+                    lb.unwrap_or(child.rect.height),
+                )
+            } else {
+                (child.rect.height, child.rect.height)
+            };
+            atom_bl.insert(*aid, bl);
             *aid += 1;
         } else {
             // Arête ∝ profondeur de l'arbre (R-24).
             explorer_common::deep(|| {
-                size_atomics_walk(child, w, cb_h, ctx, fs, abs_cb, atomics, aid);
+                size_atomics_walk(child, w, cb_h, ctx, fs, abs_cb, atomics, atom_bl, aid);
             });
         }
     }
@@ -2116,17 +2182,174 @@ struct LineAcc {
     strut_lh: f32,
     /// Baseline du strut (même modèle que les fragments).
     strut_base: f32,
+    /// Ascent de la fonte du conteneur (ancre `text-top`).
+    p_ascent: f32,
+    /// Descent (positive) de la fonte du conteneur (`text-bottom`).
+    p_descent: f32,
+    /// x-height de la fonte du conteneur (ancre `middle`).
+    p_xh: f32,
+    /// `aid` → (first, last) baseline des atomes (§10.8.1).
+    atom_bl: HashMap<usize, (f32, f32)>,
+}
+
+/// `vertical-align` effectif d'un fragment (R-315 — sorti de
+/// `close` pour servir à deux passes : hauteur requise puis
+/// placement). `alignment-baseline` → `baseline-shift` →
+/// `dominant-baseline` → `font-variant-position` en repli
+/// quand `vertical-align` est absent.
+fn va_of(f: &Fragment) -> &str {
+    let va_owned;
+    if let Some(v) = f.style.get("vertical-align") {
+        v
+    } else if let Some(bs) = f.style.get("baseline-shift") {
+        bs
+    } else if let Some(ab) = f.style.get("alignment-baseline") {
+        // R-269 — `top`/`bottom` = bords de ligne ;
+        // `above`/`over`/`below`/`under` = termes
+        // writing-modes verticaux (css-inline-3,
+        // §10.3 — approchés bord haut/bas en
+        // horizontal-tb). `first`/`last`/`auto` →
+        // baseline (unique en ligne simple).
+        va_owned = match ab.trim() {
+            "ideographic" | "text-after-edge" | "text-bottom" | "bottom" | "below" | "under" => {
+                "text-bottom"
+            }
+            "hanging" | "text-before-edge" | "text-top" | "top" | "above" | "over" => "top",
+            "central" | "mathematical" | "middle" => "middle",
+            _ => "baseline",
+        };
+        va_owned
+    } else if let Some(db) = f.style.get("dominant-baseline") {
+        // `dominant-baseline` (SVG, css-inline-3) —
+        // même table de repli qu'`alignment-baseline`
+        // quand rien d'autre n'aligne le fragment.
+        va_owned = match db.trim() {
+            "ideographic" | "text-after-edge" | "text-bottom" => "text-bottom",
+            "hanging" | "text-before-edge" | "text-top" => "top",
+            "central" | "mathematical" | "middle" => "middle",
+            _ => "baseline",
+        };
+        va_owned
+    } else if let Some(fp) = f.style.get("font-variant-position") {
+        // css-fonts-4 §6.8 : `sub`/`super` déplacent
+        // la baseline (approximation des décalages
+        // `subs`/`sups` — les métriques de la fonte
+        // ne sont pas lues ici).
+        va_owned = match fp.trim() {
+            "sub" => "sub",
+            "super" => "super",
+            _ => "baseline",
+        };
+        va_owned
+    } else {
+        "baseline"
+    }
+}
+
+/// Décalage de baseline d'un fragment (R-161, §10.8) :
+/// `sub`/`super` en fractions de font-size, longueur
+/// signée ; `%` sur la **line-height de l'élément**
+/// (R-315 — plus le strut du conteneur). Fonction libre
+/// pour rester appelable pendant `frags.iter_mut()`.
+fn va_dy(f: &Fragment, va: &str, strut_lh: f32, ctx: &BlockCtx) -> f32 {
+    let fs_px = f
+        .style
+        .get("font-size")
+        .and_then(|v| v.strip_suffix("px"))
+        .and_then(|t| t.trim().parse::<f32>().ok())
+        .unwrap_or(strut_lh);
+    match va {
+        "sub" => fs_px * 0.2,
+        "super" => -(fs_px * 0.33),
+        _ => {
+            let lh = line_height_of(&f.style, fs_px, ctx);
+            raw_length_px(va, lh, fs_px, ctx).map_or(0.0, |l| -l)
+        }
+    }
+}
+
+/// Position `rect.y` d'un fragment dans la ligne (R-315) —
+/// `geom` = (y ligne, h ligne, baseline), `p` = métriques
+/// de la fonte parente (ascent, descent, x-height),
+/// `bl` = (first, last) baseline depuis la margin box.
+///
+/// Atomes : sémantique §10.8.1 — `top`/`bottom` ancrent la
+/// **margin box** aux bords de ligne ; `text-top`/
+/// `text-bottom` aux bords de l'em box parente ; `middle`
+/// centre sur baseline + x-height/2 ; `first`/`last-baseline`
+/// = baselines réelles de l'atome. Runs texte : table
+/// historique (`text-top` ≈ `top`, `middle` géométrique —
+/// le box texte du moteur n'est pas la content area centrée
+/// de la spec). Synonymes SVG (css-inline-3) tolérés en
+/// repli gracieux.
+fn va_place_y(
+    f: &Fragment,
+    va: &str,
+    geom: (f32, f32, f32),
+    p: (f32, f32, f32),
+    bl: (f32, f32),
+    dy: f32,
+) -> f32 {
+    let (y, h, base) = geom;
+    let (p_ascent, p_descent, p_xh) = p;
+    let (fb, lb) = bl;
+    let mbox_h = f.rect.height + f.marg_t + f.marg_b;
+    if f.atomic {
+        match va {
+            "top" | "hanging" | "text-before-edge" => y + f.marg_t,
+            "text-top" => y + base - p_ascent + f.marg_t,
+            "bottom" | "ideographic" | "text-after-edge" => y + h - (f.rect.height + f.marg_b),
+            "text-bottom" => y + base + p_descent - f.rect.height - f.marg_b,
+            "middle" | "center" | "central" | "mathematical" => {
+                y + base + p_xh / 2.0 - mbox_h / 2.0 + f.marg_t
+            }
+            "first-baseline" => y + (base - fb) + f.marg_t,
+            "last-baseline" => y + (base - lb) + f.marg_t,
+            _ => y + (base - lb) + f.marg_t + dy,
+        }
+    } else {
+        match va {
+            "top" | "text-top" | "hanging" | "text-before-edge" => y + f.marg_t,
+            "bottom" | "text-bottom" | "ideographic" | "text-after-edge" => {
+                y + h - (f.rect.height + f.marg_b)
+            }
+            "middle" | "center" | "central" | "mathematical" => y + (h - mbox_h) / 2.0 + f.marg_t,
+            _ => y + (base - lb) + f.marg_t + dy,
+        }
+    }
 }
 
 impl LineAcc {
-    fn new(strut_lh: f32, strut_base: f32) -> Self {
+    fn new(
+        strut_lh: f32,
+        strut_base: f32,
+        p_ascent: f32,
+        p_descent: f32,
+        p_xh: f32,
+        atom_bl: &HashMap<usize, (f32, f32)>,
+    ) -> Self {
         Self {
             frags: Vec::new(),
             max_lh: 0.0,
             max_base: 0.0,
             strut_lh,
             strut_base,
+            p_ascent,
+            p_descent,
+            p_xh,
+            atom_bl: atom_bl.clone(),
         }
+    }
+
+    /// Baselines (first, last) du fragment depuis le haut de
+    /// sa margin box — les atomes lisent `atom_bl`, le texte
+    /// n'a qu'une baseline (la sienne).
+    fn frag_baselines(&self, f: &Fragment) -> (f32, f32) {
+        f.aid
+            .and_then(|a| self.atom_bl.get(&a).copied())
+            .map_or((f.baseline, f.baseline), |(fb, lb)| {
+                (fb + f.marg_t, lb + f.marg_t)
+            })
     }
 
     fn is_empty(&self) -> bool {
@@ -2255,94 +2478,62 @@ impl LineAcc {
             .map(|f| f.rect.x + f.rect.width)
             .fold(0.0_f32, f32::max);
         let mut h = self.max_lh.max(self.strut_lh).max(base);
-        for f in &mut self.frags {
-            // `vertical-align` des atomes (inline-block,
-            // remplacés) : `top`/`bottom` ancrent la **margin
-            // box** aux bords de la ligne, `middle` la centre
-            // (approximation — la spec centre sur x-height/2
-            // au-dessus de la baseline). Texte et autres clés
-            // : baseline.
-            // `alignment-baseline` (css-inline-3 — réexport SVG)
-            // quand `vertical-align` est absent : repli sur les
-            // clés communes. `alphabetic`→baseline, `ideographic`
-            // →text-bottom, `hanging`→top, `central`/`mathematical`
-            // →middle. `baseline-shift` = alias de `vertical-align`
-            // (`sub`/`super`/longueur) — même traitement.
-            let va_owned;
-            let va = if let Some(v) = f.style.get("vertical-align") {
-                v
-            } else if let Some(bs) = f.style.get("baseline-shift") {
-                bs
-            } else if let Some(ab) = f.style.get("alignment-baseline") {
-                // R-269 — `top`/`bottom` = bords de ligne ;
-                // `above`/`over`/`below`/`under` = termes
-                // writing-modes verticaux (css-inline-3,
-                // §10.3 — approchés bord haut/bas en
-                // horizontal-tb). `first`/`last`/`auto` →
-                // baseline (unique en ligne simple).
-                va_owned = match ab.trim() {
-                    "ideographic" | "text-after-edge" | "text-bottom" | "bottom" | "below"
-                    | "under" => "text-bottom",
-                    "hanging" | "text-before-edge" | "text-top" | "top" | "above" | "over" => "top",
-                    "central" | "mathematical" | "middle" => "middle",
-                    _ => "baseline",
-                };
-                va_owned
-            } else if let Some(db) = f.style.get("dominant-baseline") {
-                // `dominant-baseline` (SVG, css-inline-3) —
-                // même table de repli qu'`alignment-baseline`
-                // quand rien d'autre n'aligne le fragment.
-                va_owned = match db.trim() {
-                    "ideographic" | "text-after-edge" | "text-bottom" => "text-bottom",
-                    "hanging" | "text-before-edge" | "text-top" => "top",
-                    "central" | "mathematical" | "middle" => "middle",
-                    _ => "baseline",
-                };
-                va_owned
-            } else if let Some(fp) = f.style.get("font-variant-position") {
-                // css-fonts-4 §6.8 : `sub`/`super` déplacent
-                // la baseline (approximation des décalages
-                // `subs`/`sups` — les métriques de la fonte
-                // ne sont pas lues ici).
-                va_owned = match fp.trim() {
-                    "sub" => "sub",
-                    "super" => "super",
-                    _ => "baseline",
-                };
-                va_owned
-            } else {
-                "baseline"
-            };
-            // R-161 — décalages de baseline sur tout fragment
-            // : / en fractions de font-size
-            // (métriques fonte hors périmètre), longueur en
-            // px négative = monte,  de la hauteur de strut
-            // (approxime la line-height, §10.8).
-            let fs_px = f
-                .style
-                .get("font-size")
-                .and_then(|v| v.strip_suffix("px"))
-                .and_then(|t| t.trim().parse::<f32>().ok())
-                .unwrap_or(self.strut_lh);
-            let dy = match va {
-                "sub" => fs_px * 0.2,
-                "super" => -(fs_px * 0.33),
-                _ => raw_length_px(va, self.strut_lh, fs_px, ctx).map_or(0.0, |l| -l),
-            };
-            f.rect.y = match va {
-                // Synonymes SVG (css-inline-3 — `alphabetic`/
-                // `ideographic`/`hanging`/`central`/
-                // `mathematical`/*-edge tolérés aussi sur
-                // `vertical-align` — repli gracieux).
-                "top" | "text-top" | "hanging" | "text-before-edge" => *y + f.marg_t,
-                "bottom" | "text-bottom" | "ideographic" | "text-after-edge" => {
-                    *y + h - (f.rect.height + f.marg_b)
-                }
+        // Passe 1 — la ligne grandit pour contenir les boîtes
+        // alignées (§10.8.1 : la line box doit englober chaque
+        // fragment une fois son `vertical-align` appliqué ;
+        // les boîtes ancrées aux bords de ligne (`top`/`bottom`)
+        // exigent `h ≥ margin box`).
+        for f in &self.frags {
+            // Extension mesurée = atomes seulement : pour un
+            // run texte, la boîte `rect.height` = line-height
+            // posée asymétriquement (baseline = ascent, pas
+            // ascent+½leading) — compter son bord bas gonflerait
+            // la ligne au-delà de la spec (la content area est
+            // centrée dans lh ; Chrome garde la ligne à lh).
+            if !f.atomic {
+                continue;
+            }
+            let va = va_of(f);
+            let (fb, lb) = self.frag_baselines(f);
+            let mbox = f.rect.height + f.marg_t + f.marg_b;
+            let dy = va_dy(f, va, self.strut_lh, ctx);
+            let ext = match va {
+                "top" | "hanging" | "text-before-edge" => f.marg_t + f.rect.height + f.marg_b,
+                "bottom" | "ideographic" | "text-after-edge" => mbox,
+                "text-top" => base - self.p_ascent + mbox,
+                "text-bottom" => base + self.p_descent,
                 "middle" | "center" | "central" | "mathematical" => {
-                    *y + (h - f.rect.height - f.marg_t - f.marg_b) / 2.0 + f.marg_t
+                    base + self.p_xh / 2.0 + mbox / 2.0
                 }
-                _ => *y + (base - f.baseline) + dy,
+                "first-baseline" => base - fb + mbox,
+                "last-baseline" => base - lb + mbox,
+                _ => base - lb + dy + mbox,
             };
+            h = h.max(ext);
+        }
+        // Passe 2 — placement : `top`/`bottom` ancrent la
+        // **margin box** aux bords de ligne ; `text-top`/
+        // `text-bottom` aux bords de l'em box parente ;
+        // `middle` centre la margin box sur baseline +
+        // x-height/2 (spec §10.8.1, plus le centre de ligne).
+        // `first`/`last-baseline` = baselines réelles de
+        // l'atome (R-315 — plus le bord bas pour tout).
+        // `clone` (pas `take`) : `close` tourne une fois
+        // PAR LIGNE — consommer la map priverait les lignes
+        // suivantes des baselines d'atomes (mc-014).
+        let atom_bl = self.atom_bl.clone();
+        let strut_lh = self.strut_lh;
+        let p = (self.p_ascent, self.p_descent, self.p_xh);
+        for f in &mut self.frags {
+            let va = va_of(f);
+            let (fb, lb) = f
+                .aid
+                .and_then(|a| atom_bl.get(&a).copied())
+                .map_or((f.baseline, f.baseline), |(a, b)| {
+                    (a + f.marg_t, b + f.marg_t)
+                });
+            let dy = va_dy(f, va, strut_lh, ctx);
+            f.rect.y = va_place_y(f, va, (*y, h, base), p, (fb, lb), dy);
         }
         let mut base = base;
         self.lift_ruby(&mut h, &mut base);
@@ -2754,6 +2945,7 @@ fn ruby_base_span(frags: &[Fragment], rt_lo: usize) -> (f32, f32) {
 fn break_into_lines(
     items: &[Item],
     atomics: &HashMap<usize, Rect>,
+    atom_bl: &HashMap<usize, (f32, f32)>,
     x: f32,
     y: f32,
     w: f32,
@@ -2761,6 +2953,7 @@ fn break_into_lines(
     parent_fs: f32,
     fl: &FloatCtx,
     strut_lh: f32,
+    parent_m: Option<font::FontMetrics>,
     indent_first: f32,
     indent_rest: f32,
     para_lv: u8,
@@ -2778,7 +2971,14 @@ fn break_into_lines(
     // `line-height: 0` elle tombe sous l'em box et ne
     // relève ni la baseline ni la hauteur de la ligne.
     let strut_base = (strut_lh - parent_fs).mul_add(0.5, parent_fs * 0.8);
-    let mut acc = LineAcc::new(strut_lh, strut_base);
+    // Métriques parentes pour `middle`/`text-top`/`text-bottom`
+    // — repli 0.8/0.2/0.5 em sans fonte réelle (même
+    // approximation que `strut_base` ci-dessus).
+    let (p_ascent, p_descent, p_xh) = parent_m
+        .map_or((parent_fs * 0.8, parent_fs * 0.2, parent_fs * 0.5), |m| {
+            (m.ascent, -m.descent, m.x_height)
+        });
+    let mut acc = LineAcc::new(strut_lh, strut_base, p_ascent, p_descent, p_xh, atom_bl);
     let (mut line_x, mut line_w) = fl.band(y, x, w);
     // `text-indent` décale le départ de la première ligne
     // seulement (`new_line!` repart de `line_x` brut) ; les
@@ -2922,7 +3122,14 @@ fn break_into_lines(
                     width: r.width,
                     height: r.height,
                 },
-                baseline: r.height,
+                // §10.8.1 : baseline réelle de l'atome
+                // (dernière ligne box ; bord bas si aucune /
+                // overflow ≠ visible — repli dans
+                // `size_atomics`).
+                baseline: item
+                    .aid
+                    .and_then(|a| atom_bl.get(&a))
+                    .map_or(r.height, |&(_, lb)| lb),
                 shaped: None,
                 trail_w: 0.0,
                 marg_l: ml,
@@ -2932,9 +3139,17 @@ fn break_into_lines(
                 deco: Vec::new(),
                 level: para_lv,
             });
-            // (`rect.y = y + base - h`), `mb` allonge la ligne.
+            // `max_base` = baseline depuis le haut de la
+            // margin box (`mt` + baseline interne) — pas le
+            // bord bas : une inline-block multi-lignes n'a
+            // pas sa baseline au fond (§10.8.1).
             acc.max_lh = acc.max_lh.max(mt + r.height + mb);
-            acc.max_base = acc.max_base.max(mt + r.height);
+            acc.max_base = acc.max_base.max(
+                mt + item
+                    .aid
+                    .and_then(|a| atom_bl.get(&a))
+                    .map_or(r.height, |&(_, lb)| lb),
+            );
             cursor_x = px + outer;
             continue;
         }
