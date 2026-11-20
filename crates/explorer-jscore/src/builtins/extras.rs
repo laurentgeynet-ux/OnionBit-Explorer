@@ -677,20 +677,29 @@ pub(crate) fn text_encoder_encode(e: &mut Engine, _t: Value, args: &[Value]) -> 
     Ok(crate::typed_array::new_u8_array(e, s.into_bytes()))
 }
 
-/// `new TextDecoder(label?, options?)` — UTF-8 (labels parsed
-/// but ignored; non-UTF-8 requested → `RangeError` like real
-/// engines for unsupported labels). `options.fatal` : données
-/// invalides → `TypeError` au lieu du remplacement `U+FFFD`
-/// (audit 4 voix — l'option était ignorée) ; `options.ignoreBOM`
-/// : le BOM UTF-8 n'est pas livré dans la sortie.
+/// `new TextDecoder(label?, options?)` — UTF-8 et UTF-16
+/// (labels WHATWG canonisés ; autre label → `RangeError`
+/// comme les vrais moteurs). §B-204 : `utf-16le` est le
+/// décodeur `UTF16ToString` des runtimes Emscripten/wasm
+/// (diagrams.net). `options.fatal` : données invalides →
+/// `TypeError` au lieu du remplacement `U+FFFD` (audit 4
+/// voix — l'option était ignorée) ; `options.ignoreBOM`
+/// : `true` = le BOM est livré dans la sortie (spec — le
+/// défaut le retire).
 pub(crate) fn text_decoder_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let label = match arg(args, 0) {
         Value::Undefined => "utf-8".to_string(),
         v => e.to_js_string(v)?.to_lowercase(),
     };
-    if !matches!(label.as_str(), "utf-8" | "utf8" | "unicode-1-1-utf-8") {
-        return Err(e.range_error("unsupported encoding"));
-    }
+    // Labels WHATWG « get an encoding » → nom canonique.
+    let enc = match label.as_str() {
+        "utf-8" | "utf8" | "unicode-1-1-utf-8" | "unicode11utf8" | "unicode20utf8"
+        | "x-unicode20utf8" => "utf-8",
+        "utf-16" | "utf-16le" | "csunicode" | "iso-10646-ucs-2" | "ucs-2" | "unicode"
+        | "unicodefeffbig" => "utf-16le",
+        "utf-16be" | "unicodefffe" => "utf-16be",
+        _ => return Err(e.range_error("unsupported encoding")),
+    };
     let flag = |e: &mut Engine, key: &str| match arg(args, 1) {
         Value::Obj(id) => {
             let v = e.get_prop(id, key).unwrap_or(Value::Undefined);
@@ -702,8 +711,8 @@ pub(crate) fn text_decoder_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     let ignore_bom = flag(e, "ignoreBOM");
     let id = e.new_object();
     e.add_method(id, "decode", text_decoder_decode);
-    let enc = e.str_val("utf-8");
-    e.set_own(id, "encoding", enc, true);
+    let enc_v = e.str_val(enc);
+    e.set_own(id, "encoding", enc_v, true);
     e.set_own(id, "fatal", Value::Bool(fatal), true);
     e.set_own(id, "ignoreBOM", Value::Bool(ignore_bom), true);
     Ok(Value::Obj(id))
@@ -733,8 +742,21 @@ pub(crate) fn text_decoder_decode(e: &mut Engine, t: Value, args: &[Value]) -> J
         }
         _ => false,
     };
+    let enc = match t {
+        Value::Obj(id) => match e.get_prop(id, "encoding") {
+            Some(Value::Str(s)) => s.to_string(),
+            _ => "utf-8".to_string(),
+        },
+        _ => "utf-8".to_string(),
+    };
+    if enc == "utf-16le" || enc == "utf-16be" {
+        return decode_utf16(e, &bytes, enc == "utf-16be", &flag);
+    }
     let mut slice = &bytes[..];
-    if flag(e, "ignoreBOM") && slice.starts_with(&[0xEF, 0xBB, 0xBF]) {
+    // Spec : le BOM UTF-8 est retiré par défaut —
+    // `ignoreBOM:true` le conserve (la convention historique
+    // était inversée, §B-204).
+    if !flag(e, "ignoreBOM") && slice.starts_with(&[0xEF, 0xBB, 0xBF]) {
         slice = &slice[3..];
     }
     match String::from_utf8(slice.to_vec()) {
@@ -744,6 +766,53 @@ pub(crate) fn text_decoder_decode(e: &mut Engine, t: Value, args: &[Value]) -> J
         }
         Err(_) => Ok(e.str_val(String::from_utf8_lossy(slice).into_owned())),
     }
+}
+
+/// `decode` UTF-16LE/BE — paires d'octets → units `u16`
+/// livrées telles quelles (un surrogate isolé reste isolé —
+/// WHATWG ; le surrogate n'est *jamais* réencodé). BOM :
+/// `ignoreBOM:false` → le premier couple `FF FE` force LE,
+/// `FE FF` force BE (sniff, spec) ; `ignoreBOM:true` → tout
+/// est décodé littéralement dans l'endianness déclarée.
+/// Octet impair final → `U+FFFD` (`fatal` → `TypeError`).
+fn decode_utf16(
+    e: &mut Engine,
+    bytes: &[u8],
+    declared_be: bool,
+    flag: &dyn Fn(&mut Engine, &str) -> bool,
+) -> JsResult<Value> {
+    let mut be = declared_be;
+    let mut i = 0usize;
+    if !flag(e, "ignoreBOM") && bytes.len() >= 2 {
+        if bytes[0] == 0xFF && bytes[1] == 0xFE {
+            be = false;
+            i = 2;
+        } else if bytes[0] == 0xFE && bytes[1] == 0xFF {
+            be = true;
+            i = 2;
+        }
+    }
+    let mut units: Vec<u16> = Vec::with_capacity(bytes.len() / 2 + 1);
+    let mut odd_tail = false;
+    while i + 1 < bytes.len() {
+        let (a, b) = (bytes[i], bytes[i + 1]);
+        units.push(if be {
+            u16::from_be_bytes([a, b])
+        } else {
+            u16::from_le_bytes([a, b])
+        });
+        i += 2;
+    }
+    if i < bytes.len() {
+        if flag(e, "fatal") {
+            return Err(e.type_error("The encoded data was not valid for encoding utf-16"));
+        }
+        odd_tail = true;
+    }
+    if odd_tail {
+        units.push(0xFFFD);
+    }
+    Ok(e.str_val_units(units))
 }
 
 // -- Math extras --------------------------------------------------------

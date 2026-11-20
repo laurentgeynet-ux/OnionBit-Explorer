@@ -8298,6 +8298,18 @@ MCP = adaptateur, jamais la base.
   (position spec). Verrous :
   `init_ui_event_carries_view_and_detail` +
   `init_ui_event_on_ctor_path`.
+- [x] **Étape 327. §B-204 soldée : `TextDecoder`
+  `utf-16le`/`utf-16be` implémentés — verbatim diagrams.net
+  (Emscripten `UTF16ToString`)** (`explorer-jscore`
+  `builtins/extras.rs`). Labels WHATWG canonisés
+  (`utf-16`, `ucs-2`, `iso-10646-ucs-2`… → `utf-16le` ;
+  `unicodefffe` → `utf-16be`), paires d'octets → units
+  brutes (surrogate isolé conservé), sniff BOM `FF FE`/
+  `FE FF` commute l'endianness, octet impair → `U+FFFD`
+  (`fatal` → `TypeError`). Correction adjacente spec :
+  `ignoreBOM` était inversé — `true` conserve le BOM, le
+  défaut le retire (utf-8 + utf-16). Verrou :
+  `b204_textdecoder_utf16` 2/2.
 - [x] **Étape 326. §B-203 soldée :
   `document.implementation.createDocument(ns, qname,
   doctype)` implémenté — verbatim abcnews (DOMPurify
