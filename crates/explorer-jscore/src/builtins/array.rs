@@ -307,7 +307,7 @@ pub(crate) fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
 /// non-writable **héritée** ne bloque pas, un index own
 /// configurable est redéfini (`concat`/`slice`/`map`/`filter` —
 /// `15.4.4.4-5-b-iii-3-b-1`, `target-array-with-non-writable-*`).
-fn put_cdp(e: &mut Engine, a: &Value, i: usize, v: Value) -> JsResult<()> {
+pub(crate) fn put_cdp(e: &mut Engine, a: &Value, i: usize, v: Value) -> JsResult<()> {
     if let Value::Obj(aid) = a {
         if !e.create_data_prop_spec_on(*aid, &i.to_string(), v)? {
             return Err(e.type_error("cannot define index on result array"));
@@ -316,13 +316,31 @@ fn put_cdp(e: &mut Engine, a: &Value, i: usize, v: Value) -> JsResult<()> {
     Ok(())
 }
 
+/// `Array.prototype.toString` — spec : `func = Get(O,"join")` ;
+/// non-callable → `%Object.prototype.toString%` ; `Call(func, O)`.
+/// `O = ToObject(this)` — `toString.call(true)` → `join` absent
+/// sur le wrapper → `"[object Boolean]"`, pas `""`.
+pub(crate) fn array_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = Value::Obj(to_object_this(e, this)?);
+    let join = e.get_prop_value(o.clone(), "join")?;
+    if e.is_callable(join.clone()) {
+        e.call_value(join, o, &[])
+    } else {
+        object_to_string(e, o, &[])
+    }
+}
+
 pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     // `this` est un élément comme les autres (spec) : spreadable
     // → éclaté via `length`+`Get`, sinon posé tel quel. Couvre
     // les array-likes (`Object.create(array)` github
     // selector-observer : `idx.slice(0).concat(idx.default)`).
+    // `O = ToObject(this)` est le 1er élément spec — primitif
+    // → wrapper observable (`concat.call(true)[0] instanceof
+    // Boolean`) ; un vrai tableau est spread comme avant.
+    let o = Value::Obj(this_array(e, this.clone())?);
     let mut out = Vec::new();
-    for a in std::iter::once(&this).chain(args.iter()) {
+    for a in std::iter::once(&o).chain(args.iter()) {
         // `IsConcatSpreadable` (spec) : `arg[@@isConcatSpreadable]`
         // prime, sinon le défaut est `Array.isArray(arg)`.
         let spread = match a {
@@ -365,7 +383,7 @@ pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
             out.push(a.clone());
         }
     }
-    let a_v = species_array(e, this, out.len())?;
+    let a_v = species_array(e, o, out.len())?;
     for (i, v) in out.iter().enumerate() {
         put_cdp(e, &a_v, i, v.clone())?;
     }
@@ -389,14 +407,17 @@ pub(crate) fn array_reverse(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
         let mut elems = take_elems(e, id)?;
         elems.reverse();
         put_elems(e, id, elems)?;
-        return Ok(this);
+        return Ok(Value::Obj(id));
     }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
             v.reverse();
         }
     }
-    Ok(this)
+    // Spec : retourne `O` (`ToObject(this)`) — primitif →
+    // wrapper observable (`reverse.call(true) instanceof
+    // Boolean`).
+    Ok(Value::Obj(id))
 }
 
 pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -484,7 +505,8 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         }
     }
     put_elems(e, id, elems)?;
-    Ok(this)
+    // Spec : retourne `O` (`ToObject(this)`), pas `this`.
+    Ok(Value::Obj(id))
 }
 
 pub(crate) fn array_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {

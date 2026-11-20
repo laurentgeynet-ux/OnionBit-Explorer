@@ -50,16 +50,15 @@ pub(crate) fn install(e: &mut Engine) {
 
     // `@@toStringTag` (spec) — prototypes concrets, namespaces et
     // `globalThis`. Lus par `obj[Symbol.toStringTag]` et par
-    // `Object.prototype.toString`. Les sous-classes d'`Error`
-    // héritent le tag `"Error"` (spec).
+    // `Object.prototype.toString`. ABSENTS spec (tag = slot
+    // interne, jamais une prop proto — un data non-writable
+    // hérité bloquerait `obj[Symbol.toStringTag] = …` via
+    // `OrdinarySet`, `symbol-tag-override-*`) : `String`/
+    // `Number`/`Boolean`/`Error`/`Date`/`RegExp`/`Array`/`Object`/
+    // `Function`. `.prototype`.
     for (pid, tag) in [
-        (e.protos.string, "String"),
-        (e.protos.number, "Number"),
-        (e.protos.boolean, "Boolean"),
         (e.protos.bigint, "BigInt"),
         (e.protos.symbol, "Symbol"),
-        (e.protos.error, "Error"),
-        (e.protos.date, "Date"),
         // `%RegExp.prototype%` n'a PAS de `@@toStringTag`
         // (spec — les instances sont brandées par leur kind,
         // `Object.prototype.toString.call(RegExp.prototype)`
@@ -1077,8 +1076,10 @@ pub(crate) fn install(e: &mut Engine) {
     }
     let op = e.protos.object;
     e.add_method(op, "toString", object_to_string);
-    // Spec : `toLocaleString` délègue à `toString` par défaut.
-    e.add_method(op, "toLocaleString", object_to_string);
+    // Spec : `toLocaleString` = `Invoke(this,"toString")` — pas
+    // un alias de `object_to_string` (receiver primitif propagé,
+    // TypeError sur null/undefined via `GetV`).
+    e.add_method(op, "toLocaleString", object_to_locale_string);
     e.add_method(op, "hasOwnProperty", has_own_property);
     e.add_method(op, "valueOf", object_value_of);
     e.add_method(op, "isPrototypeOf", object_is_prototype_of);
@@ -1199,7 +1200,10 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(ap, "shift", array_shift);
     e.add_method(ap, "unshift", array_unshift);
     e.add_method(ap, "join", array_join);
-    e.add_method(ap, "toString", array_join);
+    // Spec : `toString` = `join` si callable, sinon
+    // `%Object.prototype.toString%` — `call(true)` →
+    // "[object Boolean]" (wrapper sans `join`).
+    e.add_method(ap, "toString", array_to_string);
     e.add_method(ap, "indexOf", array_index_of);
     e.add_method(ap, "lastIndexOf", array_last_index_of);
     e.add_method(ap, "slice", array_slice);
@@ -1742,11 +1746,23 @@ fn this_num(e: &mut Engine, this: Value) -> JsResult<f64> {
 /// tableau ; JS-C90). Les primitives (`"x".push`…) restent
 /// rejetées — la coercition `ToObject` n'est pas portée
 /// (déviation documentée).
-fn this_array(e: &mut Engine, this: Value) -> JsResult<ObjId> {
+/// `ToObject(this)` des méthodes génériques (spec
+/// `RequireObjectCoercible` — toute méthode `Array.prototype.*`
+/// et `Object.prototype.*` commence par `ToObject`) : primitive
+/// → wrapper du bon proto, `null`/`undefined` → `TypeError`.
+pub(crate) fn to_object_this(e: &mut Engine, this: Value) -> JsResult<ObjId> {
     match this {
         Value::Obj(id) => Ok(id),
-        _ => Err(e.type_error("array method called on non-array")),
+        Value::Undefined | Value::Null => Err(e.type_error("method called on null or undefined")),
+        v => match e.box_primitive(v) {
+            Value::Obj(id) => Ok(id),
+            _ => Err(e.type_error("method called on non-object")),
+        },
     }
+}
+
+fn this_array(e: &mut Engine, this: Value) -> JsResult<ObjId> {
+    to_object_this(e, this)
 }
 
 /// `this` lu comme array-like (méthodes *génériques* spec —

@@ -16342,6 +16342,51 @@ chaque gain rapporté contre les **deux** archétypes.
   = pools pré-existants (`this` primitif non-coercé,
   bornes 2^53, `resizable-buffer`, `fromAsync`,
   `for-in` dstr — clusters suivants).
+- [x] **JS-C645 — coercition `ToObject(this)` des méthodes
+  génériques + `Object.prototype.*` spec + `@@toStringTag`
+  exact — sous-ensemble 291 fichiers : 448 →
+  **580/580 passes-mode, 0 échec** (`builtins/{mod,object,
+  array,c17,extras,species,arities}.rs`, `interp/mod.rs`
+  `prop_key` + gate `tests/c645_receiver_coercion.rs` **8/8**).
+  **`to_object_this` partagé** : `Array.prototype.*` et
+  `Object.prototype.*` boxent les receivers primitifs
+  (booléen/number/string — wrapper à proto du realm),
+  `null`/`undefined` → `TypeError` ; mutateurs `copyWithin`/
+  `fill`/`reverse`/`sort` rendent `O` (le wrapper), pas `this`.
+  **`isPrototypeOf` ordre spec** : `V` non-objet → `false`
+  **avant** `ToObject(this)` — cellule `ObjKind::Symbol`
+  comptée primitive — puis marche par `[[GetPrototypeOf]]`
+  trappé (proxy `getPrototypeOf`, erreurs propagées).
+  **`toLocaleString`** : lookup `toString` via le wrapper,
+  `Call` avec le receiver **primitif** (strict `typeof this`
+  = `"boolean"`/`"number"`… — Node vérifie). **`prop_key`** :
+  `ToPrimitive` qui rend un symbole → sa clé interne (plus de
+  routage par `ToString` — `hasOwnProperty({toString(){return
+  sym}})`). **Annex B** `__defineGetter__`/`__defineSetter__`/
+  `__lookupGetter__`/`__lookupSetter__`/`__proto__` réécrits
+  spec : receiver `ToObject`, props data = arrêt de marche,
+  traps proxy, `proto_setter` `RequireObjectCoercible` +
+  `O.[[SetPrototypeOf]]` (`false` → `TypeError`).
+  **`Object.prototype` = immutable-prototype exotic** :
+  `setPrototypeOf` → `false` sauf `SameValue(V, courant)`.
+  **`concat`** : `O` est l'item 0 (puis `@@isConcatSpreadable`) ;
+  **`flatMap`** : résultat par `ArraySpeciesCreate` +
+  `CreateDataProperty` (ctor/`@@species` custom honorés,
+  `C` non-objet → `TypeError` dans `species_array`).
+  **`Array.prototype.toString`** : `join` callable → `join`,
+  sinon repli `%Object.prototype.toString%`. **builtinTag spec**
+  : retrait des `@@toStringTag` props indûment posés sur les
+  protos `String`/`Number`/`Boolean`/`Error`/`Date` (brandage
+  interne `__time`/chaîne → `protos.error`, pas de propriété
+  exposée) ; `BigInt` n'a pas de builtinTag (tag non-string →
+  `[object Object]`) ; `IsArray` spec traverse les proxies
+  (révoqué → `TypeError`) ; tag custom string prioritaire sur
+  wrappers/tableaux/fonctions/erreurs/dates. Mesure régression
+  : sous-ensemble ciblé 580/580, gates c617→c644 + lib 54/54
+  verts, zéro régression. Restes catalogués : `length` 2^53
+  sur array-likes (`integer-limit`, `length-near`, `in-decreased`),
+  `resizable-buffer`, `fromAsync`, cross-realm symbol proto
+  (`get-value-prop-base-primitive-realm` — résiduel C627).
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

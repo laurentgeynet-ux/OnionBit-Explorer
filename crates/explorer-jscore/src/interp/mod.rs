@@ -12630,10 +12630,21 @@ impl Engine {
         crate::j17_tick(&crate::J17_PROP_KEY);
         match v {
             Value::Num(n) => Ok(num_to_js_string(n)),
-            Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
-                Some(ObjKind::Symbol { key, .. }) => Ok(key.clone()),
-                _ => self.to_js_string(v),
-            },
+            Value::Obj(id) => {
+                if let Some(ObjKind::Symbol { key, .. }) = self.heap.obj(id).map(|o| &o.kind) {
+                    return Ok(key.clone());
+                }
+                // `ToPropertyKey` : `ToPrimitive(string)` qui rend
+                // un symbole → sa clé, PAS `ToString` (TypeError)
+                // — `hasOwnProperty({toString(){return sym}})`.
+                let p = self.to_primitive(v, PrimHint::String)?;
+                if let Value::Obj(pid) = p {
+                    if let Some(ObjKind::Symbol { key, .. }) = self.heap.obj(pid).map(|o| &o.kind) {
+                        return Ok(key.clone());
+                    }
+                }
+                self.to_js_string(p)
+            }
             _ => self.to_js_string(v),
         }
     }

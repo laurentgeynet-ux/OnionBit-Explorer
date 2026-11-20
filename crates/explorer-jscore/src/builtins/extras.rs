@@ -153,7 +153,8 @@ pub(crate) fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
                 *slot = v.clone();
             }
         }
-        Ok(this)
+        // Spec : retourne `O` (`ToObject(this)`), pas `this`.
+        Ok(Value::Obj(id))
     })
 }
 
@@ -227,7 +228,11 @@ pub(crate) fn array_flat(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "flatMap")?;
     let len = iter_len(e, id)?;
-    let mut out = Vec::new();
+    // `A = ? ArraySpeciesCreate(O, 0)` (spec) — `constructor`/
+    // `@@species` lus par `Get` (observables), `C` non-objet ≠
+    // undefined → TypeError (`this-value-ctor-*`).
+    let a_v = species_array(e, Value::Obj(id), 0)?;
+    let mut n = 0usize;
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
             let r = e.call_value(
@@ -235,13 +240,20 @@ pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsR
                 this_arg.clone(),
                 &[v, Value::Num(i as f64), this.clone()],
             )?;
+            // `FlattenIntoArray` profondeur 1 : tableaux éclatés,
+            // trous filtrés, chaque élément `CreateDataProperty`.
+            let mut out = Vec::new();
             flat_into(e, r, 1, &mut out)?;
+            for v in out {
+                put_cdp(e, &a_v, n, v)?;
+                n += 1;
+            }
         }
         if i % 8192 == 0 {
             e.tick()?;
         }
     }
-    Ok(e.new_array(out))
+    Ok(a_v)
 }
 
 pub(crate) fn array_find_last(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {

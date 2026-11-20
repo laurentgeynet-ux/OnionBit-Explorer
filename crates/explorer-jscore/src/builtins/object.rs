@@ -12,38 +12,116 @@ use super::*;
 // Object
 // ------------------------------------------------------------------
 
-pub(crate) fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let tag = match this {
-        Value::Undefined | Value::Hole => "Undefined",
-        Value::Null => "Null",
-        Value::Num(_) => "Number",
-        Value::Bool(_) => "Boolean",
-        Value::Str(_) => "String",
-        Value::Big(_) => "BigInt",
-        // Arguments exotiques : `builtinTag = "Arguments"` (spec
-        // `Object.prototype.toString` §19.1.3.6) — discriminé par
-        // `args_map` (posé sur mapped ET unmapped).
-        Value::Obj(id) if e.heap.obj(id).is_some_and(|o| o.args_map.is_some()) => "Arguments",
-        Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::Array(_)) => "Array",
-            Some(ObjKind::Fun(_)) => "Function",
-            Some(ObjKind::RegExp(_)) => "RegExp",
-            Some(ObjKind::ByteBuf(_)) => "ArrayBuffer",
-            Some(ObjKind::DataView { .. }) => "DataView",
-            Some(ObjKind::TypedArray { ta, .. }) => ta.name(),
-            Some(ObjKind::Host(h)) => return Ok(e.str_val(format!("[object {}]", h.class_name()))),
-            _ => "Object",
-        },
-    };
-    // `@@toStringTag` override (spec `Object.prototype.toString` —
-    // les instances lisent leur tag propre ou hérité).
-    if let Value::Obj(id) = this {
-        if let Some(Value::Str(sid)) = e.get_prop(id, crate::interp::SYM_TO_STRING_TAG) {
-            let s = sid.to_string();
-            return Ok(e.str_val(format!("[object {s}]")));
+/// `IsArray` spec (§7.2.2) : proxy → sa cible, chaînage borné ;
+/// proxy **révoqué** → `TypeError` (`toString/proxy-revoked`).
+fn is_array_spec(e: &mut Engine, v: Value) -> JsResult<bool> {
+    let mut cur = v;
+    let mut depth = 0;
+    loop {
+        match cur {
+            Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Array(_)) => return Ok(true),
+                Some(ObjKind::Proxy { .. }) => match e.proxy_th(id)? {
+                    Some((tid, ..)) => {
+                        cur = Value::Obj(tid);
+                        depth += 1;
+                        if depth > 64 {
+                            return Ok(false);
+                        }
+                    }
+                    None => {
+                        return Err(e.type_error("Cannot perform 'IsArray' on a revoked proxy"));
+                    }
+                },
+                _ => return Ok(false),
+            },
+            _ => return Ok(false),
         }
     }
-    Ok(e.str_val(format!("[object {tag}]")))
+}
+
+/// `builtinTag` spec `Object.prototype.toString` : `Arguments`
+/// (`args_map`), `Array` (`IsArray`, proxy traversé), `Function`
+/// (`[[Call]]` — proxy callable inclus), `RegExp`, `Error`
+/// (`[[ErrorData]]` ≙ chaîne → `%Error.prototype%`, même
+/// approximation que `Error.isError`), Date (`__time` ≙
+/// `[[DateValue]]`), wrappers primitifs (`PRIM` ≙
+/// `[[BooleanData]]`/`[[NumberData]]`/`[[StringData]]` — pas de
+/// slot `[[BigIntData]]`/`[[SymbolData]]` spec : leurs tags
+/// viennent de `@@toStringTag` sur le proto). Les tags
+/// TA/ArrayBuffer/Map/Set/Iterator viennent pareil des protos.
+fn obj_builtin_tag(e: &mut Engine, id: ObjId) -> JsResult<String> {
+    if e.heap.obj(id).is_some_and(|o| o.args_map.is_some()) {
+        return Ok("Arguments".into());
+    }
+    if is_array_spec(e, Value::Obj(id))? {
+        return Ok("Array".into());
+    }
+    if e.is_callable(Value::Obj(id)) {
+        return Ok("Function".into());
+    }
+    if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::RegExp(_))) {
+        return Ok("RegExp".into());
+    }
+    match e
+        .heap
+        .obj(id)
+        .and_then(|o| o.get_own(crate::builtins::ctors::PRIM))
+    {
+        Some(Value::Bool(_)) => return Ok("Boolean".into()),
+        Some(Value::Num(_)) => return Ok("Number".into()),
+        Some(Value::Str(_)) => return Ok("String".into()),
+        _ => {}
+    }
+    if e.heap
+        .obj(id)
+        .is_some_and(|o| o.get_own("__time").is_some())
+    {
+        return Ok("Date".into());
+    }
+    // `[[ErrorData]]` ≙ chaîne atteignant `%Error.prototype%`.
+    let mut cur = e.heap.obj(id).map(|o| o.proto.clone());
+    let mut depth = 0;
+    while let Some(Value::Obj(p)) = cur {
+        if p == e.protos.error {
+            return Ok("Error".into());
+        }
+        cur = e.heap.obj(p).map(|o| o.proto.clone());
+        depth += 1;
+        if depth > 64 {
+            break;
+        }
+    }
+    Ok("Object".into())
+}
+
+pub(crate) fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    // Spec §19.1.3.6 : `undefined`/`null` directs ; sinon
+    // `O = ToObject(this)` (primitive → wrapper — son `@@toString-
+    // Tag` hérité est observable, `symbol-tag-override-*`) ;
+    // `builtinTag` par slots internes ; puis `tag = ? Get(O,
+    // @@toStringTag)` — getters ET traps proxy invoqués
+    // (`get-symbol-tag-err`, `proxy-revoked-during-get-call`),
+    // non-string → builtinTag.
+    match this {
+        Value::Undefined | Value::Hole => return Ok(e.str_val("[object Undefined]")),
+        Value::Null => return Ok(e.str_val("[object Null]")),
+        _ => {}
+    }
+    let id = to_object_this(e, this)?;
+    // `Host` garde son nom de classe (deviation : pas de
+    // `@@toStringTag` installé sur les protos hôtes).
+    if let Some(h) = e.host_of(id) {
+        return Ok(e.str_val(format!("[object {}]", h.class_name())));
+    }
+    let tag = obj_builtin_tag(e, id)?;
+    match e.get_prop_value(Value::Obj(id), crate::interp::SYM_TO_STRING_TAG)? {
+        Value::Str(sid) => {
+            let s = sid.to_string();
+            Ok(e.str_val(format!("[object {s}]")))
+        }
+        _ => Ok(e.str_val(format!("[object {tag}]"))),
+    }
 }
 
 pub(crate) fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -51,76 +129,85 @@ pub(crate) fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> J
     // conversion `ToString` (TypeError spuri — trigger réel :
     // `hasOwnProperty.call(t, Symbol())` dans catalyst/GitHub).
     let key = e.prop_key(arg(args, 0))?;
+    // `ToObject(this)` (spec) : primitive → wrapper (les index
+    // String restent own via `StringGetOwnProperty`),
+    // `null`/`undefined` → TypeError.
+    let id = to_object_this(e, this)?;
     // `StringGetOwnProperty` : l'index d'un wrapper
     // `new String(s)` (PRIM = Str) est own, hors `props`.
-    let str_idx = match &this {
-        Value::Obj(id) => {
-            e.heap
-                .obj(*id)
-                .and_then(|o| match o.get_own(crate::builtins::ctors::PRIM) {
-                    Some(Value::Str(sid)) => crate::interp::array_index(&key)
-                        .filter(|i| *i < sid.u16_len())
-                        .map(|_| true),
-                    _ => None,
-                })
-        }
-        _ => None,
-    };
+    let str_idx = e
+        .heap
+        .obj(id)
+        .and_then(|o| match o.get_own(crate::builtins::ctors::PRIM) {
+            Some(Value::Str(sid)) => crate::interp::array_index(&key)
+                .filter(|i| *i < sid.u16_len())
+                .map(|_| true),
+            _ => None,
+        });
     let has = match str_idx {
         Some(true) => true,
-        _ => match this {
+        _ => {
             // Proxy : `hasOwnProperty` passe par la trap
             // `getOwnPropertyDescriptor` (spec `[[GetOwnProperty]]`).
-            Value::Obj(id)
-                if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) =>
-            {
+            if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
                 e.get_own_prop(id, &key)?.is_some()
-            }
-            Value::Obj(id) => match e.heap.obj(id) {
-                Some(o) => match &o.kind {
-                    ObjKind::Array(elems) => {
-                        key == "length"
-                            || crate::interp::array_index(&key)
-                                .is_some_and(|i| elems.get(i).is_some_and(|v| !v.is_hole()))
-                            || o.find(&key).is_some()
-                    }
-                    // Index canonique d'une vue typée : own ssi index
-                    // **vivant** (`-0`/`-1`/`1.5`/`NaN` sont canoniques
-                    // mais invalides → `false`) — borne lue sur la
-                    // région réelle du buffer (détaché → vidé, RAB
-                    // rétréci, spec `IsValidIntegerIndex`, JS-C606) ;
-                    // clé non-canonique → prop ordinaire.
-                    ObjKind::TypedArray {
-                        ta,
-                        buffer,
-                        offset,
-                        len,
-                        auto,
-                    } => match crate::interp::canonical_numeric_index(&key) {
-                        Some(n) => crate::interp::ta_live_index(
-                            &e.heap, *ta, buffer, *offset, *len, *auto, n,
-                        )
-                        .is_some(),
-                        None => o.find(&key).is_some(),
+            } else {
+                match e.heap.obj(id) {
+                    Some(o) => match &o.kind {
+                        ObjKind::Array(elems) => {
+                            key == "length"
+                                || crate::interp::array_index(&key)
+                                    .is_some_and(|i| elems.get(i).is_some_and(|v| !v.is_hole()))
+                                || o.find(&key).is_some()
+                        }
+                        // Index canonique d'une vue typée : own ssi index
+                        // **vivant** (`-0`/`-1`/`1.5`/`NaN` sont canoniques
+                        // mais invalides → `false`) — borne lue sur la
+                        // région réelle du buffer (détaché → vidé, RAB
+                        // rétréci, spec `IsValidIntegerIndex`, JS-C606) ;
+                        // clé non-canonique → prop ordinaire.
+                        ObjKind::TypedArray {
+                            ta,
+                            buffer,
+                            offset,
+                            len,
+                            auto,
+                        } => match crate::interp::canonical_numeric_index(&key) {
+                            Some(n) => crate::interp::ta_live_index(
+                                &e.heap, *ta, buffer, *offset, *len, *auto, n,
+                            )
+                            .is_some(),
+                            None => o.find(&key).is_some(),
+                        },
+                        _ => o.find(&key).is_some(),
                     },
-                    _ => o.find(&key).is_some(),
-                },
-                None => false,
-            },
-            // Primitif string : `length` et les indices sont des
-            // props propres du wrapper `ToObject` (spec).
-            Value::Str(sid) => {
-                key == "length"
-                    || crate::interp::array_index(&key).is_some_and(|i| i < sid.u16_len())
+                    None => false,
+                }
             }
-            _ => false,
-        },
+        }
     };
     Ok(Value::Bool(has))
 }
 
-pub(crate) fn object_value_of(_e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(this)
+/// `Object.prototype.toLocaleString` — spec `Invoke(O,"toString")`.
+/// Le lookup `GetV(this,"toString")` boxe le primitif pour la
+/// résolution (`TypeError` sur `null`/`undefined`) mais `Call`
+/// reçoit le receiver **d'origine** — `typeof this` dans un
+/// `toString` redéfini observe la primitive, pas le wrapper
+/// (`primitive_this_value.js`).
+pub(crate) fn object_to_locale_string(
+    e: &mut Engine,
+    this: Value,
+    _a: &[Value],
+) -> JsResult<Value> {
+    let f = e.get_prop_value(this.clone(), "toString")?;
+    e.call_value(f, this, &[])
+}
+
+pub(crate) fn object_value_of(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    // Spec : `ToObject(this)` — primitive → wrapper,
+    // `null`/`undefined` → TypeError.
+    Ok(Value::Obj(to_object_this(e, this)?))
 }
 
 /// `o.isPrototypeOf(v)` — `this` se trouve-t-il sur la chaîne de
@@ -130,22 +217,38 @@ pub(crate) fn object_is_prototype_of(
     this: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let (Value::Obj(pid), Value::Obj(vid)) = (this, arg(args, 0)) else {
+    // Spec : `V` non-objet → `false` AVANT `ToObject(this)`
+    // (`isPrototypeOf.call(undefined, 5)` → `false`, pas de
+    // TypeError). `ObjKind::Symbol` est une cellule `Obj` mais
+    // une **primitive** spec (`Symbol()` → `Type(V) ≠ Object`).
+    // `this` `null`/`undefined` → TypeError sinon.
+    let Value::Obj(mut vid) = arg(args, 0) else {
         return Ok(Value::Bool(false));
     };
-    let mut cur = e.heap.obj(vid).map(|o| o.proto.clone());
+    if matches!(
+        e.heap.obj(vid).map(|o| &o.kind),
+        Some(ObjKind::Symbol { .. })
+    ) {
+        return Ok(Value::Bool(false));
+    }
+    let pid = to_object_this(e, this)?;
+    // La boucle spec lit `V.[[GetPrototypeOf]]` — trappée pour
+    // un proxy (`arg-is-proxy.js` : le trap rend `proxyProto`),
+    // délégation à la cible sinon (`object_get_proto`).
     let mut depth = 0;
-    while let Some(Value::Obj(c)) = cur {
-        if c == pid {
-            return Ok(Value::Bool(true));
-        }
-        cur = e.heap.obj(c).map(|o| o.proto.clone());
-        depth += 1;
-        if depth > 100 {
-            break;
+    loop {
+        match object_get_proto(e, Value::Undefined, &[Value::Obj(vid)])? {
+            Value::Obj(c) if c == pid => return Ok(Value::Bool(true)),
+            Value::Obj(c) => {
+                vid = c;
+                depth += 1;
+                if depth > 100 {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            _ => return Ok(Value::Bool(false)),
         }
     }
-    Ok(Value::Bool(false))
 }
 
 pub(crate) fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
@@ -263,14 +366,36 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         id = tid;
         e.deleg_hop(&mut depth)?;
     }
+    // `%Object.prototype%` est l'*immutable prototype exotic
+    // object* du realm : `[[SetPrototypeOf]]` refuse tout
+    // `V` ≠ `current` (= null), même non-circulaire —
+    // `setPrototypeOf-with-non-circular-values` (TypeError via
+    // `Object.setPrototypeOf`, `false` via `Reflect`).
+    if id == e.protos.object {
+        if e.heap.obj(id).is_some_and(|o| proto.same_value(&o.proto)) {
+            return Ok(target);
+        }
+        return Err(e.type_error("Object.prototype is an immutable prototype exotic object"));
+    }
+    // Spec `OrdinarySetPrototypeOf` : `SameValue(V, current)`
+    // → succès AVANT le test d'extensibilité (`subject.__proto__
+    // = proto` sur non-extensible est un no-op valide).
+    if e.heap.obj(id).is_some_and(|o| proto.same_value(&o.proto)) {
+        return Ok(target);
+    }
     if !e.heap.obj(id).is_some_and(|o| o.extensible) {
         return Err(e.type_error("cannot set prototype of non-extensible object"));
     }
     // Cycle check : remonter la chaîne de `proto` jusqu'à `id`.
+    // Spec étape 8.c.i : un maillon proxy (`[[GetPrototypeOf]]`
+    // non ordinaire) termine la détection — `set-cycle-shadowed`.
     let mut cur = proto.clone();
     while let Value::Obj(cid) = cur {
         if cid == id {
             return Err(e.type_error("cyclic prototype value"));
+        }
+        if e.proxy_th(cid)?.is_some() {
+            break;
         }
         cur = e.heap.obj(cid).map_or(Value::Null, |o| o.proto.clone());
     }

@@ -51,7 +51,9 @@ pub(crate) fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> 
         }
     }
     put_elems(e, id, elems)?;
-    Ok(this)
+    // Spec : retourne `O` (`ToObject(this)`), pas `this` —
+    // `copyWithin.call(true) instanceof Boolean`.
+    Ok(Value::Obj(id))
 }
 
 /// `Math.f16round(v)` — arrondi IEEE-754 binary16 (ES2025).
@@ -374,20 +376,24 @@ pub(crate) fn object_property_is_enumerable(
     args: &[Value],
 ) -> JsResult<Value> {
     let key = e.prop_key(arg(args, 0))?;
-    match this {
-        Value::Obj(id) => {
-            let Some(p) = e.get_own_prop(id, &key)? else {
-                return Ok(Value::Bool(false));
-            };
-            Ok(Value::Bool(p.enumerable()))
-        }
-        Value::Str(sid) => {
-            let s = sid.to_string();
-            let ok = crate::interp::array_index(&key).is_some_and(|i| i < s.encode_utf16().count());
-            Ok(Value::Bool(ok))
-        }
-        _ => Ok(Value::Bool(false)),
+    // `ToObject(this)` (spec) : `null`/`undefined` → TypeError ;
+    // les index/`length` d'un primitif string sont own sur le
+    // wrapper (énumérables — `StringGetOwnProperty`).
+    let id = crate::builtins::to_object_this(e, this)?;
+    if let Some(p) = e.get_own_prop(id, &key)? {
+        return Ok(Value::Bool(p.enumerable()));
     }
+    let ok = match e
+        .heap
+        .obj(id)
+        .and_then(|o| o.get_own(crate::builtins::ctors::PRIM))
+    {
+        Some(Value::Str(sid)) => {
+            crate::interp::array_index(&key).is_some_and(|i| i < sid.u16_len())
+        }
+        _ => false,
+    };
+    Ok(Value::Bool(ok))
 }
 
 /// `__defineGetter__(k, f)` — accesseur `{get: f}` énumérable +
@@ -407,29 +413,23 @@ pub(crate) fn define_accessor_annex(
     f: Value,
     is_get: bool,
 ) -> JsResult<Value> {
+    // Spec B.2.2.4/.5 dans l'ordre : `ToObject(this)`
+    // (`null`/`undefined` → TypeError, primitif → wrapper),
+    // `IsCallable`, `ToPropertyKey` (abrupt propagé —
+    // `define-abrupt`), puis `DefinePropertyOrThrow` — le vrai
+    // `[[DefineOwnProperty]]` (non-extensible / non-configurable
+    // → refus, trap proxy honorée).
+    let id = crate::builtins::to_object_this(e, this)?;
     if !e.is_callable(f.clone()) {
         return Err(e.type_error("__defineGetter__/__defineSetter__ needs a function"));
     }
-    let Value::Obj(id) = this else {
-        return Err(e.type_error("can't define accessor on a primitive"));
-    };
     let key = e.prop_key(key_v)?;
-    let (get, set) = if is_get {
-        (f, Value::Undefined)
-    } else {
-        (Value::Undefined, f)
-    };
-    if let Some(o) = e.heap.obj_mut(id) {
-        o.define_accessor(
-            &key,
-            get,
-            set,
-            crate::heap::PropAttrs {
-                writable: false,
-                enumerable: true,
-                configurable: true,
-            },
-        );
+    let d = e.new_object();
+    e.set_own(d, if is_get { "get" } else { "set" }, f, false);
+    e.set_own(d, "enumerable", Value::Bool(true), false);
+    e.set_own(d, "configurable", Value::Bool(true), false);
+    if !object::define_one_prop(e, id, &key, d)? {
+        return Err(e.type_error("cannot define accessor on this object"));
     }
     Ok(Value::Undefined)
 }
@@ -450,52 +450,74 @@ pub(crate) fn lookup_accessor_annex(
     key_v: Value,
     is_get: bool,
 ) -> JsResult<Value> {
+    // Spec B.2.2.2/.3 : `ToObject(this)` (null/undefined →
+    // TypeError, primitif → wrapper), puis `[[GetOwnProperty]]`/
+    // `[[GetPrototypeOf]]` itérés — trappés pour les proxies
+    // (`lookup-proto-*`/`lookup-own-*`) ; une prop **data**
+    // stoppe la remontée (undefined, jamais le proto).
+    let mut id = crate::builtins::to_object_this(e, this)?;
     let key = e.prop_key(key_v)?;
-    let Value::Obj(mut id) = this else {
-        return Ok(Value::Undefined);
-    };
     let mut hops = 0;
     loop {
         hops += 1;
         if hops > 64 {
             return Ok(Value::Undefined);
         }
-        let Some(o) = e.heap.obj(id) else {
-            return Ok(Value::Undefined);
-        };
-        if let Some(crate::heap::Prop::Acc { get, set, .. }) = o.find(&key) {
-            return Ok(if is_get { get } else { set });
+        match e.get_own_prop(id, &key)? {
+            Some(crate::heap::Prop::Acc { get, set, .. }) => {
+                return Ok(if is_get { get } else { set });
+            }
+            Some(_) => return Ok(Value::Undefined),
+            None => {}
         }
-        match o.proto {
+        match object_get_proto(e, Value::Undefined, &[Value::Obj(id)])? {
             Value::Obj(next) => id = next,
             _ => return Ok(Value::Undefined),
         }
     }
 }
 
-/// `get __proto__` (Annex B) — `[[Prototype]]` du receiver ;
-/// primitives → proto de leur wrapper (`(1).__proto__` =
-/// `Number.prototype`).
+/// `get __proto__` (Annex B) — spec : `O = ? ToObject(this)`
+/// puis `O.[[GetPrototypeOf]]` — `null`/`undefined` → `TypeError`
+/// (`get-to-obj-abrupt`), primitives → proto du wrapper, proxy
+/// → trap `getPrototypeOf` (test `get-abrupt`).
 pub(crate) fn proto_getter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    match this {
-        Value::Obj(id) => Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto.clone())),
-        Value::Str(_) => Ok(Value::Obj(e.protos.string)),
-        Value::Num(_) => Ok(Value::Obj(e.protos.number)),
-        Value::Bool(_) => Ok(Value::Obj(e.protos.boolean)),
-        Value::Big(_) => Ok(Value::Obj(e.protos.bigint)),
-        _ => Ok(Value::Null),
-    }
+    let id = crate::builtins::to_object_this(e, this)?;
+    object_get_proto(e, Value::Undefined, &[Value::Obj(id)])
 }
 
-/// `set __proto__` (Annex B) — `o.proto = v` si `v` est objet ou
-/// `null` ; autres valeurs ignorées (spec). Délègue à
-/// `object_set_proto` : non-extensible → `TypeError`, cycle rejeté,
-/// trap proxy honorée.
+/// `set __proto__` (Annex B) — spec : `RequireObjectCoercible`
+/// (`null`/`undefined` → `TypeError`), `proto` ni objet ni null →
+/// no-op (`Symbol()` = primitive — cellule `Obj` exclue),
+/// receiver primitif → no-op ; sinon `O.[[SetPrototypeOf]]`
+/// (`false` → `TypeError`, cycle/trap via `object_set_proto`).
 pub(crate) fn proto_setter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    if let Value::Obj(id) = this {
-        if let v @ (Value::Obj(_) | Value::Null) = arg(args, 0) {
-            object_set_proto(e, Value::Undefined, &[Value::Obj(id), v])?;
-        }
+    if matches!(this, Value::Undefined | Value::Null) {
+        return Err(e.type_error("__proto__ setter called on null or undefined"));
     }
+    let proto = arg(args, 0);
+    let ok_proto = match &proto {
+        Value::Null => true,
+        Value::Obj(vid) => !matches!(
+            e.heap.obj(*vid).map(|o| &o.kind),
+            Some(ObjKind::Symbol { .. })
+        ),
+        _ => false,
+    };
+    if !ok_proto {
+        return Ok(Value::Undefined);
+    }
+    // `O` non-objet → no-op (receiver primitif, cellule symbole
+    // incluse — `Type(O) is not Object`).
+    let Value::Obj(id) = this else {
+        return Ok(Value::Undefined);
+    };
+    if matches!(
+        e.heap.obj(id).map(|o| &o.kind),
+        Some(ObjKind::Symbol { .. })
+    ) {
+        return Ok(Value::Undefined);
+    }
+    object_set_proto(e, Value::Undefined, &[Value::Obj(id), proto])?;
     Ok(Value::Undefined)
 }

@@ -313,6 +313,7 @@ pub(crate) const ARITIES: &[(&str, u16)] = &[
     ("Object.prototype.__lookupSetter__", 1),
     ("Object.prototype.hasOwnProperty", 1),
     ("Object.prototype.isPrototypeOf", 1),
+    ("Object.prototype.propertyIsEnumerable", 1),
     ("Object.prototype.toString", 0),
     ("Object.seal", 1),
     ("Object.setPrototypeOf", 2),

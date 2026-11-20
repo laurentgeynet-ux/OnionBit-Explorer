@@ -118,6 +118,10 @@ pub(crate) fn species_array(e: &mut Engine, src: Value, len: usize) -> JsResult<
             Value::Undefined | Value::Null => {}
             s => return e.construct(s, &[Value::Num(len as f64)]),
         }
+    } else if !matches!(c, Value::Undefined) {
+        // Spec étape 7 : `C` non-objet et ≠ undefined → TypeError
+        // (`flatMap` `this-value-ctor-non-object`).
+        return Err(e.type_error("constructor is not an object"));
     }
     array_create(e)
 }
