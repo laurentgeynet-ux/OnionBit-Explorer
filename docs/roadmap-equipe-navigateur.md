@@ -8276,6 +8276,18 @@ MCP = adaptateur, jamais la base.
   Verrous : `computed_published_at_relayout`,
   `b193_getcomputedstyle_sert_le_calcule_publie` (e2e),
   `b193_style_write_rejette_les_artefacts_numeriques_js`.
+- [x] **Étape 323. §B-194 soldée : expirations de cookie
+  extrêmes saturées — fin du panic `cookies.rs`
+  `overflow when adding duration to SystemTime`** (adobe.com,
+  verbatim vol 937/946). Chaîne : `Expires` an 999 999 999
+  ou `Max-Age` géant débordaient le domaine `SystemTime` —
+  `UNIX_EPOCH + Duration`/`now + Duration` bruts → panic
+  niveau tâche fetch (violation « jamais panic »), la tâche
+  tuée coupait le boot applicatif (aval §B-141). Fix :
+  `saturating_add` borne à 10000-01-01 aux deux sites
+  (`parse_http_date` + `Max-Age`) — une expiration hors
+  domaine est une non-expiration honnête. Verrou :
+  `b194_expirations_extremes_saturent_sans_panic`.
 - [x] **Étape 321. §B-175-bis : cibles d'import map résolues
   contre la base du document — windy `@leafletGl` soldé**
   (`module.rs` `resolve_bare` + `session/scripts.rs`

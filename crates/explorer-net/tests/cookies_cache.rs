@@ -676,3 +676,22 @@ fn chips_partition_keys() {
     assert_eq!(pk.as_deref(), Some("https://a.example"));
     assert_eq!(partition_key(&u("data:text/plain,x")), None);
 }
+
+#[test]
+fn b194_expirations_extremes_saturent_sans_panic() {
+    // §B-194 : `Expires` an 999 999 999 / `Max-Age` géant — le
+    // domaine `SystemTime` déborde : saturer, jamais paniquer.
+    let jar = CookieJar::new();
+    let url = u("https://example.com/");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    assert!(jar.set_from_header_at(
+        &url,
+        "far=1; Expires=Sun, 01 Jan 999999999 00:00:00 GMT",
+        t0
+    ));
+    assert!(jar.set_from_header_at(&url, "big=1; Max-Age=999999999999999999", t0));
+    // Saturé ≠ session : le cookie survit à un saut de 400 ans.
+    let t1 = t0 + Duration::from_secs(400 * 365 * 86_400);
+    let h = jar.header_for_at(&url, true, t1);
+    assert!(h.contains("far=1") && h.contains("big=1"), "header: {h}");
+}

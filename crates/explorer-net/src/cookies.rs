@@ -397,9 +397,10 @@ impl CookieJar {
                     if secs <= 0 {
                         c.expires = Some(now); // suppression immédiate
                     } else {
-                        c.expires = Some(
-                            now + Duration::from_secs(u64::try_from(secs).unwrap_or(u64::MAX)),
-                        );
+                        c.expires = Some(saturating_add(
+                            now,
+                            Duration::from_secs(u64::try_from(secs).unwrap_or(u64::MAX)),
+                        ));
                     }
                 }
             } else if k.eq_ignore_ascii_case("expires") {
@@ -663,7 +664,20 @@ pub(crate) fn parse_http_date(s: &str) -> Option<SystemTime> {
     // jours depuis epoch — civil_from_days (algorithme de Hinnant).
     let days = days_from_civil(year, month, day)?;
     let secs = days.checked_mul(86400)? + hh * 3600 + mm * 60 + ss;
-    Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs))
+    Some(saturating_add(
+        SystemTime::UNIX_EPOCH,
+        Duration::from_secs(secs),
+    ))
+}
+
+/// `t + d` saturé : un cookie « `Expires` an 999 999 999 » ou un
+/// `Max-Age` géant déborde du domaine représentable de `SystemTime`
+/// (`panic` §B-194 sur adobe.com). La date est valide, c'est une
+/// non-expiration honnête — on borne au lointain représentable.
+fn saturating_add(t: SystemTime, d: Duration) -> SystemTime {
+    const FAR_FUTURE_SECS: u64 = 253_402_300_800; // 10000-01-01
+    t.checked_add(d)
+        .unwrap_or_else(|| SystemTime::UNIX_EPOCH + Duration::from_secs(FAR_FUTURE_SECS))
 }
 
 /// `y-m-d` → jours depuis 1970-01-01 (algorithme `civil_from_days`).
