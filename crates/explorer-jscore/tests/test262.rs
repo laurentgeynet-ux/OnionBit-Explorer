@@ -90,7 +90,6 @@ const UNSUPPORTED: &[&str] = &[
     "json-modules",                       // idem
     "decorators",                         // `@dec` absent (Symbol.metadata seul)
     "error-stack-accessor",               // stack = donnée own, pas accesseur proto
-    "regexp-duplicate-named-groups",      // dup `(?<n>)` rejetés même disjoints
     "symbols-as-weakmap-keys",            // clés Symbol refusées (`CanBeHeldWeakly`)
 ];
 // NON-skippés malgré des échecs — features vérifiées PRÉSENTES

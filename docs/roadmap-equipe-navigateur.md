@@ -16227,6 +16227,46 @@ chaque gain rapporté contre les **deux** archétypes.
   **Mesures** : `unicode_restricted_identity_escape{,_alpha,
   _c,_u,_x}` + `arithmetic-modifiers-both-empty` ×2 (7
   fichiers) **14/14** — cluster soldé.
+- [x] **JS-C642 — `regexp-duplicate-named-groups` ES2025 :
+  noms dupliqués acceptés en alternatives **disjointes**,
+  rejetés ailleurs ; slots physiques distincts fusionnés en
+  un slot logique — `groups.x`/`indices.groups.x` =
+  la participante (ou `undefined`), `\k<x>` = la
+  participante (vide si aucune) — **26/26** (13 fichiers),
+  skip retiré du harness**
+  (`regexp.rs` traduction + `exec_map`, gate
+  `tests/c642_dup_named_groups.rs` **5/5**).
+  **Validation disjointe** : `alt_stack` trace le chemin
+  d'alternatives de chaque déclaration nommée — un dupliqué
+  n'est admis que si **tous** les chemins déjà vus sont
+  disjoints du sien ; sinon `SyntaxError` comme avant.
+  **Noms émis** : fancy-regex exige l'unicité — le dupliqué
+  part sous `__dN` (`dup_map` orig→émis, `dup_rev` inverse),
+  `name_num` indexé par nom émis vers l'indice **logique**.
+  **`exec_map`** (logique→physique par groupe, `GInfo` pile
+  des corps/logicals/phys) : `build_match` refusionne les
+  captures physiques vers la vue JS — `groups`, `indices`,
+  `indices.groups` et numérotés ne voient qu'une entrée par
+  nom (première participante), slots `__dN`/`__uN`/marqueurs
+  filtrés. **Marqueurs de participation** : chaque
+  déclaration nommée est suivie d'un `(?P<__mN>)` eager ;
+  `\k<x>` émet `(?:(?=\k<m1>)\k<e1>|…|(?!\k<m1>)…)` — la
+  backref backend ne distinguant pas « non participé » de
+  « capturé mais texte différent », la branche négative ne
+  livre le vide que si **aucune** déclaration n'a participé
+  (corrige aussi `\k<a>` sur groupe unique non-participant
+  — `zy` corpus). **Unroll `G{m}` exact** (2≤m≤8, groupe à
+  captures) : `fancy-regex` conserve les captures entre
+  itérations là où la spec les réinitialise — les copies
+  `(?P<name__cK_J>body)` à slots frais rétablissent la
+  sémantique ; le corps est renommé (`rename_body` : `?P<`,
+  `\k<`, `\N`) et le mapping logique vise la dernière copie.
+  **Mesures** : subset `duplicate-names` (13 fichiers)
+  16 → **26/26** ; named-groups+match-indices 98/100
+  (reste = lookbehind variable catalogué) ; RegExp+String
+  nogen 4 903/5 033 (échecs = pools catalogués :
+  property-escapes, lookbehind variable, capture-reset
+  `*`/`+` non borné, nullable-lazy, depth 200).
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

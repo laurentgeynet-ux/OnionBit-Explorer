@@ -53,6 +53,18 @@ pub struct JsRegExp {
     /// les `IdentifierName` non-ASCII (`(?<$𐒤>)`) sont émis sous
     /// `__uN` et traduits à l'affichage (`groups`/`named`/`k`).
     renamed: std::collections::BTreeMap<String, String>,
+    /// JS-C642 `regexp-duplicate-named-groups` : nom orig →
+    /// noms **émis** (la 1ʳᵉ déclaration garde son nom, les
+    /// suivantes reçoivent `__dN` — le backend exige l'unicité).
+    /// `groups.x`/`indices` fusionnent sur l'alternative
+    /// participante.
+    dup_map: std::collections::BTreeMap<String, Vec<String>>,
+    /// Nom émis → nom orig (les `__dN` et la première forme
+    /// `__uN` éventuelle) — repère les slots à fusionner.
+    dup_rev: std::collections::BTreeMap<String, String>,
+    /// Slot logique → physique après déroulage `{m}` (JS-C642) —
+    /// l'array exec et `indices` rapportent les slots logiques.
+    exec_map: Vec<usize>,
 }
 
 /// **Domaine sentinelle regex** — même schéma que le lexer : un
@@ -310,7 +322,7 @@ impl JsRegExp {
         // `v` ≈ `u` côté moteur (unicodeSets non implémenté) —
         // même traduction unicode.
         let uni = unicode || unicode_sets;
-        let (translated, synth, renamed) =
+        let (translated, synth, renamed, dup_map, dup_rev, exec_map) =
             translate_pattern(source, uni, unicode_sets, dot_all, ignore_case)?;
         pat.push_str(&translated);
         // Domaine sentinelle : le pattern traduit porte des
@@ -338,6 +350,9 @@ impl JsRegExp {
             has_sentinels,
             synth,
             renamed,
+            dup_map,
+            dup_rev,
+            exec_map,
         })
     }
 
@@ -448,10 +463,13 @@ impl JsRegExp {
             ),
             None => (0, 0, String::new()),
         };
-        let mut groups = Vec::with_capacity(caps.len());
+        // Slots **logiques** — `exec_map` renumérote quand un
+        // `{m}` a été déroulé (dernière copie = captures visibles,
+        // reset sémantique). Identité sinon.
+        let mut groups = Vec::with_capacity(self.exec_map.len() + 1);
         groups.push(Some(text.clone()));
-        for i in 1..caps.len() {
-            groups.push(caps.get(i).map(|g| g.as_str().to_string()));
+        for &p in &self.exec_map {
+            groups.push(caps.get(p).map(|g| g.as_str().to_string()));
         }
         let mut named = Vec::new();
         let mut named_indices = Vec::new();
@@ -461,6 +479,26 @@ impl JsRegExp {
             .flatten()
             .filter(|n| !self.synth.contains(*n))
         {
+            // JS-C642 : slot **dupliqué** — `groups.x` = la
+            // capture de l'alternative **participante** (au plus
+            // une — disjointe) ; `__dN` suivants filtrés par
+            // `synth`. Position d'énumération = 1ʳᵉ déclaration.
+            if let Some(orig) = self.dup_rev.get(name) {
+                let ems = &self.dup_map[orig];
+                named.push((
+                    orig.clone(),
+                    ems.iter()
+                        .find_map(|em| caps.name(em).map(|g| g.as_str().to_string())),
+                ));
+                named_indices.push((
+                    orig.clone(),
+                    ems.iter().find_map(|em| {
+                        caps.name(em)
+                            .map(|g| (byte_to_char(hay, g.start()), byte_to_char(hay, g.end())))
+                    }),
+                ));
+                continue;
+            }
             // JS-C624 : le nom émis (`__uN`) redevient l'origine
             // (`$𐒤`) à l'affichage.
             let disp = self
@@ -477,10 +515,14 @@ impl JsRegExp {
                     .map(|g| (byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
             ));
         }
-        let mut group_indices = Vec::with_capacity(caps.len());
-        for i in 0..caps.len() {
+        let mut group_indices = Vec::with_capacity(self.exec_map.len() + 1);
+        group_indices.push(
+            caps.get(0)
+                .map(|g| (byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
+        );
+        for &p in &self.exec_map {
             group_indices.push(
-                caps.get(i)
+                caps.get(p)
                     .map(|g| (byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
             );
         }
@@ -530,6 +572,9 @@ type TranslateOut = (
     String,
     std::collections::BTreeSet<String>,
     std::collections::BTreeMap<String, String>,
+    std::collections::BTreeMap<String, Vec<String>>,
+    std::collections::BTreeMap<String, String>,
+    Vec<usize>,
 );
 
 /// JS source → `fancy-regex` pattern, with JS-side validation the
@@ -602,6 +647,15 @@ fn translate_pattern(
         grp_pos: Vec::new(),
         closed: std::collections::BTreeSet::new(),
         class_depth: 0,
+        alt_stack: vec![0],
+        name_paths: std::collections::BTreeMap::new(),
+        dup_map: std::collections::BTreeMap::new(),
+        dup_rev: std::collections::BTreeMap::new(),
+        exec_map: Vec::new(),
+        ginfo: Vec::new(),
+        last_closed: None,
+        markers: std::collections::BTreeMap::new(),
+        marker_ctr: 0,
     };
     let mut out = String::with_capacity(src.len() + 8);
     let mut i = 0;
@@ -1065,11 +1119,14 @@ fn translate_pattern(
             }
             '(' if !in_class => {
                 t.groups_open += 1;
-                t.open_stack.push(Some(t.groups_open));
+                t.exec_map.push(t.groups_open);
+                let logical = t.exec_map.len();
+                t.open_stack.push(Some(logical));
+                t.alt_stack.push(0);
                 t.look_pos.push(None);
                 t.mod_stack.push(None);
                 last_atom = false;
-                if t.need_synth {
+                let anon_name = if t.need_synth {
                     // JS-C269 : nommer l'anonyme pour que `\N`
                     // puisse être réémis `\k<__eN>` (le backend
                     // refuse `\N` dès qu'un nommé existe).
@@ -1077,17 +1134,44 @@ fn translate_pattern(
                     out.push_str("(?P<");
                     out.push_str(&nm);
                     out.push('>');
+                    Some(nm)
                 } else {
                     t.emitted.push(String::new());
                     out.push('(');
-                }
+                    None
+                };
                 t.grp_pos.push((out.len(), t.groups_open));
+                t.ginfo.push(GInfo {
+                    inner_out: out.len(),
+                    inner_cs: i + 1,
+                    names: vec![anon_name],
+                    logicals: vec![logical],
+                    origs: vec![None],
+                    phys: vec![t.groups_open],
+                    phys_base: t.groups_open - 1,
+                    own_cap: true,
+                    ..Default::default()
+                });
             }
             ')' if !in_class => {
+                t.alt_stack.pop();
                 if let Some(Some(n)) = t.open_stack.pop() {
                     t.closed.insert(n);
                 }
                 let (gstart, g_at_open) = t.grp_pos.pop().unwrap_or_default();
+                // JS-C642 : trace du corps pour un `{m}` suivant —
+                // le corps exclut la parenthèse fermante. Les
+                // déclarations imbriquées remontent au parent.
+                let mut gi = t.ginfo.pop().unwrap_or_default();
+                gi.body = out[gi.inner_out..].to_string();
+                gi.cs_end = i;
+                if let Some(parent) = t.ginfo.last_mut() {
+                    parent.names.extend(gi.names.iter().cloned());
+                    parent.logicals.extend(gi.logicals.iter().copied());
+                    parent.origs.extend(gi.origs.iter().cloned());
+                    parent.phys.extend(gi.phys.iter().copied());
+                    parent.hidden.extend(gi.hidden.iter().cloned());
+                }
                 // Groupe de modificateurs `(?ims-ims:…)` — restaure
                 // les états effectifs sauvegardés à l'ouverture.
                 if let Some(Some((fold, dotall, eff_i))) = t.mod_stack.pop() {
@@ -1097,6 +1181,19 @@ fn translate_pattern(
                 }
                 last_atom = true;
                 out.push(')');
+                // Marqueur de participation `(?P<__mN>)` juste
+                // après le `)` d'un nommé : il ne participe que
+                // quand la branche du groupe a matché — la clé
+                // de `\k` dupliqué.
+                if let Some(mk) = gi.dup_marker.clone() {
+                    out.push_str(&format!("(?P<{mk}>)"));
+                    t.groups_open += 1;
+                    let owner = gi.logicals.first().copied().unwrap_or(0);
+                    if let Some(parent) = t.ginfo.last_mut() {
+                        parent.hidden.push((mk, t.groups_open, owner));
+                    }
+                }
+                t.last_closed = Some((out.len(), gi));
                 if let Some(pos) = t.look_pos.pop().flatten() {
                     // Lookahead quantifié (Annex B) : `(?=x)?` —
                     // le backend refuse le quantificateur sur
@@ -1217,6 +1314,134 @@ fn translate_pattern(
                             return Err(format!("invalid quantifier range in /{src}/"));
                         }
                     }
+                    // JS-C642 / capture-reset : `G{m}` **exact**
+                    // sur un groupe contenant des captures se
+                    // déroule en `m` copies à slots physiques
+                    // distincts — chaque itération repart à
+                    // captures vides (`RepeatMatcher` étape 4) et
+                    // le slot logique rapporte la **dernière**
+                    // copie. C'est la sémantique reset que le
+                    // backend ne donne pas nativement (il garde
+                    // la dernière valeur écrite). Borné à 8 —
+                    // `*`/`+`/`{n,}`/`{m,n}` restent du gap
+                    // backend catalogué.
+                    if let Some((cpos, g)) = t.last_closed.take() {
+                        if cpos == out.len()
+                            && hi == Some(lo)
+                            && (2..=8).contains(&lo)
+                            && !g.names.is_empty()
+                            && !span_has_digit_escape(&cs, g.inner_cs, g.cs_end)
+                        {
+                            let m = lo as usize;
+                            // Slots par copie : déclarations
+                            // (`names`, propres + imbriquées),
+                            // marqueurs imbriqués (`hidden`) et le
+                            // marqueur propre émis après `)`.
+                            let d = g.names.len()
+                                + g.hidden.len()
+                                + usize::from(g.dup_marker.is_some());
+                            let base = t.groups_open;
+                            for k in 2..=m {
+                                // Copie `k` : le groupe capturant
+                                // garde un slot propre (`?P<…>` ou
+                                // `(` anonyme) ; non capturant →
+                                // `(?:`.
+                                if g.own_cap {
+                                    if g.names[0].is_some() {
+                                        out.push_str(&format!("(?P<__c{k}_0>"));
+                                    } else {
+                                        out.push('(');
+                                    }
+                                } else {
+                                    out.push_str("(?:");
+                                }
+                                out.push_str(&rename_body(&g, k));
+                                out.push(')');
+                                // Marqueur propre après le `)`.
+                                if g.dup_marker.is_some() {
+                                    out.push_str(&format!("(?P<__c{k}_m0>)"));
+                                }
+                            }
+                            t.groups_open += d * (m - 1);
+                            for (j, name) in g.names.iter().enumerate() {
+                                let logical = g.logicals[j];
+                                let last_phys = base + (m - 2) * d + (g.phys[j] - g.phys_base);
+                                t.exec_map[logical - 1] = last_phys;
+                                if let Some(nm) = name {
+                                    if !nm.is_empty() {
+                                        // `\N` → dernier slot
+                                        // (nom émis) — requis en
+                                        // mode `need_synth`.
+                                        t.emitted[logical - 1] = format!("__c{m}_{j}");
+                                    }
+                                    for k in 2..m {
+                                        let cn = format!("__c{k}_{j}");
+                                        t.name_num.insert(cn.clone(), logical);
+                                        t.synth.insert(cn);
+                                    }
+                                    t.name_num.insert(format!("__c{m}_{j}"), logical);
+                                    // Slots des copies 1..m-1
+                                    // masqués à l'affichage.
+                                    t.synth.insert(nm.clone());
+                                }
+                            }
+                            // Marqueurs : noms renommés masqués +
+                            // liaison nom émis → marqueur pour la
+                            // dernière copie (`\k` après le groupe).
+                            for (h, (_, _, owner)) in g.hidden.iter().enumerate() {
+                                for k in 2..m {
+                                    t.synth.insert(format!("__c{k}_h{h}"));
+                                }
+                                if let Some(dj) = g.logicals.iter().position(|l| l == owner) {
+                                    t.markers
+                                        .insert(format!("__c{m}_{dj}"), format!("__c{m}_h{h}"));
+                                }
+                            }
+                            if let Some(mk) = &g.dup_marker {
+                                let _ = mk;
+                                t.markers.insert(format!("__c{m}_0"), format!("__c{m}_m0"));
+                            }
+                            let mut dup_new: std::collections::BTreeMap<String, Vec<String>> =
+                                std::collections::BTreeMap::new();
+                            for (j, orig) in g.origs.iter().enumerate() {
+                                let Some(orig) = orig else {
+                                    continue;
+                                };
+                                let cname = format!("__c{m}_{j}");
+                                if t.dup_map.contains_key(orig) {
+                                    dup_new.entry(orig.clone()).or_default().push(cname.clone());
+                                    t.dup_rev.insert(cname, orig.clone());
+                                } else {
+                                    t.orig_to_synth.insert(orig.clone(), cname.clone());
+                                    t.renamed.insert(cname, orig.clone());
+                                }
+                            }
+                            for (orig, v) in dup_new {
+                                let in_group: std::collections::BTreeSet<String> = g
+                                    .origs
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, o)| o.as_ref() == Some(&orig))
+                                    .filter_map(|(jj, _)| g.names[jj].clone())
+                                    .collect();
+                                let mut keep: Vec<String> = t.dup_map[&orig]
+                                    .iter()
+                                    .filter(|e| !in_group.contains(*e))
+                                    .cloned()
+                                    .collect();
+                                keep.extend(v);
+                                t.dup_map.insert(orig, keep);
+                            }
+                            last_atom = false;
+                            i = next;
+                            // Lazy `?` absorbé : les `m` copies
+                            // sont requises quoi qu'il arrive.
+                            if cs.get(i) == Some(&'?') {
+                                i += 1;
+                            }
+                            continue;
+                        }
+                    }
                     // JS-C638 : `DecimalDigits` non borné côté
                     // spec (`b{9007199254740991}` légal — ne
                     // matche jamais : aucun input n'a cette
@@ -1251,6 +1476,11 @@ fn translate_pattern(
             }
             '|' if !in_class => {
                 last_atom = false;
+                // Branche suivante de la disjonction englobante
+                // (frame courante de `alt_stack` — JS-C642).
+                if let Some(top) = t.alt_stack.last_mut() {
+                    *top += 1;
+                }
                 out.push('|');
             }
             '^' | '$' if !in_class => {
@@ -1373,7 +1603,7 @@ fn translate_pattern(
     if in_class {
         return Err(format!("unterminated class in /{src}/"));
     }
-    Ok((out, t.synth, t.renamed))
+    Ok((out, t.synth, t.renamed, t.dup_map, t.dup_rev, t.exec_map))
 }
 
 /// État partagé du traducteur : flags, tables de groupes.
@@ -1453,6 +1683,70 @@ struct Trans {
     /// une identité) et l'enveloppe `(?i:…)` ne s'y applique
     /// pas.
     class_depth: u32,
+    /// JS-C642 : chemin d'alternatives — indice de `|`-branche
+    /// à chaque niveau de disjonction englobante (frame 0 =
+    /// disjonction du pattern). Deux déclarations d'un même nom
+    /// sont licites ssi leurs chemins divergent à un index où
+    /// **les deux** ont une valeur (alternatives disjointes).
+    alt_stack: Vec<usize>,
+    /// Nom → chemins d'alternatives de chaque déclaration.
+    name_paths: std::collections::BTreeMap<String, Vec<Vec<usize>>>,
+    /// Nom dupliqué → noms émis par ordre de déclaration.
+    dup_map: std::collections::BTreeMap<String, Vec<String>>,
+    /// Nom émis (`__dN`, ou `__uN`/orig de la 1ʳᵉ) → orig.
+    dup_rev: std::collections::BTreeMap<String, String>,
+    /// Slot logique → slot physique (logique = ordre de
+    /// déclaration 1-indexé, physique = groupe capturant émis).
+    /// Identité tant qu'aucun `{m}` n'est déroulé ; sert au
+    /// remap de l'affichage et à l'émission `\N` (physique).
+    exec_map: Vec<usize>,
+    /// Groupes ouverts — trace du corps pour le déroulage `{m}`.
+    ginfo: Vec<GInfo>,
+    /// Dernier groupe fermé (pos `out` après le `)` + corps) —
+    /// un `{m}` immédiatement après le déroule.
+    last_closed: Option<(usize, GInfo)>,
+    /// Nom émis d'une décl. dupliquée → son marqueur `__mN`
+    /// (participation — `\k<…>` sur `()` réussit ssi le slot a
+    /// capturé dans la branche courante, même vide).
+    markers: std::collections::BTreeMap<String, String>,
+    marker_ctr: usize,
+}
+
+/// Trace d'un groupe ouvert pour le déroulage `{m}` (JS-C642) :
+/// corps traduit + déclarations capturantes qu'il contient.
+#[derive(Default)]
+struct GInfo {
+    /// Début du corps dans `out` (après `(`, `(?:`, `(?P<n>`…).
+    inner_out: usize,
+    /// Index du premier char du corps dans `cs`.
+    inner_cs: usize,
+    /// Index du `)` dans `cs` — fixé à la fermeture.
+    cs_end: usize,
+    /// Corps traduit (hors parenthèses englobantes).
+    body: String,
+    /// Nom émis par déclaration capturante du corps (ordre
+    /// d'ouverture, imbriquées comprises ; `None` = anonyme non
+    /// renommable — seuls `?P<…>`/`\k<…>` sont réécrits).
+    names: Vec<Option<String>>,
+    /// Numéro logique (1-indexé) parallèle à `names`.
+    logicals: Vec<usize>,
+    /// Nom JS d'origine pour les déclarations nommées.
+    origs: Vec<Option<String>>,
+    /// Slot physique absolu parallèle à `names` (valeur de
+    /// `groups_open` à l'ouverture de la déclaration).
+    phys: Vec<usize>,
+    /// Slots physiques hors logique — marqueurs de participation
+    /// `(?P<__mN>)` : (nom émis, slot absolu, logique propriétaire).
+    hidden: Vec<(String, usize, usize)>,
+    /// `groups_open` avant le slot propre du groupe (base des
+    /// offsets pour le déroulage `{m}`).
+    phys_base: usize,
+    /// Le groupe lui-même est capturant (`(`/`(?<n>`) — ses
+    /// copies réémettent un slot propre.
+    own_cap: bool,
+    /// Déclaration nommée **dupliquée** : nom du marqueur de
+    /// participation `(?P<__mN>)` à émettre après le `)`.
+    dup_marker: Option<String>,
 }
 
 impl Trans {
@@ -2437,6 +2731,61 @@ fn sole_group(body: &str) -> bool {
     false
 }
 
+/// `\`+chiffre dans `cs[lo..hi]` — une backref numérique dans le
+/// corps interdit le déroulage `{m}` (renumérotation textuelle
+/// impossible ; la sémantique reset resterait fausse).
+fn span_has_digit_escape(cs: &[char], lo: usize, hi: usize) -> bool {
+    let hi = hi.min(cs.len());
+    cs[lo.min(hi)..hi]
+        .windows(2)
+        .any(|w| w[0] == '\\' && w[1].is_ascii_digit())
+}
+
+/// Copie `k` du corps déroulé : chaque nom émis `E` d'une
+/// déclaration du groupe devient `__c{k}_{j}` (j = rang dans le
+/// corps) dans les `?P<E>` comme les `\k<E>` — les références
+/// vers des groupes **externes** (hors `names`) restent intactes.
+fn rename_body(g: &GInfo, k: usize) -> String {
+    let mut repl: Vec<(String, String)> = g
+        .names
+        .iter()
+        .enumerate()
+        .filter_map(|(j, n)| n.as_ref().map(|n| (n.clone(), format!("__c{k}_{j}"))))
+        .collect();
+    repl.extend(
+        g.hidden
+            .iter()
+            .enumerate()
+            .map(|(h, (n, _, _))| (n.clone(), format!("__c{k}_h{h}"))),
+    );
+    if let Some(mk) = &g.dup_marker {
+        repl.push((mk.clone(), format!("__c{k}_m0")));
+    }
+    let body = &g.body;
+    let mut out = String::with_capacity(body.len() + repl.len() * 8);
+    let mut i = 0;
+    'outer: while i < body.len() {
+        for marker in ["(?P<", "\\k<"] {
+            if body[i..].starts_with(marker) {
+                if let Some(rel) = body[i + marker.len()..].find('>') {
+                    let nm = &body[i + marker.len()..i + marker.len() + rel];
+                    if let Some((_, to)) = repl.iter().find(|(f, _)| f == nm) {
+                        out.push_str(marker);
+                        out.push_str(to);
+                        out.push('>');
+                        i += marker.len() + rel + 1;
+                        continue 'outer;
+                    }
+                }
+            }
+        }
+        let ch = body[i..].chars().next().unwrap_or('\u{FFFD}');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
 fn parse_quantifier(cs: &[char], i: usize) -> Option<(u64, Option<u64>, usize)> {
     if cs.get(i) != Some(&'{') {
         return None;
@@ -2493,6 +2842,7 @@ fn translate_group(
     match cs.get(i + 2) {
         Some(':' | '=' | '!') => {
             t.open_stack.push(None);
+            t.alt_stack.push(0);
             // `=`/`!` → lookahead quantifiable (Annex B) ; `:` non.
             t.look_pos.push(if cs[i + 2] == ':' {
                 None
@@ -2503,35 +2853,94 @@ fn translate_group(
             out.push_str("(?");
             out.push(cs[i + 2]);
             t.grp_pos.push((out.len(), t.groups_open));
+            t.ginfo.push(GInfo {
+                inner_out: out.len(),
+                inner_cs: i + 3,
+                phys_base: t.groups_open,
+                ..Default::default()
+            });
             Ok(i + 3)
         }
         Some('<') if matches!(cs.get(i + 3), Some('=' | '!')) => {
             t.open_stack.push(None);
+            t.alt_stack.push(0);
             t.look_pos.push(None);
             t.mod_stack.push(None);
             out.push_str("(?<");
             out.push(cs[i + 3]);
             t.grp_pos.push((out.len(), t.groups_open));
+            t.ginfo.push(GInfo {
+                inner_out: out.len(),
+                inner_cs: i + 4,
+                phys_base: t.groups_open,
+                ..Default::default()
+            });
             Ok(i + 4)
         }
         Some('<') => {
-            // Groupe nommé : `name` = IdentifierName, unique.
+            // Groupe nommé : `name` = IdentifierName, unique —
+            // sauf ES2025 `regexp-duplicate-named-groups` : le
+            // nom peut se répéter dans des **alternatives
+            // disjointes** (chacune a son slot de capture ;
+            // `groups.x`/`\k<x>` = la participante).
             let Some((name, j)) = scan_group_name(cs, i + 3) else {
                 return Err(err());
             };
-            if !t.names.insert(name.clone()) {
-                return Err(format!("duplicate group name `{name}` in /{src}/"));
+            let path = t.alt_stack.clone();
+            let dup = !t.names.insert(name.clone());
+            if dup {
+                let disjoint =
+                    |a: &[usize], b: &[usize]| a.iter().zip(b.iter()).any(|(x, y)| x != y);
+                let ok = t
+                    .name_paths
+                    .get(&name)
+                    .is_some_and(|ps| ps.iter().all(|p| disjoint(p, &path)));
+                if !ok {
+                    return Err(format!("duplicate group name `{name}` in /{src}/"));
+                }
+                // Rétro-enregistrement de la 1ʳᵉ déclaration sous
+                // son nom émis (orig ou `__uN` renommé).
+                if let std::collections::btree_map::Entry::Vacant(e) = t.dup_map.entry(name.clone())
+                {
+                    let first = t
+                        .orig_to_synth
+                        .get(&name)
+                        .cloned()
+                        .unwrap_or_else(|| name.clone());
+                    t.dup_rev.insert(first.clone(), name.clone());
+                    e.insert(vec![first]);
+                }
             }
+            t.name_paths.entry(name.clone()).or_default().push(path);
             t.groups_open += 1;
-            t.name_num.insert(name.clone(), t.groups_open);
-            t.open_stack.push(Some(t.groups_open));
+            t.exec_map.push(t.groups_open);
+            let logical = t.exec_map.len();
+            t.open_stack.push(Some(logical));
+            t.alt_stack.push(0);
             t.look_pos.push(None);
             t.mod_stack.push(None);
             // JS-C624 : fancy-regex n'accepte que `[A-Za-z0-9_]`
             // dans `?P<…>` — un IdentifierName plus large (`$`,
             // non-ASCII, non-BMP) est émis sous un nom synthétique
-            // `__uN` (dédoublé) et traduit à l'affichage.
-            let emit_name = if name_needs_rename(&name) {
+            // `__uN` (dédoublé) et traduit à l'affichage. JS-C642 :
+            // un **dupliqué** reçoit `__dN` (le backend exige
+            // l'unicité ; fusionné à l'affichage via `dup_map`).
+            let emit_name = if dup {
+                let mut nm = format!("__d{}", t.dup_rev.len());
+                while t.all_names.contains(&nm)
+                    || t.synth.contains(&nm)
+                    || t.renamed.contains_key(&nm)
+                    || t.dup_rev.contains_key(&nm)
+                {
+                    nm.push('_');
+                }
+                t.synth.insert(nm.clone());
+                if let Some(v) = t.dup_map.get_mut(&name) {
+                    v.push(nm.clone());
+                }
+                t.dup_rev.insert(nm.clone(), name.clone());
+                nm
+            } else if name_needs_rename(&name) {
                 let mut nm = format!("__u{}", t.renamed.len());
                 while t.all_names.contains(&nm)
                     || t.synth.contains(&nm)
@@ -2540,16 +2949,51 @@ fn translate_group(
                     nm.push('_');
                 }
                 t.renamed.insert(nm.clone(), name.clone());
-                t.orig_to_synth.insert(name, nm.clone());
+                t.orig_to_synth.insert(name.clone(), nm.clone());
                 nm
             } else {
-                name
+                name.clone()
             };
+            // `name_num` est clé par nom **émis** (un dupliqué a
+            // une entrée par déclaration — `\k` résout la liste)
+            // vers le numéro **logique** (comme `closed`).
+            t.name_num.insert(emit_name.clone(), logical);
             t.emitted.push(emit_name.clone());
+            let orig_name = name;
             out.push_str("(?P<");
             out.push_str(&emit_name);
             out.push('>');
             t.grp_pos.push((out.len(), t.groups_open));
+            // Marqueur de participation `(?P<__mN>)` émis après le
+            // `)` — requis pour `\k` sur nom dupliqué (le backref
+            // backend ne distingue pas « pas participé » de
+            // « capturé mais le texte ne suit pas »). Émis pour
+            // tout nommé : le statut de dupliqué n'est connu
+            // qu'à la 2ᵉ déclaration.
+            t.marker_ctr += 1;
+            let mut mk = format!("__m{}", t.marker_ctr);
+            while t.all_names.contains(&mk)
+                || t.synth.contains(&mk)
+                || t.renamed.contains_key(&mk)
+                || t.dup_rev.contains_key(&mk)
+            {
+                mk.push('_');
+            }
+            t.markers.insert(emit_name.clone(), mk.clone());
+            t.synth.insert(mk.clone());
+            let dup_marker = Some(mk);
+            t.ginfo.push(GInfo {
+                inner_out: out.len(),
+                inner_cs: j,
+                names: vec![Some(emit_name)],
+                logicals: vec![logical],
+                origs: vec![Some(orig_name)],
+                phys: vec![t.groups_open],
+                phys_base: t.groups_open - 1,
+                own_cap: true,
+                dup_marker,
+                ..Default::default()
+            });
             Ok(j)
         }
         Some('P' | '#') => Err(err()),
@@ -2601,8 +3045,10 @@ fn translate_group(
             // add bascule à true, remove à false — les listes
             // sont disjointes, pas de conflit).
             t.open_stack.push(None);
+            t.alt_stack.push(0);
             t.look_pos.push(None);
             t.mod_stack.push(Some((t.fold, t.dotall, t.eff_i)));
+            let mod_inner = j + 1;
             if add.contains(&'i') {
                 t.eff_i = true;
             } else if sub.contains(&'i') {
@@ -2650,6 +3096,12 @@ fn translate_group(
                 out.push_str("(?:");
             }
             t.grp_pos.push((out.len(), t.groups_open));
+            t.ginfo.push(GInfo {
+                inner_out: out.len(),
+                inner_cs: mod_inner,
+                phys_base: t.groups_open,
+                ..Default::default()
+            });
             Ok(j + 1)
         }
     }
@@ -2821,23 +3273,82 @@ impl Trans {
             if cs.get(i + 2) == Some(&'<') {
                 if let Some((name, j)) = scan_group_name(cs, i + 3) {
                     if self.names.contains(&name) {
+                        // Noms **émis** : un seul en général, tous
+                        // les slots du dupliqué sinon (JS-C642).
+                        let ems: Vec<String> =
+                            self.dup_map.get(&name).cloned().unwrap_or_else(|| {
+                                vec![self
+                                    .orig_to_synth
+                                    .get(&name)
+                                    .cloned()
+                                    .unwrap_or_else(|| name.clone())]
+                            });
                         // Le groupe est déclaré mais pas encore
                         // **fermé** (`\k<a>` dans `(?<a>…)`) — il
                         // ne peut pas avoir capturé → la backref
                         // matche vide (spec 21.2.2.9, comme `\N`).
-                        let closed = self
-                            .name_num
-                            .get(&name)
-                            .is_some_and(|n| self.closed.contains(n));
-                        if !closed {
-                            return Ok(("(?:)".into(), j));
+                        // Seuls les émis **clos** figurent ; la
+                        // branche `|` finale livre le vide quand
+                        // aucun n'a participé (dupliqués).
+                        let ems: Vec<&String> = ems
+                            .iter()
+                            .filter(|em| {
+                                self.name_num
+                                    .get(*em)
+                                    .is_some_and(|n| self.closed.contains(n))
+                            })
+                            .collect();
+                        match ems.len() {
+                            0 => return Ok(("(?:)".into(), j)),
+                            1 => {
+                                // Marqueur de participation :
+                                // « capturé mais le texte ne
+                                // suit pas » doit échouer, « pas
+                                // participé » livre le vide —
+                                // le backend échoue les deux.
+                                if let Some(mk) = self.markers.get(ems[0]) {
+                                    return Ok((
+                                        self.wrap_backref(format!(
+                                            "(?:(?=\\k<{mk}>)\\k<{}>|(?!\\k<{mk}>))",
+                                            ems[0]
+                                        )),
+                                        j,
+                                    ));
+                                }
+                                return Ok((self.wrap_backref(format!("\\k<{}>", ems[0])), j));
+                            }
+                            _ => {
+                                // JS-C642 : test de participation
+                                // par marqueur `()` — `(?=\k<mk>)`
+                                // n'ouvre la branche `\k<e>` que
+                                // si la déclaration a participé
+                                // (un backref backend échoue aussi
+                                // sur slot jamais capturé) ; la
+                                // queue `(?!\k<mk>)…` ne livre le
+                                // vide que si **aucune** n'a
+                                // participé — « capturé mais le
+                                // texte ne suit pas » échoue donc
+                                // au lieu d'être masqué par `|`.
+                                let alt = ems
+                                    .iter()
+                                    .map(|e| match self.markers.get(*e) {
+                                        Some(mk) => {
+                                            format!("(?=\\k<{mk}>)\\k<{e}>")
+                                        }
+                                        None => format!("\\k<{e}>"),
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("|");
+                                let negs: String = ems
+                                    .iter()
+                                    .filter_map(|e| self.markers.get(*e))
+                                    .fold(String::new(), |mut acc, mk| {
+                                        acc.push_str(&format!("(?!\\k<{mk}>)"));
+                                        acc
+                                    });
+                                return Ok((self.wrap_backref(format!("(?:{alt}|{negs})")), j));
+                            }
                         }
-                        // JS-C624 : groupe renommé → `\k<synth>`.
-                        let nm = self
-                            .orig_to_synth
-                            .get(&name)
-                            .map_or(name.as_str(), String::as_str);
-                        return Ok((self.wrap_backref(format!("\\k<{nm}>")), j));
                     }
                     if self.all_names.contains(&name) {
                         // Référence avant déclaration : le groupe ne
@@ -3139,7 +3650,10 @@ impl Trans {
                         return Ok((self.wrap_backref(format!("\\k<{nm}>")), j));
                     }
                 }
-                return Ok((self.wrap_backref(format!("\\{n}")), j));
+                // `exec_map` livre le slot **physique** —
+                // identité sans déroulage `{m}` (JS-C642).
+                let phys = self.exec_map.get(n - 1).copied().unwrap_or(n);
+                return Ok((self.wrap_backref(format!("\\{phys}")), j));
             }
             // Backref « vers l'avant » : le groupe n'a pas encore
             // fermé — il ne peut pas avoir capturé → la référence
