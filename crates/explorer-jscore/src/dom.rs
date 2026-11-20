@@ -4312,6 +4312,15 @@ impl Dom {
                 out.push(c);
             }
             stack.extend(n.children.iter().rev());
+            // `<template>` : les collections traversent le
+            // fragment `content` (§B-203 — `getElementsByTagName`
+            // trouve les descendants de `template.content`,
+            // contrairement aux sélecteurs).
+            if n.tag == "template" {
+                if let Some(&f) = self.template_contents.get(&c) {
+                    stack.extend(self.nodes[f as usize].children.iter().rev());
+                }
+            }
         }
     }
 
@@ -4330,6 +4339,15 @@ impl Dom {
                 out.push(c);
             }
             stack.extend(n.children.iter().rev());
+            // `<template>` : `getElementsByTagName` traverse
+            // `content` (§B-203 — Chrome trouve les
+            // descendants du fragment, DOMPurify s'y appuie
+            // via `createDocument(ns,"template")`).
+            if n.tag == "template" {
+                if let Some(&f) = self.template_contents.get(&c) {
+                    stack.extend(self.nodes[f as usize].children.iter().rev());
+                }
+            }
         }
     }
 

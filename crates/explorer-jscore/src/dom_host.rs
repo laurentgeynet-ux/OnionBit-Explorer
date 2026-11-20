@@ -8486,22 +8486,35 @@ impl Host for DocumentHost {
                 // sur le DOM yt). Le repli rejoue l'ancien
                 // comportement à l'identique quand le squelette
                 // n'est pas là.
+                // §B-203 — document XML (`implementation.
+                // createDocument`, `DOMParser` non-html) :
+                // `body` = enfant `<body>` de la racine
+                // `<html>` seulement — `null` sinon, jamais de
+                // squelette auto-créé (DOMPurify lit
+                // `e.body || e.documentElement`).
                 let n = {
                     let d = self.dom.borrow();
-                    let fast = d.document_element().and_then(|h| {
+                    let de = d.document_element();
+                    let de_is_html = de.is_some_and(|h| d.nodes[h as usize].tag == "html");
+                    let fast = de.filter(|_| de_is_html).and_then(|h| {
                         d.element_children(h)
                             .into_iter()
                             .find(|&c| d.nodes[c as usize].tag == "body")
                     });
-                    if let Some(n) = fast {
-                        n
+                    if fast.is_some() {
+                        fast
+                    } else if d.xml {
+                        None
                     } else {
                         drop(d);
                         ensure_doc_part(&self.dom, "body");
-                        self.dom.borrow().body()
+                        Some(self.dom.borrow().body())
                     }
                 };
-                Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+                Ok(Some(match n {
+                    Some(n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
             }
             // `document.activeElement` (CAP-162) — l'élément
             // focalisé du miroir (`Dom::focused` tenu par
@@ -8835,6 +8848,24 @@ impl Host for DocumentHost {
                 // l'insère avant `body` (JS-C89 — le hoisting
                 // `<title>`/metadata de React 19 fait
                 // `document.head.insertBefore` au mount).
+                // §B-203 — document XML (`implementation.
+                // createDocument`, `DOMParser` non-html) :
+                // `head` = enfant `<head>` de la racine
+                // `<html>` seulement — `null` sinon, jamais de
+                // squelette auto-créé (garde commune
+                // `body`/`head`).
+                if self.dom.borrow().xml {
+                    let d = self.dom.borrow();
+                    let n = d.document_element().and_then(|h| {
+                        d.element_children(h)
+                            .into_iter()
+                            .find(|&c| d.nodes[c as usize].tag == "head")
+                    });
+                    return Ok(Some(match n {
+                        Some(n) => node_value(e, &self.dom, &self.cache, n),
+                        None => Value::Null,
+                    }));
+                }
                 let n = {
                     let mut d = self.dom.borrow_mut();
                     // JS-C561 — même chemin rapide que `body` :
@@ -19389,7 +19420,7 @@ impl Host for DomImplementationHost {
     }
 
     fn has_method(&self, name: &str) -> bool {
-        matches!(name, "createHTMLDocument" | "hasFeature")
+        matches!(name, "createHTMLDocument" | "createDocument" | "hasFeature")
     }
 
     fn invoke(
@@ -19433,6 +19464,44 @@ impl Host for DomImplementationHost {
                         }
                     }
                 }
+                Ok(Some(doc_v))
+            }
+            // Spec `createDocument(namespaceURI,
+            // qualifiedName, doctype)` — document XML détaché
+            // dont `documentElement` = l'élément
+            // `qualifiedName` (`""`/null → document sans
+            // racine). Trigger réel §B-203 : DOMPurify
+            // (`createDocument(ns,"template",null)`, abcnews).
+            // Borné : l'`namespaceURI` reste l'approximation
+            // historique des nœuds et `doctype` est accepté
+            // sans effet (les types de document ne sont pas
+            // modélisés) ; `body`/`head` = `null` sur les
+            // documents sans racine `<html>` (garde commune
+            // ci-dessus).
+            "createDocument" => {
+                let str_arg = |e: &mut Engine, i: usize| -> JsResult<String> {
+                    match arg(args, i) {
+                        Value::Null | Value::Undefined => Ok(String::new()),
+                        v => e.to_js_string(v),
+                    }
+                };
+                let _ns = str_arg(e, 0)?;
+                let qname = str_arg(e, 1)?;
+                let mut d = Dom::new();
+                d.xml = true;
+                if !qname.is_empty() {
+                    let root_el = d.create_element(&qname);
+                    d.append(d.root, root_el);
+                }
+                let doc_v = e.new_host_object(Rc::new(DocumentHost {
+                    dom: Rc::new(RefCell::new(d)),
+                    cache: Rc::new(RefCell::new(HashMap::new())),
+                    implementation: RefCell::new(None),
+                    fonts: RefCell::new(None),
+                    domain_override: RefCell::new(None),
+                    adopted_sheets: RefCell::new(None),
+                    design_mode: RefCell::new(false),
+                }));
                 Ok(Some(doc_v))
             }
             // `hasFeature()` — spec : retourne toujours `true`

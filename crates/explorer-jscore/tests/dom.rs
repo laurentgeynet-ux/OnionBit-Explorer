@@ -2632,6 +2632,32 @@ fn abort_controller_survit_a_install_xhr() {
     }
 }
 
+/// §B-203 — abcnews `DOMPurify` :
+/// `document.implementation.createDocument(ns,"template",null)`
+/// produit un document XML détaché dont `documentElement` =
+/// `<template>` ; `body`/`head` = `null` (jamais de squelette
+/// `<html>` auto-créé — `e.body || e.documentElement` de
+/// `DOMPurify` bascule alors sur la racine) ; `innerHTML` sur le
+/// template alimente `content` et `getElementsByTagName`
+/// traverse le fragment (`I.call(e,"body")[0]`).
+#[test]
+fn b203_implementation_create_document_xml() {
+    let out = ev2(
+        PAGE,
+        "var d=document.implementation.createDocument(\
+         'http://www.w3.org/1999/xhtml','template',null);\
+         var t=d.documentElement;\
+         t.innerHTML='<body><b id=x>y</b></body>';",
+        "t.tagName+'|'+(d.body===null)+'|'+(d.head===null)+'|'+\
+         t.content.childNodes.length+'|'+\
+         d.getElementsByTagName('body').length+'|'+\
+         d.getElementsByTagName('b').length",
+    );
+    // `tagName` = `template` (casse conservée — le miroir
+    // est en mode XML).
+    assert_eq!(out, "template|true|true|1|1|1");
+}
+
 /// Surface des events *dispatchés* (host object, JS-C59 — trou
 /// remonté par github.com : `composedPath is not a function`) :
 /// chemin réel, phases, trusted, flags — le chemin script-créé

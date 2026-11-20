@@ -8298,6 +8298,19 @@ MCP = adaptateur, jamais la base.
   (position spec). Verrous :
   `init_ui_event_carries_view_and_detail` +
   `init_ui_event_on_ctor_path`.
+- [x] **Étape 326. §B-203 soldée :
+  `document.implementation.createDocument(ns, qname,
+  doctype)` implémenté — verbatim abcnews (DOMPurify
+  `createDocument(ns,"template",null)`)** (`explorer-jscore`
+  `dom_host.rs` + `dom.rs`). Le document produit est un
+  miroir XML (`d.xml` : casse conservée, `body`/`head` =
+  enfants de `<html>` seulement — `null` sinon, jamais de
+  squelette auto-créé, `e.body || e.documentElement` de
+  DOMPurify bascule sur la racine) ; `getElementsByTagName`
+  traverse désormais `template.content` (comportement
+  Chrome : les collections franchissent la frontière
+  template que les sélecteurs ne franchissent pas).
+  Verrou : `b203_implementation_create_document_xml`.
 - [x] **Étape 325. §B-201 soldée : `srcset` — la virgule
   *interne* à l'URL d'un candidat ne borne plus le
   candidat** (`explorer-core` `dom_helpers.rs` —
