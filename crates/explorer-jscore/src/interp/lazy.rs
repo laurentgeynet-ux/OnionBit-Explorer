@@ -1643,7 +1643,17 @@ impl GExec {
                     // JS-C534 — canon resolver du bloc catch
                     // (`cbody.as_ptr()`, convention `exec.rs`) :
                     // le param + ses lexicals en `cells` denses.
-                    let cenv = Env::local(f.env.clone());
+                    // §B-211 — le catch est frère du try : enfant
+                    // du PARENT de `f.env` (le bloc try), pas de
+                    // `f.env` — sinon les `let`/`const` du try
+                    // fuyaient dans le catch après suspension.
+                    let penv = f
+                        .env
+                        .borrow()
+                        .parent
+                        .clone()
+                        .unwrap_or_else(|| f.env.clone());
+                    let cenv = Env::block(penv);
                     e.predeclare_slots(&cenv, cbody.as_ptr() as usize);
                     e.bind_pat(
                         &cenv,
@@ -1683,11 +1693,21 @@ impl GExec {
                     // `finally` traversé : suspendu — `UnwindFin`
                     // court le bloc, la complétion reprend à sa
                     // sortie naturelle (`leave_frame`).
+                    // §B-211 — bloc frère : enfant du parent de
+                    // `f.env` (bloc try), pas `f.env` lui-même.
                     self.unwind = Some((u, false));
+                    let penv = f
+                        .env
+                        .borrow()
+                        .parent
+                        .clone()
+                        .unwrap_or_else(|| f.env.clone());
+                    let fenv = Env::block(penv);
+                    e.predeclare_slots(&fenv, fin.as_ptr() as usize);
                     self.stack.push(GFrame {
                         list: Rc::new(fin),
                         pc: 0,
-                        env: f.env,
+                        env: fenv,
                         labels: Vec::new(),
                         kind: FKind::UnwindFin,
                     });
@@ -2423,10 +2443,20 @@ impl GExec {
                 let (env, fin) = (f.env.clone(), finally.clone());
                 self.stack.pop();
                 if let Some(fin) = fin {
+                    // §B-211 — `finally` est un bloc FRERE du
+                    // `try` : env enfant du parent de `f.env`
+                    // (le bloc try), jamais `f.env` lui-même —
+                    // sinon les `let`/`const` du try fuyaient
+                    // dans le finally après suspension
+                    // (vitrine globo : `u` try-bloc `null` lu
+                    // à la place du module `r(9850)`).
+                    let penv = env.borrow().parent.clone().unwrap_or_else(|| env.clone());
+                    let fenv = Env::block(penv);
+                    e.predeclare_slots(&fenv, fin.as_ptr() as usize);
                     self.stack.push(GFrame {
                         list: Rc::new(fin),
                         pc: 0,
-                        env,
+                        env: fenv,
                         labels: Vec::new(),
                         kind: FKind::Seq,
                     });
@@ -2644,7 +2674,11 @@ impl GExec {
     /// lexicale possible — l'env reste un pass-through non
     /// câblé (`extra` vide, lookup remonte direct).
     fn frame_env(e: &Engine, env: &EnvRef, body: &Stmt) -> EnvRef {
-        let fenv = Env::local(env.clone());
+        // §B-211 — `Block`, pas `Local` : un `var` dans le corps
+        // se déclare au scope fonction (le `Local` l'avalait —
+        // `{var x}`/`if(var)`/`for{var}` async rendaient
+        // `undefined` post-suspension).
+        let fenv = Env::block(env.clone());
         if let Stmt::Block(l) = body {
             e.predeclare_slots(&fenv, l.as_ptr() as usize);
         }
@@ -2760,11 +2794,11 @@ impl GExec {
                 Ok(GFlow::Adv)
             }
             Stmt::Block(l) => {
-                // JS-C502 — même clé `l.as_ptr()` que le resolver
-                // (env `Local` ici vs `Block` en sync : la
-                // pré-déclare accepte les deux, `Uninit` reste
-                // transparente à `var`).
-                let benv = Env::local(env.clone());
+                // JS-C502 — même clé `l.as_ptr()` que le resolver.
+                // §B-211 — `Block` comme en sync : `Local`
+                // avalait les `var` du bloc (`{var x};await` →
+                // `x` perdu hors bloc).
+                let benv = Env::block(env.clone());
                 e.predeclare_slots(&benv, l.as_ptr() as usize);
                 self.stack.push(GFrame {
                     list: Rc::new(l.clone()),
@@ -2934,7 +2968,9 @@ impl GExec {
             } => {
                 // JS-C534 — canon resolver du bloc try
                 // (`block.as_ptr()`, convention `exec.rs`).
-                let benv = Env::local(env.clone());
+                // §B-211 — `Block` comme en sync : `Local`
+                // avalait les `var` du try.
+                let benv = Env::block(env.clone());
                 e.predeclare_slots(&benv, block.as_ptr() as usize);
                 self.stack.push(GFrame {
                     list: Rc::new(block.clone()),
@@ -3011,8 +3047,9 @@ impl GExec {
                         // switch : canon `cases.as_ptr()`
                         // (convention `exec.rs` — le `flat` est
                         // synthétique, la clé reste celle des
-                        // cases source).
-                        let senv = Env::local(env.clone());
+                        // cases source). §B-211 — `Block` comme
+                        // en sync : `Local` avalait les `var`.
+                        let senv = Env::block(env.clone());
                         e.predeclare_slots(&senv, cases.as_ptr() as usize);
                         self.stack.push(GFrame {
                             list: Rc::new(flat),

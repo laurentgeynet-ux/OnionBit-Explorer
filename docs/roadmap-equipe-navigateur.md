@@ -8367,6 +8367,22 @@ MCP = adaptateur, jamais la base.
   vide par défaut. Verrou : `navigator_is_fixed_and_poor`
   réécrit. Reliquat : `sec-ch-ua*` absents,
   `navigator.vendor` vide.
+- [x] **Étape 333. §B-211 soldée : `finally`/`catch`
+  async = blocs FRERES du try, `var` des blocs async
+  traverse au scope fonction** (`explorer-jscore`
+  `interp/lazy.rs`). Vitrine globo (`bs/delivery/show`) :
+  `(0,u.showFallbackContent)` — `u` devait être le
+  module `r(9850)` mais lisait le `const{utm_source:u}`
+  du bloc `try` (null) — après `await`, la machine
+  à états exécutait `finally` dans l'env du bloc try
+  (`f.env`) : les `let`/`const` du try fuyaient.
+  Même racine pour `var` : envs de bloc `Env::local`
+  (avale `var`) → `Env::block` (traverse au scope
+  fonction) — `{var x};await`/`if{var}`/`for{var}`/
+  `try{var}` rendaient `undefined`. Catch frère aussi
+  (voyait les lexicals du try). Sonde : 7/7 cas =
+  Node (nominal, unwind, catch, post-await, imbriqué,
+  `var` ×4). Verrou : `b211_async_block_scope` 2/2.
 - [x] **Étape 332. §B-210 soldée — cluster entier
   (a)-(e), une racine : regex `i`, les littéraux
   échappés `\[`,`\.`,`\(`,`\)`,`\|`… sont émis échappés
