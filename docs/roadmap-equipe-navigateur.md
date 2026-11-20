@@ -15663,6 +15663,79 @@ chaque gain rapporté contre les **deux** archétypes.
   `for-of/dstr` rests imbriqués, `put-let` TDZ script.
   Gates : c628 4/4, c616-c627 verts, lib 54/54, clippy/fmt
   propres.
+- [x] **JS-C629 — §B-192 : le miroir ré-émet `<!doctype html>`
+  à la sérialisation — fin du basculement quirks fantôme au
+  re-parse de resynchro** (`dom.rs`, diagnostic pipeline
+  vol 898 — anomalie terrain webmd `dh=-9` uniforme ×107).
+  Signature : `li`/`a` nav webmd à 35,55/36,55 vs ref 44,7/
+  45,7. Chaîne : `serialize_document`/`serialize_keyed`
+  omettaient le doctype → tout re-parse `apply_payload`
+  basculait en **quirks** → la règle « `height:%` traversant
+  les ancêtres `auto` » propageait le `cb_h` de l'absolu
+  (35,55 px) aux liens `height:100%`. Fix : `<!doctype html>`
+  émis quand `had_doctype` (cohérent avec
+  `document.compatMode` = `CSS1Compat` constant côté JS) ;
+  sans doctype au parse → rien d'injecté (pages réellement
+  quirks préservées). Mesure site réel : `li` 36,55 → 45,7,
+  `a` 35,55 → 44,7 — exact ref Chrome. Attention : mode
+  document de toute page à doctype désormais standards en
+  continu — les geodiffs archivés (sous quirks) divergeront.
+  Verrous : `b192_serialize_reemet_le_doctype` +
+  `b192_sync_miroir_conserve_le_mode_standards` (session).
+- [x] **JS-C630 — §B-152-classe : `insertRule`/`deleteRule`/
+  `replace*` sur feuille `<style>` régénèrent son
+  `textContent` miroir — le CSS runtime styled-components
+  rejoint la cascade** (`misc_apis.rs`, qualification
+  pilotée geodiff vol 898 — anomalie terrain bbc.com
+  `sheets_bytes=0`). Chaîne : les classes `*Styled-sc-*`
+  étaient posées sur les éléments sans déclarations —
+  `insertRule` stockait dans `cssRules[]` « borné : pas
+  cascadée » et la sérialisation émettait des `<style>`
+  vides. `reflect_sheet_to_style` reconstruit le texte
+  depuis `cssRules[*].cssText` après chaque mutation
+  (ordre index préservé ; `replace*` via `__text`) —
+  no-op hors miroir DOM ou sans `<style>` en `ownerNode`.
+  Mesure site réel : `computed>12` 0 → 2434/2544,
+  doc 31 102 → 9 037 px. Verrou :
+  `b152_insertrule_alimente_le_textcontent_du_style`.
+- [x] **JS-C631 — modifiers inline RegExp ES2025
+  `(?ims-ims:…)` : portée lexicale réelle de `i`/`m`/`s`,
+  `regexp-modifiers` 130 → 140/140 (+10)** (`regexp.rs`,
+  gate `tests/c631_re_modifiers.rs` **8/8**). La syntaxe
+  était déjà relayée verbatim à fancy-regex ; l'écart était
+  sémantique : `s` émis en classes littérales (pas de flag
+  backend), `i` non-`u` = folding manuel ASCII `ToUppercase`
+  (le folding Unicode natif de fancy est trop large), `m`
+  natif. **`Trans.mod_stack`** sauvegarde `(eff_i, m,
+  dotall)` à l'ouverture et restaure au `)` — imbriqué dans
+  `open_stack` ; `eff_i` est l'état effectif d'insensibilité
+  consulté aux sites d'émission (hors `u` : expansion
+  manuelle `fold_variants` ; sous `u` : `(?i` natif émis en
+  tête de groupe modifier). **Validation spec** : lettres
+  ∈ {i,m,s}, pas de doublon ni d'intersection add/remove,
+  `:` obligatoire → `SyntaxError`. **Backrefs** enveloppées
+  `(?i:…)` sous `eff_i` (fancy ne folde pas `\1`) — sauf en
+  corps de classe (`class_depth`, Annex B `\k` = identité).
+  **`GetWordCharacters(modifiers)`** : `\w`/`\W` émis en
+  classe explicite — ASCII63 hors `i`, +`ſ`/`K` sous
+  `u`+`i` (leurs canon ∈ ASCII) ; `\b`/`\B` abaissés en
+  lookarounds `(?:(?=[w])(?<=[^w])|…)` sur le même jeu —
+  corrige aussi `\w` nu hors-i (était `\w` Unicode fancy,
+  `/\w/.test('é')` passait à tort). **`\P{P}`+i** : le jeu
+  spec `{c : canon(c) ∉ P}` (canon sur l'input, complément
+  d'abord — `\P{Lu}`+i matche 'a' **et** 'A' et '0') est
+  inexprimable dans fancy (ses 4 formes foldent le set) —
+  `[\s\S]` émis, écart catalogué pour les props lettres /
+  script dont l'ensemble exclu `{c : canon(c) ∈ P}` est
+  non vide. **Mesures** : `regexp-modifiers` (70 fichiers)
+  **130 → 140/140** ; `unicodeSets` 292/304 stable ;
+  RegExp+String nogen (2481 fichiers) 4597/4927 — les 330
+  échecs = pools catalogués (property-escapes,
+  lookBehind variable, named-groups non-BMP résiduels,
+  `\d` Unicode, gaps String pré-existants), aucun fichier
+  modifier/word-char. **Écarts catalogués restants** :
+  `\P{P}`+i sur props à pré-image de fold non triviale,
+  `\d` Unicode fancy (`character-class-digit-*`).
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

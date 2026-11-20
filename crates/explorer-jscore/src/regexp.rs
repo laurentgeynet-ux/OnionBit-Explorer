@@ -311,7 +311,7 @@ impl JsRegExp {
         // même traduction unicode.
         let uni = unicode || unicode_sets;
         let (translated, synth, renamed) =
-            translate_pattern(source, uni, unicode_sets, dot_all, ignore_case && !uni)?;
+            translate_pattern(source, uni, unicode_sets, dot_all, ignore_case)?;
         pat.push_str(&translated);
         // Domaine sentinelle : le pattern traduit porte des
         // chars `F0000..=F0800` (surrogates du source ou d'un
@@ -569,7 +569,7 @@ fn translate_pattern(
     unicode: bool,
     vsets: bool,
     dotall: bool,
-    fold: bool,
+    icase: bool,
 ) -> Result<TranslateOut, String> {
     let cs: Vec<char> = src.chars().collect();
     let (all_names, n_groups, has_decimal) = prescan(&cs);
@@ -584,7 +584,8 @@ fn translate_pattern(
         unicode,
         vsets,
         dotall,
-        fold,
+        fold: icase && !unicode,
+        eff_i: icase,
         n_groups,
         names: std::collections::BTreeSet::new(),
         all_names,
@@ -596,7 +597,9 @@ fn translate_pattern(
         groups_open: 0,
         open_stack: Vec::new(),
         look_pos: Vec::new(),
+        mod_stack: Vec::new(),
         closed: std::collections::BTreeSet::new(),
+        class_depth: 0,
     };
     let mut out = String::with_capacity(src.len() + 8);
     let mut i = 0;
@@ -850,6 +853,7 @@ fn translate_pattern(
             }
             '[' if !in_class => {
                 in_class = true;
+                t.class_depth += 1;
                 class_prev = None;
                 class_dash = false;
                 class_prev_bound = false;
@@ -865,6 +869,7 @@ fn translate_pattern(
             }
             ']' if in_class => {
                 in_class = false;
+                t.class_depth = t.class_depth.saturating_sub(1);
                 last_atom = true;
                 if class_emitted {
                     out.push(']');
@@ -1041,6 +1046,7 @@ fn translate_pattern(
                 t.groups_open += 1;
                 t.open_stack.push(Some(t.groups_open));
                 t.look_pos.push(None);
+                t.mod_stack.push(None);
                 last_atom = false;
                 if t.need_synth {
                     // JS-C269 : nommer l'anonyme pour que `\N`
@@ -1058,6 +1064,13 @@ fn translate_pattern(
             ')' if !in_class => {
                 if let Some(Some(n)) = t.open_stack.pop() {
                     t.closed.insert(n);
+                }
+                // Groupe de modificateurs `(?ims-ims:…)` — restaure
+                // les états effectifs sauvegardés à l'ouverture.
+                if let Some(Some((fold, dotall, eff_i))) = t.mod_stack.pop() {
+                    t.fold = fold;
+                    t.dotall = dotall;
+                    t.eff_i = eff_i;
                 }
                 last_atom = true;
                 out.push(')');
@@ -1257,6 +1270,11 @@ struct Trans {
     /// `i` en mode non-`u` : folding `ToUppercase` simple émis à la
     /// main (le `i` du backend est un folding Unicode complet).
     fold: bool,
+    /// `i` **effectif** aux deux modes (`UpdateModifiers`) —
+    /// pilote le jeu de word-chars `\w`/`\b` et la négation
+    /// `\P{…}`+i → `[^\p{…}]` ; en `u` le folding proprement dit
+    /// reste natif (header `(?i`/`(?-i` émis).
+    eff_i: bool,
     /// Nombre de groupes capturants du pattern (validation `\N`).
     n_groups: usize,
     /// Noms déclarés *avant* la position courante.
@@ -1293,10 +1311,20 @@ struct Trans {
     /// fermeture : min=0 → `(?:(?=…)|)`, min≥1 → forme nue
     /// (assertion idempotente) ; mesuré sur bbc.com (JS-C56).
     look_pos: Vec<Option<usize>>,
+    /// Parallèle à `open_stack` : `Some((fold, dotall, eff_i))`
+    /// sauvé à l'ouverture d'un groupe de modificateurs
+    /// `(?ims-ims:)` — restauré au `)` (JS-C630,
+    /// `UpdateModifiers`).
+    mod_stack: Vec<Option<(bool, bool, bool)>>,
     /// Numéros de groupes **fermés** avant la position courante —
     /// seule une backref vers un groupe clos peut réellement
     /// capturer (`\3` dans `(\3)…(…)` matche vide, spec 21.2.2.9).
     closed: std::collections::BTreeSet<usize>,
+    /// Non nul pendant l'émission d'un corps `[…]` non-`v` —
+    /// une backref n'y est pas un atome (Annex B : `\k<…>` est
+    /// une identité) et l'enveloppe `(?i:…)` ne s'y applique
+    /// pas.
+    class_depth: u32,
 }
 
 impl Trans {
@@ -1855,7 +1883,12 @@ fn v_assemble(set: VSet) -> String {
 /// Point d'entrée — `[…]` en mode `v`. `i` = index du `[` ;
 /// retourne `(atome pattern, index après le `]` fermant)`.
 fn v_class(t: &mut Trans, cs: &[char], i: usize, src: &str) -> Result<(String, usize), String> {
-    let (set, next) = v_set(t, cs, i, src)?;
+    // `class_depth` : un `\w`/`\W` opérande s'émet en corps de
+    // classe (membres nus, composables avec `&&`/`--` natifs).
+    t.class_depth += 1;
+    let res = v_set(t, cs, i, src);
+    t.class_depth = t.class_depth.saturating_sub(1);
+    let (set, next) = res?;
     Ok((v_assemble(set), next))
 }
 
@@ -2303,6 +2336,7 @@ fn translate_group(
             } else {
                 Some(out.len())
             });
+            t.mod_stack.push(None);
             out.push_str("(?");
             out.push(cs[i + 2]);
             Ok(i + 3)
@@ -2310,6 +2344,7 @@ fn translate_group(
         Some('<') if matches!(cs.get(i + 3), Some('=' | '!')) => {
             t.open_stack.push(None);
             t.look_pos.push(None);
+            t.mod_stack.push(None);
             out.push_str("(?<");
             out.push(cs[i + 3]);
             Ok(i + 4)
@@ -2337,6 +2372,7 @@ fn translate_group(
             t.groups_open += 1;
             t.open_stack.push(Some(t.groups_open));
             t.look_pos.push(None);
+            t.mod_stack.push(None);
             // JS-C624 : fancy-regex n'accepte que `[A-Za-z0-9_]`
             // dans `?P<…>` — un IdentifierName plus large (`$`,
             // non-ASCII, non-BMP) est émis sous un nom synthétique
@@ -2390,16 +2426,70 @@ fn translate_group(
                     }
                 }
             }
+            // Gauche vide licite avec `-` (`(?-i:x)` = retrait
+            // pur — tout le corpus `remove-*` l'utilise) ; les
+            // deux listes sont disjointes (`(?i-i:x)` →
+            // `SyntaxError`).
             if cs.get(j) != Some(&':')
                 || (add.is_empty() && !saw_dash)
                 || add.iter().any(|f| sub.contains(f))
             {
                 return Err(err());
             }
-            // Fragment validé → émis tel quel (fancy le comprend).
+            // Portée : `fold`/`dotall` sont les états effectifs
+            // traqués par la traduction — sauvegardés ici,
+            // restaurés au `)` via `mod_stack` (UpdateModifiers :
+            // add bascule à true, remove à false — les listes
+            // sont disjointes, pas de conflit).
             t.open_stack.push(None);
             t.look_pos.push(None);
-            out.push_str(&cs[i..=j].iter().collect::<String>());
+            t.mod_stack.push(Some((t.fold, t.dotall, t.eff_i)));
+            if add.contains(&'i') {
+                t.eff_i = true;
+            } else if sub.contains(&'i') {
+                t.eff_i = false;
+            }
+            // Non-`u` : `i` est le folding manuel `fold`
+            // (simple-upper) — jamais émis au backend qui
+            // folderait Unicode (`/\u{212a}/` ≠ 'k').
+            if !t.unicode {
+                t.fold = t.eff_i;
+            }
+            // `s` : `.` est déjà traduit en classes littérales —
+            // le flag backend serait sans effet, l'état vit ici.
+            if add.contains(&'s') {
+                t.dotall = true;
+            } else if sub.contains(&'s') {
+                t.dotall = false;
+            }
+            // Émis : `m` toujours natif (portée fancy cohérente
+            // avec le flag global `(?m)`), `i` natif en `u`
+            // seulement, `s` jamais — `(?:` si rien n'est émis.
+            let mut hdr = String::from("(?");
+            let mut any = false;
+            for &f in &add {
+                if f == 'm' || (f == 'i' && t.unicode) {
+                    hdr.push(f);
+                    any = true;
+                }
+            }
+            let mut sub_emit = String::new();
+            for &f in &sub {
+                if f == 'm' || (f == 'i' && t.unicode) {
+                    sub_emit.push(f);
+                }
+            }
+            if !sub_emit.is_empty() {
+                hdr.push('-');
+                hdr.push_str(&sub_emit);
+                any = true;
+            }
+            if any {
+                hdr.push(':');
+                out.push_str(&hdr);
+            } else {
+                out.push_str("(?:");
+            }
             Ok(j + 1)
         }
     }
@@ -2522,7 +2612,7 @@ impl Trans {
                             .orig_to_synth
                             .get(&name)
                             .map_or(name.as_str(), String::as_str);
-                        return Ok((format!("\\k<{nm}>"), j + 1));
+                        return Ok((self.wrap_backref(format!("\\k<{nm}>")), j + 1));
                     }
                     if self.all_names.contains(&name) {
                         // Référence avant déclaration : le groupe ne
@@ -2594,7 +2684,54 @@ impl Trans {
             {
                 return Err(format!("invalid \\p{{ name in `u` regex /{src}/"));
             }
+            // `\P{P}` + `i` : le jeu spec est `{c : canon(c) ∉
+            // P}` — canon sur l'**input** (complément d'abord) :
+            // `\P{Lu}`+i matche 'a' **et** 'A' et '0'. fancy
+            // fold toujours le *set* — `{fold∉P}` est
+            // inexprimable ; l'exclusion réelle `{fold(c) ∈ P}`
+            // est quasi-vide pour les props du corpus (`Lu` —
+            // rien ne folde vers l'uppercase) → `[\s\S]`, écart
+            // catalogué pour les props lettres/script.
+            if c == 'P' && self.eff_i && self.class_depth == 0 {
+                return Ok(("[\\s\\S]".to_string(), end + 1));
+            }
             return Ok((cs[i..=end].iter().collect::<String>(), end + 1));
+        }
+        // `\w`/`\W`/`\b`/`\B` : le `\w` du backend couvre les
+        // word-chars Unicode — JS `GetWordCharacters` est les
+        // 63 ASCII (+ `ſıȷ`/`ſK` sous `i` effectif). Émis en
+        // classe explicite ; les frontières en lookarounds.
+        if c == 'w' || c == 'W' {
+            let body = self.word_body();
+            let frag = if c == 'w' {
+                if self.class_depth > 0 {
+                    body.to_string()
+                } else {
+                    format!("[{body}]")
+                }
+            } else if self.class_depth > 0 {
+                // `\W` nié en corps de classe : inexprimable
+                // simplement — brut (comportement précédent).
+                "\\W".to_string()
+            } else {
+                format!("[^{body}]")
+            };
+            return Ok((frag, i + 2));
+        }
+        if (c == 'b' || c == 'B') && self.class_depth == 0 {
+            // Quantificateur direct sur l'assertion (`\b+`) :
+            // la forme brute conserve le refus du backend.
+            let quantified = matches!(cs.get(i + 2), Some('*' | '+' | '?'))
+                || (cs.get(i + 2) == Some(&'{') && cs.get(i + 3).is_some_and(char::is_ascii_digit));
+            if !quantified {
+                let w = format!("[{}]", self.word_body());
+                let frag = if c == 'b' {
+                    format!("(?:(?<!{w})(?={w})|(?<={w})(?!{w}))")
+                } else {
+                    format!("(?:(?<!{w})(?!{w})|(?<={w})(?={w}))")
+                };
+                return Ok((frag, i + 2));
+            }
         }
         if c.is_ascii_alphanumeric() {
             let known = matches!(
@@ -2633,6 +2770,30 @@ impl Trans {
         Ok((format!("\\{c}"), i + 2))
     }
 
+    /// Corps de classe `GetWordCharacters` : 63 ASCII + extras
+    /// sous `i` effectif — `ſ ı ȷ` (`ToUppercase` simple ∈
+    /// ASCII) en non-`u`, `ſ K` (fold Unicode ∈ ASCII) en `u`.
+    fn word_body(&self) -> &'static str {
+        match (self.unicode, self.eff_i) {
+            (true, true) => "A-Za-z0-9_\\x{17f}\\x{212a}",
+            (false, true) => "A-Za-z0-9_\\x{131}\\x{17f}\\x{237}",
+            _ => "A-Za-z0-9_",
+        }
+    }
+
+    /// Fragment backref sous `fold` effectif — JS `i` rend la
+    /// comparaison du texte capturé insensible à la casse
+    /// (`Canonicalize`) ; non-`u` seulement (`fold` n'est armé
+    /// que là), enveloppe `(?i:…)` — folding Unicode du backend,
+    /// exact en ASCII, superset rare du simple-upper spec.
+    fn wrap_backref(&self, frag: String) -> String {
+        if self.fold && self.class_depth == 0 {
+            format!("(?i:{frag})")
+        } else {
+            frag
+        }
+    }
+
     /// `\N…` : backref décimale, avec les retombées Annex B quand
     /// le numéro excède les groupes du pattern (préfixe valide,
     /// octale legacy `\1`–`\7`, identité `\8`/`\9`).
@@ -2649,10 +2810,10 @@ impl Trans {
                     // Le backend refuse `\N` en présence de
                     // groupes nommés — réémet `\k<émis>` (JS-C269).
                     if let Some(nm) = self.emitted.get(n - 1).filter(|s| !s.is_empty()) {
-                        return Ok((format!("\\k<{nm}>"), j));
+                        return Ok((self.wrap_backref(format!("\\k<{nm}>")), j));
                     }
                 }
-                return Ok((format!("\\{n}"), j));
+                return Ok((self.wrap_backref(format!("\\{n}")), j));
             }
             // Backref « vers l'avant » : le groupe n'a pas encore
             // fermé — il ne peut pas avoir capturé → la référence
