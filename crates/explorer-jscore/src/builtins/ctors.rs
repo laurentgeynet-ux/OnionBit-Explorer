@@ -12,12 +12,45 @@ use super::*;
 // constructors
 // ------------------------------------------------------------------
 
-pub(crate) fn object_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn object_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    // Spec §19.1.1.1 : `NewTarget` ni `undefined` ni la fonction
+    // active → `OrdinaryCreateFromConstructor(NewTarget)` — objet
+    // ordinaire frais, argument ignoré (`subclass-object-arg`,
+    // `Reflect.construct(Object, …, Sub)`). `ctor_fresh` marque
+    // l'objet alloué pour cet appel ; un proto `%Object.prototype%`
+    // signifie `new Object` direct (NewTarget = fonction active →
+    // sémantique `ToObject` plus bas).
+    if let Value::Obj(tid) = &t {
+        if e.ctor_fresh == Some(*tid)
+            && e.heap.obj(*tid).map(|o| o.proto.clone()) != Some(Value::Obj(e.protos.object))
+        {
+            return Ok(t.clone());
+        }
+    }
     match arg(args, 0) {
+        // Cellule symbole = primitive spec → `Object(sym)` rend un
+        // **wrapper frais** (`symbol_object-returns-fresh-symbol`),
+        // pas la cellule.
+        Value::Obj(id)
+            if matches!(
+                e.heap.obj(id).map(|o| &o.kind),
+                Some(ObjKind::Symbol { .. })
+            ) =>
+        {
+            Ok(e.box_primitive(arg(args, 0)))
+        }
         v @ Value::Obj(_) => Ok(v),
-        // `Object()`/`Object(undefined)`/`Object(null)` → objet
+        // `new Object()` (proto `%Object.prototype%` + `ctor_fresh`)
+        // → `this` frais ; `Object(undefined)`/`Object(null)` → objet
         // ordinaire vide (spec `Object` function, §19.1.1.1).
-        Value::Undefined | Value::Null => Ok(Value::Obj(e.new_object())),
+        Value::Undefined | Value::Null => {
+            if let Value::Obj(tid) = &t {
+                if e.ctor_fresh == Some(*tid) {
+                    return Ok(t.clone());
+                }
+            }
+            Ok(Value::Obj(e.new_object()))
+        }
         // §B-72 bras 2 (fifa davinci vol 504) : `Object(t)` sur
         // primitive = `ToObject` → wrapper du bon proto —
         // `Object('NA').constructor === String`, attendu par les

@@ -252,26 +252,13 @@ pub(crate) fn object_is_prototype_of(
 }
 
 pub(crate) fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    // `Object.keys('ab')` → `['0','1']` — indices énumérables de
-    // la string-box (spec `ToObject`).
-    if let Value::Str(sid) = arg(args, 0) {
-        let n = sid.u16_len();
-        let vals: Vec<Value> = (0..n).map(|i| e.str_val(i.to_string())).collect();
-        return Ok(arr_of(e, vals));
-    }
-    let Value::Obj(id) = arg(args, 0) else {
-        return Ok(arr_of(e, Vec::new()));
-    };
-    let keys = e.own_enum_keys_trapped(id)?;
-    // Spec : `Object.keys` = clés **string** énumérables — les
-    // clés-symboles `\u{f130}…` énumérables ne doivent pas fuir
-    // comme strings sentinelles (même classe que `Reflect.ownKeys`,
-    // §B-57).
-    let vals: Vec<Value> = keys
-        .iter()
-        .filter(|k| !crate::builtins::bigint::is_sentinel_key(k))
-        .map(|k| e.str_val(k.clone()))
-        .collect();
+    // Spec : `ToObject(O)` — `null`/`undefined` → `TypeError`,
+    // `'ab'` → wrapper à indices own (`keys/exception-*`,
+    // `property-traps-order-with-proxied-array` : le `gopd` par
+    // clé — `length` incluse — est observable).
+    let id = crate::builtins::to_object_this(e, arg(args, 0))?;
+    let keys = e.enum_own_props(id, false)?;
+    let vals: Vec<Value> = keys.iter().map(|(k, _)| e.str_val(k.clone())).collect();
     Ok(arr_of(e, vals))
 }
 
@@ -333,14 +320,36 @@ pub(crate) fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
 /// proxy : trap `setPrototypeOf` → `false` = `TypeError`.
 pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let target = arg(args, 0);
+    // Spec : `RequireObjectCoercible(O)` d'abord — `setPrototypeOf
+    // (null, x)` → `TypeError` (`o-not-obj-coercible`).
+    if matches!(target, Value::Undefined | Value::Null) {
+        return Err(e.type_error("setPrototypeOf: cannot convert undefined or null to object"));
+    }
     let proto = match arg(args, 1) {
-        v @ Value::Obj(_) => v,
-        Value::Null | Value::Undefined => Value::Null,
+        // `Type(proto)` Object — la cellule symbole est primitive
+        // → `TypeError` (`proto-not-obj`, `undefined` inclus).
+        v @ Value::Obj(pid) => {
+            if matches!(
+                e.heap.obj(pid).map(|o| &o.kind),
+                Some(ObjKind::Symbol { .. })
+            ) {
+                return Err(e.type_error("setPrototypeOf: proto must be an object or null"));
+            }
+            v
+        }
+        Value::Null => Value::Null,
         _ => return Err(e.type_error("setPrototypeOf: proto must be an object or null")),
     };
     let Value::Obj(mut id) = target else {
         return Ok(target); // primitives are ignored, per spec
     };
+    // Cellule symbole = primitive spec — `O` non-objet → `O`.
+    if matches!(
+        e.heap.obj(id).map(|o| &o.kind),
+        Some(ObjKind::Symbol { .. })
+    ) {
+        return Ok(target);
+    }
     // Délégation bornée — chaîne `Proxy(proxy)×N` sans trap
     // récurait ici hors `call_depth` (J2, classe alpine).
     let mut depth = 0;
@@ -511,46 +520,58 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
 }
 
 pub(crate) fn object_values(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let Value::Obj(id) = arg(args, 0) else {
-        return Ok(arr_of(e, Vec::new()));
-    };
-    let keys = e.own_enum_keys_trapped(id)?;
-    let mut vals = Vec::with_capacity(keys.len());
-    for k in keys {
-        // Spec `Object.values` : valeurs des props **string**
-        // énumérables — les clés-symboles sont exclues.
-        if crate::builtins::bigint::is_sentinel_key(&k) {
-            continue;
-        }
-        // Getter-aware read (class accessors are own props).
-        vals.push(e.get_prop_value(Value::Obj(id), &k)?);
-    }
-    Ok(arr_of(e, vals))
+    let id = crate::builtins::to_object_this(e, arg(args, 0))?;
+    let props = e.enum_own_props(id, true)?;
+    Ok(arr_of(e, props.into_iter().map(|(_, v)| v).collect()))
 }
 
 /// `Object.assign(t, …srcs)` — enumerable-own copy, accessor-aware
 /// read and write (setters on the target fire, per spec).
 pub(crate) fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let target = arg(args, 0);
+    if matches!(target, Value::Undefined | Value::Null) {
+        return Err(e.type_error("Object.assign: cannot convert undefined or null to object"));
+    }
+    // Spec : `to = ToObject(target)` rendu — primitive → wrapper
+    // (`Target-String`, `OnlyOneArgument`, `Target-Symbol`).
+    let to = crate::builtins::to_object_this(e, target.clone())?;
     for src in &args[1.min(args.len())..] {
-        if let Value::Obj(sid) = src {
-            // diag sonde (même mur que `{...}` : getters
-            // proto perdus — spec, terrain TanStack).
-            if crate::heap::proto_has_accessor(&e.heap, *sid) {
-                e.diag("Object.assign dropped proto getters");
+        if matches!(src, Value::Undefined | Value::Null) {
+            continue;
+        }
+        // `from = ToObject(src)` — une source string expose ses
+        // index énumérables (`Source-String`).
+        let from = crate::builtins::to_object_this(e, src.clone())?;
+        if crate::heap::proto_has_accessor(&e.heap, from) {
+            e.diag("Object.assign dropped proto getters");
+        }
+        // `[[OwnPropertyKeys]]` — clés symboles énumérables
+        // incluses (clés sentinelles).
+        for k in e.own_keys_trapped(from)? {
+            let en = e.get_own_prop(from, &k)?.is_some_and(|p| p.enumerable());
+            if !en {
+                continue;
             }
-            for k in e.own_enum_keys_trapped(*sid)? {
-                let v = match e.get_prop_value(src.clone(), &k) {
-                    Ok(v) => v,
-                    Err(t) => {
-                        crate::defprop_note(format!(
-                            "assign #{sid} read `{k}` → {}",
-                            defprop_err_summary(e, t.0.clone())
-                        ));
-                        return Err(t);
-                    }
-                };
-                if let Err(t) = e.set_prop_value(target.clone(), &k, v) {
+            let v = match e.get_prop_value(Value::Obj(from), &k) {
+                Ok(v) => v,
+                Err(t) => {
+                    crate::defprop_note(format!(
+                        "assign #{from} read `{k}` → {}",
+                        defprop_err_summary(e, t.0.clone())
+                    ));
+                    return Err(t);
+                }
+            };
+            // `Set(to, k, v, Throw=true)` — refus (cible
+            // non-writable/gelée/non-extensible) → `TypeError`.
+            match e.set_prop_recv(to, Value::Obj(to), &k, v) {
+                Ok(true) => {}
+                Ok(false) => {
+                    let t = e.type_error(format!("assign: cannot set `{k}` on target"));
+                    crate::defprop_note(format!("assign tgt={target:?} set `{k}` → refused"));
+                    return Err(t);
+                }
+                Err(t) => {
                     crate::defprop_note(format!(
                         "assign tgt={target:?} set `{k}` → {}",
                         defprop_err_summary(e, t.0.clone())
@@ -560,7 +581,7 @@ pub(crate) fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
             }
         }
     }
-    Ok(target)
+    Ok(Value::Obj(to))
 }
 
 /// `Object.create(proto[, propsMap])` — proto must be an object or
@@ -768,14 +789,19 @@ fn defprop_err_desc(e: &Engine, id: ObjId, key: &str, t: &crate::heap::Thrown) -
     )
 }
 
-fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsResult<bool> {
+pub(crate) fn define_one_prop_impl(
+    e: &mut Engine,
+    id: ObjId,
+    key: &str,
+    desc_id: ObjId,
+) -> JsResult<bool> {
     // Délégation bornée — même motif que `object_set_proto` (J2).
     let mut id = id;
     let mut depth = 0;
     while let Some((tid, target, handler)) = e.proxy_th(id)? {
         let trap = e.proxy_trap(handler.clone(), "defineProperty")?;
         if matches!(trap, Value::Obj(_)) {
-            let kv = e.str_val(key);
+            let kv = e.prop_trap_key(key);
             let r = e.call_value(trap, handler, &[target, kv, Value::Obj(desc_id)])?;
             return if e.to_boolean(r) {
                 // Invariants spec `[[DefineOwnProperty]]` : nouvelle
@@ -1313,38 +1339,11 @@ pub(crate) fn object_get_own_property_descriptor(
     _t: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let target = arg(args, 0);
+    // Spec : `ToObject(O)` — `null`/`undefined` → `TypeError`,
+    // primitif → wrapper (index/`length` propres des strings via
+    // `StringGetOwnProperty` sur le wrapper).
+    let id = crate::builtins::to_object_this(e, arg(args, 0))?;
     let key = e.prop_key(arg(args, 1))?;
-    // Descripteurs propres de la string primitive (spec
-    // `ToObject` + `StringGetOwnProperty`).
-    if let Value::Str(sid) = target {
-        let n = sid.u16_len();
-        let d = e.new_object();
-        if key == "length" {
-            e.set_own(d, "value", Value::Num(n as f64), true);
-            e.set_own(d, "writable", Value::Bool(false), true);
-            e.set_own(d, "enumerable", Value::Bool(false), true);
-            e.set_own(d, "configurable", Value::Bool(false), true);
-            return Ok(Value::Obj(d));
-        }
-        if let Some(i) = crate::interp::array_index(&key) {
-            if i < n {
-                let cv = match sid.u16_at(i) {
-                    Some(w) => e.str_val_units(vec![w]),
-                    None => e.str_val(""),
-                };
-                e.set_own(d, "value", cv, true);
-                e.set_own(d, "writable", Value::Bool(false), true);
-                e.set_own(d, "enumerable", Value::Bool(true), true);
-                e.set_own(d, "configurable", Value::Bool(false), true);
-                return Ok(Value::Obj(d));
-            }
-        }
-        return Ok(Value::Undefined);
-    }
-    let Value::Obj(id) = target else {
-        return Ok(Value::Undefined);
-    };
     let Some(p) = e.get_own_prop(id, &key)? else {
         return Ok(Value::Undefined);
     };
@@ -1380,38 +1379,21 @@ pub(crate) fn object_get_own_property_descriptors(
     args: &[Value],
 ) -> JsResult<Value> {
     let out = e.new_object();
-    let Value::Obj(id) = arg(args, 0) else {
-        return Ok(Value::Obj(out));
-    };
-    let keys: Vec<String> =
-        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
-            e.own_keys_trapped(id)?
-        } else {
-            match e.heap.obj(id) {
-                Some(o) => {
-                    let mut ks: Vec<String> = o.props.iter().map(|(k, _)| k.to_string()).collect();
-                    if let ObjKind::Array(elems) = &o.kind {
-                        // Éléments *présents* seuls — les trous ne
-                        // sont pas des clés propres (JS-C613 :
-                        // jamais `0..len` sur un backing sparse).
-                        let nk = elems.present().count();
-                        ks.splice(0..0, elems.present().map(|(i, _)| i.to_string()));
-                        ks.insert(nk, "length".into());
-                    }
-                    ks
-                }
-                None => Vec::new(),
-            }
-        };
-    for k in keys {
-        // Clés internes/symboles sentinelles (`\u{f120}…\u{f13f}` —
-        // privés, métadonnées classe, `PRIM`) : jamais exposées
-        // comme descripteurs.
-        if crate::builtins::bigint::is_sentinel_key(&k) {
+    // Spec : `ToObject(O)` — `null`/`undefined` → `TypeError`,
+    // primitif → wrapper (`primitive-strings`, `symbols-included`).
+    let id = crate::builtins::to_object_this(e, arg(args, 0))?;
+    for k in e.own_keys_trapped(id)? {
+        // Clés internes non-symboles (`\u{f120}…`, `\u{f131}…` —
+        // `PRIM`, privés, métadonnées classe) exclues ; les clés
+        // symboles `\u{f130}…` ont leur descripteur (spec :
+        // tout own key, String ou Symbol).
+        if crate::builtins::bigint::is_sentinel_key(&k) && !k.starts_with('\u{f130}') {
             continue;
         }
-        let kv = e.str_val(k.clone());
-        let d = object_get_own_property_descriptor(e, Value::Undefined, &[arg(args, 0), kv])?;
+        let Some(p) = e.get_own_prop(id, &k)? else {
+            continue;
+        };
+        let d = prop_desc_object(e, p);
         e.set_own(out, &k, d, true);
     }
     Ok(Value::Obj(out))
@@ -1423,16 +1405,52 @@ pub(crate) fn object_get_own_property_descriptors(
 pub(crate) fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = arg(args, 0) {
         if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
-            return object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)]);
-        }
-        if let Some(o) = e.heap.obj_mut(id) {
-            // `freeze` sur vue typée non vide → TypeError (spec).
-            if let ObjKind::TypedArray { len, .. } = &o.kind {
-                if *len > 0 {
-                    let err = e.type_error("cannot freeze a typed array");
-                    return Err(err);
+            // `SetIntegrityLevel(O, frozen)` spec : `[[PreventExtensions]]`
+            // puis par clé `[[GetOwnProperty]]` + `DefinePropertyOrThrow`
+            // `{configurable:false[,writable:false]}` — les traps
+            // `ownKeys`/`getOwnPropertyDescriptor`/`defineProperty`
+            // sont observables (`proxy-with-defineProperty-handler`).
+            object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)])?;
+            for k in e.own_keys_trapped(id)? {
+                let Some(d) = e.get_own_prop(id, &k)? else {
+                    continue;
+                };
+                let desc = e.new_object();
+                e.set_own(desc, "configurable", Value::Bool(false), true);
+                if matches!(d, crate::heap::Prop::Data { .. }) {
+                    e.set_own(desc, "writable", Value::Bool(false), true);
+                }
+                if !define_one_prop_impl(e, id, &k, desc)? {
+                    return Err(e.type_error(format!("freeze: cannot define `{k}`")));
                 }
             }
+            return Ok(arg(args, 0));
+        }
+        // `[[PreventExtensions]]` TA (spec 10.4.5.15) : buffer
+        // **non-fixed-length** (resizable) → `false` →
+        // `SetIntegrityLevel` lève `TypeError` même à len 0 ;
+        // buffer fixe + éléments → les index non-config ne
+        // peuvent pas passer `writable:false` → `TypeError`.
+        let ta_freeze_err = match e.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::TypedArray {
+                buffer, len, auto, ..
+            }) => {
+                let rab = match buffer {
+                    Value::Obj(bid) => e
+                        .heap
+                        .obj(*bid)
+                        .is_some_and(|b| matches!(b.get_own("resizable"), Some(Value::Bool(true)))),
+                    _ => false,
+                };
+                rab || *len > 0 || *auto
+            }
+            _ => false,
+        };
+        if ta_freeze_err {
+            let err = e.type_error("cannot freeze a typed array");
+            return Err(err);
+        }
+        if let Some(o) = e.heap.obj_mut(id) {
             o.extensible = false;
             o.elem_integrity |= 6;
             for (_, p) in &mut o.props {
@@ -1450,6 +1468,30 @@ pub(crate) fn object_freeze(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
 }
 
 pub(crate) fn object_is_frozen(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = arg(args, 0) {
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
+            // `TestIntegrityLevel(O, frozen)` spec : `[[IsExtensible]]`
+            // (trap) puis `[[OwnPropertyKeys]]` + `[[GetOwnProperty]]`
+            // par clé — ordre observable `proxy-no-ownkeys-*`.
+            if let Value::Bool(true) = object_is_extensible(e, Value::Undefined, &[arg(args, 0)])? {
+                return Ok(Value::Bool(false));
+            }
+            for k in e.own_keys_trapped(id)? {
+                let Some(d) = e.get_own_prop(id, &k)? else {
+                    continue;
+                };
+                let ok = !d.configurable()
+                    && match &d {
+                        crate::heap::Prop::Data { attrs, .. } => !attrs.writable,
+                        crate::heap::Prop::Acc { .. } => true,
+                    };
+                if !ok {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            return Ok(Value::Bool(true));
+        }
+    }
     Ok(Value::Bool(match arg(args, 0) {
         Value::Obj(id) => e.heap.obj(id).is_some_and(|o| {
             !o.extensible

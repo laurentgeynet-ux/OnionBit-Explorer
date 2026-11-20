@@ -195,6 +195,16 @@ pub(crate) fn install(e: &mut Engine) {
     let ev_err = ctor(e, "EvalError", eval_error_ctor, e.protos.eval_error);
     let rg_err = ctor(e, "RangeError", range_error_ctor, e.protos.range_error);
     let ur_err = ctor(e, "URIError", uri_error_ctor, e.protos.uri_error);
+    // Spec NativeError : `[[Prototype]]` de chaque ctor = `Error`
+    // (`Object.getPrototypeOf(TypeError) === Error` —
+    // `getPrototypeOf/15.2.3.2-2-*`).
+    for c in [&t_err, &r_err, &s_err, &a_err, &ev_err, &rg_err, &ur_err] {
+        if let (Value::Obj(cid), Value::Obj(eid)) = (c, &error) {
+            if let Some(o) = e.heap.obj_mut(*cid) {
+                o.proto = Value::Obj(*eid);
+            }
+        }
+    }
     // Spec NativeError : chaque proto porte `name` (nom du ctor)
     // et `message` ("") en props **propres** `{w:true,e:false,
     // c:true}` — sans elles l'héritage `Error.prototype` rend
@@ -1752,6 +1762,19 @@ fn this_num(e: &mut Engine, this: Value) -> JsResult<f64> {
 /// → wrapper du bon proto, `null`/`undefined` → `TypeError`.
 pub(crate) fn to_object_this(e: &mut Engine, this: Value) -> JsResult<ObjId> {
     match this {
+        // Cellule symbole = primitive spec : `ToObject` produit un
+        // wrapper frais `%Symbol.prototype%`, pas la cellule.
+        Value::Obj(id)
+            if matches!(
+                e.heap.obj(id).map(|o| &o.kind),
+                Some(ObjKind::Symbol { .. })
+            ) =>
+        {
+            match e.box_primitive(this.clone()) {
+                Value::Obj(wid) => Ok(wid),
+                _ => Ok(id),
+            }
+        }
         Value::Obj(id) => Ok(id),
         Value::Undefined | Value::Null => Err(e.type_error("method called on null or undefined")),
         v => match e.box_primitive(v) {

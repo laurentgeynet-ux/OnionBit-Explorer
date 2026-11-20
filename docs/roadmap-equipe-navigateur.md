@@ -16387,6 +16387,39 @@ chaque gain rapporté contre les **deux** archétypes.
   sur array-likes (`integer-limit`, `length-near`, `in-decreased`),
   `resizable-buffer`, `fromAsync`, cross-realm symbol proto
   (`get-value-prop-base-primitive-realm` — résiduel C627).
+- [x] **JS-C646 — résiduel `Object` : `EnumerableOwnProperties`
+  spec (`keys`/`values`/`entries`/`getOwnPropertyDescriptors`
+  — `ToObject` + props énumérables propres incluant index de
+  wrapper string + symboles), `Object.assign` spec (`ToObject`
+  cible, `[[Set]] Throw` → `TypeError` sur refus), `fromEntries`
+  `AddEntriesFromIterable` (`IteratorStep`/`IteratorValue`
+  propagés **sans** `IteratorClose` ; le corps ferme via
+  `IfAbruptCloseIterator` — entry primitive → `TypeError`,
+  `CreateDataPropertyOrThrow`), `ToObject` sur args
+  (`names`/`symbols`/`descriptor(s)`/`hasOwn` → `TypeError`),
+  `ownKeys` ordre strings→symboles + `length`, `Object(sym)`
+  → wrapper `[[SymbolData]]` frais, `[[Prototype]]` NativeError
+  → `Error`, `setPrototypeOf` `TypeError`s — sous-ensemble
+  `built-ins/Object` complet : 6 663 → **6 802/6 802
+  passes-mode sur 3 411 fichiers, 0 échec** (`builtins/{
+  mod,object,bigint,extras,ctors}.rs`, `interp/mod.rs`,
+  gate `tests/c646_object_residual.rs` **7/7**).
+  **`thisSymbolValue`** (`sym_prim`) : cellule symbole →
+  elle-même, wrapper `PRIM` → la cellule portée —
+  `Symbol.prototype.{toString,valueOf,description}` servent
+  `Object(sym)` spec (`valueOf` rend la **primitive**, plus
+  le wrapper). **`ToObject` cellule symbole** : `to_object_this`
+  boxe sur `%Symbol.prototype%` (`assign(Symbol())` → wrapper
+  object). **`[[Set]]` wrapper String** : index dans les
+  bornes = prop exotique non-writable → refus remonté
+  (`Object.assign('a',[1])` → `TypeError`, plus de prop ombre).
+  **`freeze`/`seal` TA** : buffer non-fixed-length (resizable)
+  → `[[PreventExtensions]]` `false` → `TypeError` même à len 0
+  (spec 10.4.5.15 — `typedarray-backed-by-resizable-buffer`).
+  **`fromEntries` ordre spec** : `next` non-callable/résultat
+  non-objet → `TypeError` nu sans `return` hostile
+  (`iterator-not-closed-for-uncallable-next`). Gates
+  c644 9/9 + c645 8/8 + lib 54/54 verts, clippy 0 warning.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,

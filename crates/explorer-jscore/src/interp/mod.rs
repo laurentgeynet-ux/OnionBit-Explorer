@@ -5073,6 +5073,17 @@ impl Engine {
             Value::Num(_) => self.protos.number,
             Value::Bool(_) => self.protos.boolean,
             Value::Big(_) => self.protos.bigint,
+            // Cellule symbole = primitive spec : `ToObject` la
+            // boxe sur `%Symbol.prototype%` (`Object(sym)` rend
+            // un wrapper frais, pas la cellule).
+            Value::Obj(id)
+                if matches!(
+                    self.heap.obj(id).map(|o| &o.kind),
+                    Some(ObjKind::Symbol { .. })
+                ) =>
+            {
+                self.protos.symbol
+            }
             _ => self.protos.object,
         };
         let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));
@@ -11473,6 +11484,20 @@ impl Engine {
                 return Ok(true);
             }
         }
+        // Wrapper `String` : index dans les bornes = prop
+        // exotique own non-writable/non-configurable (spec
+        // `StringGetOwnProperty` → `OrdinarySet` refuse) —
+        // `false` remonte au `TypeError` Throw de `assign`/
+        // `Reflect.set`, jamais de prop ombre dans `props`.
+        if let Some(i) = ai {
+            let str_idx = self.heap.obj(id).is_some_and(|o| {
+                matches!(o.get_own(crate::builtins::ctors::PRIM), Some(Value::Str(sid))
+                    if i < sid.u16_len())
+            });
+            if str_idx {
+                return Ok(false);
+            }
+        }
         // `ArraySetLength` : `length` passe `ToNumber` puis
         // `ToUint32` — divergence → RangeError (2**32, négatif,
         // fraction, NaN). Avant `obj_mut` : `to_number` peut
@@ -11912,6 +11937,11 @@ impl Engine {
                     for (i, _) in elems.present() {
                         out.push(i.to_string());
                     }
+                    // `length` est une propre prop spec
+                    // `[[OwnPropertyKeys]]` (ordre de création :
+                    // après les indices, avant les props user —
+                    // `getOwnPropertyNames/order-after-define`).
+                    out.push("length".to_string());
                 }
                 ObjKind::TypedArray {
                     ta,
@@ -12002,7 +12032,7 @@ impl Engine {
     /// symbole casse tout `prop === Symbol.x` dans les traps —
     /// mesuré mastodon : immer `x[DRAFT_STATE]` → `isDraft` faux →
     /// `freeze(draft)` → cible non-extensible → `ownKeys` `TypeError`.
-    fn prop_trap_key(&mut self, key: &str) -> Value {
+    pub(crate) fn prop_trap_key(&mut self, key: &str) -> Value {
         if key.starts_with('\u{f130}') {
             if let Some(id) = self.sym_index.get(key) {
                 return Value::Obj(*id);
@@ -12024,12 +12054,36 @@ impl Engine {
                 let Value::Obj(arr) = r else {
                     return Err(self.type_error("proxy ownKeys trap must return an array"));
                 };
-                let elems = match self.heap.obj(arr).map(|o| &o.kind) {
-                    Some(ObjKind::Array(e)) => e.to_vec(),
-                    _ => Vec::new(),
+                // `CreateListFromArrayLike(trapResult, « String,
+                // Symbol »)` — `length` puis chaque index lus par
+                // `Get` (accesseurs observables — `keys/proxy-keys`),
+                // tout élément qui n'est ni String ni Symbol →
+                // `TypeError`.
+                let n = {
+                    let lv = self.get_prop_value(Value::Obj(arr), "length")?;
+                    let f = self.to_number(lv)?;
+                    if !f.is_finite() || f <= 0.0 {
+                        0usize
+                    } else {
+                        (f as usize).min(9_007_199_254_740_991usize)
+                    }
                 };
                 let mut out = Vec::new();
-                for v in elems {
+                for i in 0..n {
+                    let v = self.get_prop_value(Value::Obj(arr), &i.to_string())?;
+                    let typed = match &v {
+                        Value::Str(_) => true,
+                        Value::Obj(sid) => matches!(
+                            self.heap.obj(*sid).map(|o| &o.kind),
+                            Some(ObjKind::Symbol { .. })
+                        ),
+                        _ => false,
+                    };
+                    if !typed {
+                        return Err(self.type_error(
+                            "proxy ownKeys trap result must contain only strings and symbols",
+                        ));
+                    }
                     let k = self.prop_key(v)?;
                     if out.contains(&k) {
                         return Err(self.type_error("proxy ownKeys trap returned duplicate key"));
@@ -12183,6 +12237,39 @@ impl Engine {
             if self.get_own_prop(id, &k)?.is_some_and(|p| p.enumerable()) {
                 out.push(k);
             }
+        }
+        Ok(out)
+    }
+
+    /// `EnumerableOwnProperties(O, kind)` — snapshot
+    /// `[[OwnPropertyKeys]]` puis, **par clé string** et dans
+    /// l'ordre, `[[GetOwnProperty]]` (saut si non énumérable ou
+    /// retirée par un getter précédent) puis `[[Get]]` quand
+    /// `read_val` (kinds `value`/`entry`) — ordre observable
+    /// entrelacé spec (`values/entries/observable-operations`,
+    /// `getter-removing-future-key`). Les clés symboles ne sont
+    //  jamais `String` — exclues.
+    pub(crate) fn enum_own_props(
+        &mut self,
+        id: ObjId,
+        read_val: bool,
+    ) -> JsResult<Vec<(String, Value)>> {
+        let keys = self.own_keys_trapped(id)?;
+        let mut out = Vec::new();
+        for k in keys {
+            if crate::builtins::bigint::is_sentinel_key(&k) {
+                continue;
+            }
+            let en = self.get_own_prop(id, &k)?.is_some_and(|p| p.enumerable());
+            if !en {
+                continue;
+            }
+            let v = if read_val {
+                self.get_prop_value(Value::Obj(id), &k)?
+            } else {
+                Value::Undefined
+            };
+            out.push((k, v));
         }
         Ok(out)
     }

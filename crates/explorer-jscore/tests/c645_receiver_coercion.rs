@@ -35,7 +35,10 @@ fn c645_mutateurs_rendent_o() {
         eval("Array.prototype.fill.call('x',1) instanceof String"),
         "true"
     );
-    assert_eq!(eval("Array.prototype.sort.call('ba') instanceof String"), "true");
+    assert_eq!(
+        eval("Array.prototype.sort.call('ba') instanceof String"),
+        "true"
+    );
     assert_eq!(
         eval("Array.prototype.reverse.call('ab') instanceof String"),
         "true"
@@ -49,7 +52,10 @@ fn c645_mutateurs_rendent_o() {
 #[test]
 fn c645_is_prototype_of_ordre_et_proxy() {
     // V non-objet → false AVANT ToObject(this) ; Symbol = primitive.
-    assert_eq!(eval("Object.prototype.isPrototypeOf.call(null, 5)"), "false");
+    assert_eq!(
+        eval("Object.prototype.isPrototypeOf.call(null, 5)"),
+        "false"
+    );
     assert_eq!(
         eval("Object.prototype.isPrototypeOf.call(undefined, Symbol())"),
         "false"
@@ -124,10 +130,19 @@ fn c645_array_to_string_fallback() {
 fn c645_to_string_tags() {
     // builtinTag spec : primitifs brandés, BigInt tag non-string → "Object",
     // @@toStringTag custom string prioritaire.
-    assert_eq!(eval("Object.prototype.toString.call(true)"), "[object Boolean]");
+    assert_eq!(
+        eval("Object.prototype.toString.call(true)"),
+        "[object Boolean]"
+    );
     assert_eq!(eval("Object.prototype.toString.call(5)"), "[object Number]");
-    assert_eq!(eval("Object.prototype.toString.call('x')"), "[object String]");
-    assert_eq!(eval("Object.prototype.toString.call(Symbol())"), "[object Symbol]");
+    assert_eq!(
+        eval("Object.prototype.toString.call('x')"),
+        "[object String]"
+    );
+    assert_eq!(
+        eval("Object.prototype.toString.call(Symbol())"),
+        "[object Symbol]"
+    );
     assert_eq!(
         eval("Object.prototype.toString.call(Object(1n))"),
         "[object BigInt]"
@@ -143,9 +158,7 @@ fn c645_to_string_tags() {
     );
     // @@toStringTag custom sur instances brandées → prioritaire.
     assert_eq!(
-        eval(
-            "var s=new String(); s[Symbol.toStringTag]='t'; Object.prototype.toString.call(s)"
-        ),
+        eval("var s=new String(); s[Symbol.toStringTag]='t'; Object.prototype.toString.call(s)"),
         "[object t]"
     );
     assert_eq!(

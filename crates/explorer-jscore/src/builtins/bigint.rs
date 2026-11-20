@@ -151,8 +151,32 @@ pub(crate) fn symbol_key_for(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     Ok(hit.map_or(Value::Undefined, |k| e.str_val(k)))
 }
 
-pub(crate) fn sym_desc(e: &Engine, this: Value) -> Option<String> {
+/// `thisSymbolValue` spec : cellule symbole → elle-même ; objet
+/// avec `[[SymbolData]]` (slot interne `PRIM` — `Object(sym)`,
+/// `new`-via-subclass) → la cellule portée. Sinon `None`.
+pub(crate) fn sym_prim(e: &Engine, this: &Value) -> Option<Value> {
     let Value::Obj(id) = this else { return None };
+    let o = e.heap.obj(*id)?;
+    if matches!(o.kind, ObjKind::Symbol { .. }) {
+        return Some(this.clone());
+    }
+    // Wrapper : `PRIM` own non-énumérable posé par `wrap_or_prim`.
+    match o.get_own(crate::builtins::ctors::PRIM) {
+        Some(p @ Value::Obj(pid))
+            if matches!(
+                e.heap.obj(pid).map(|w| &w.kind),
+                Some(ObjKind::Symbol { .. })
+            ) =>
+        {
+            Some(p)
+        }
+        _ => None,
+    }
+}
+
+pub(crate) fn sym_desc(e: &Engine, this: Value) -> Option<String> {
+    let prim = sym_prim(e, &this)?;
+    let Value::Obj(id) = prim else { return None };
     match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::Symbol { desc, .. }) => Some(desc.clone().unwrap_or_default()),
         _ => None,
@@ -170,10 +194,7 @@ pub(crate) fn symbol_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
 }
 
 pub(crate) fn symbol_value_of(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    if sym_desc(e, this.clone()).is_none() {
-        return Err(e.type_error("Symbol.prototype.valueOf on non-symbol"));
-    }
-    Ok(this)
+    sym_prim(e, &this).ok_or_else(|| e.type_error("Symbol.prototype.valueOf on non-symbol"))
 }
 
 /// `Symbol.prototype.description` getter.
@@ -1482,18 +1503,10 @@ pub(crate) fn object_get_own_property_names(
     _t: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let keys = match arg(args, 0) {
-        Value::Obj(id) => e.own_keys_trapped(id)?,
-        // String-box : indices + `length` (spec `ToObject`).
-        Value::Str(sid) => {
-            let n = sid.u16_len();
-            (0..n)
-                .map(|i| i.to_string())
-                .chain(["length".to_string()])
-                .collect()
-        }
-        _ => Vec::new(),
-    };
+    // Spec : `ToObject(O)` — `null`/`undefined` → `TypeError`,
+    // string → wrapper (index + `length` propres).
+    let oid = crate::builtins::to_object_this(e, arg(args, 0))?;
+    let keys = e.own_keys_trapped(oid)?;
     // Spec : `getOwnPropertyNames` ne rend que les clés string —
     // les clés-symboles sentinelles `\u{f130}…` et les internes
     // `\u{f131}…` (noms privés, métadonnées de classe) sont exclues.
@@ -1523,10 +1536,9 @@ pub(crate) fn object_get_own_property_symbols(
     _t: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let keys = match arg(args, 0) {
-        Value::Obj(id) => e.own_keys_trapped(id)?,
-        _ => Vec::new(),
-    };
+    // Spec : `ToObject(O)` — `null`/`undefined` → `TypeError`.
+    let oid = crate::builtins::to_object_this(e, arg(args, 0))?;
+    let keys = e.own_keys_trapped(oid)?;
     let mut vals = Vec::new();
     for k in &keys {
         // Toute clé sentinelle `\u{f130}…` — `Symbol.<name>` des
@@ -1608,24 +1620,47 @@ pub(crate) fn object_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) ->
     Ok(Value::Bool(false))
 }
 
-/// `Object.seal` — non-extensible + toutes props non-configurables.
-/// Sur un proxy : la trap `preventExtensions` si présente, sinon la
-/// cible (approximation — la spec définit chaque prop via la trap
-/// `defineProperty`, surface jugée trop lourde ici).
 pub(crate) fn object_seal(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = arg(args, 0) {
         if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
-            return object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)]);
-        }
-        if let Some(o) = e.heap.obj_mut(id) {
-            // `seal` sur vue typée non vide → TypeError (spec —
-            // les éléments restent configurable:true).
-            if let ObjKind::TypedArray { len, .. } = &o.kind {
-                if *len > 0 {
-                    let err = e.type_error("cannot seal a typed array");
-                    return Err(err);
+            // `SetIntegrityLevel(O, sealed)` spec : `[[PreventExtensions]]`
+            // puis `DefinePropertyOrThrow({configurable:false})` par
+            // clé — traps observables.
+            object_prevent_extensions(e, Value::Undefined, &[arg(args, 0)])?;
+            for k in e.own_keys_trapped(id)? {
+                if e.get_own_prop(id, &k)?.is_none() {
+                    continue;
+                }
+                let desc = e.new_object();
+                e.set_own(desc, "configurable", Value::Bool(false), true);
+                if !crate::builtins::object::define_one_prop_impl(e, id, &k, desc)? {
+                    return Err(e.type_error(format!("seal: cannot define `{k}`")));
                 }
             }
+            return Ok(arg(args, 0));
+        }
+        // `SetIntegrityLevel` : `[[PreventExtensions]]` TA refuse
+        // sur buffer non-fixed-length (resizable → `false` →
+        // `TypeError` même à len 0) ; buffer fixe + éléments →
+        // les index ne passent pas `writable:false`/`configurable`
+        // → `TypeError` (spec 10.4.5.4/10.4.5.15).
+        let ta_err = match e.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::TypedArray { buffer, len, .. }) => {
+                *len > 0
+                    || match buffer {
+                        Value::Obj(bid) => e.heap.obj(*bid).is_some_and(|b| {
+                            matches!(b.get_own("resizable"), Some(Value::Bool(true)))
+                        }),
+                        _ => false,
+                    }
+            }
+            _ => false,
+        };
+        if ta_err {
+            let err = e.type_error("cannot seal a typed array");
+            return Err(err);
+        }
+        if let Some(o) = e.heap.obj_mut(id) {
             o.extensible = false;
             o.elem_integrity |= 1;
             for (_, p) in &mut o.props {
@@ -1642,6 +1677,23 @@ pub(crate) fn object_seal(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
 }
 
 pub(crate) fn object_is_sealed(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = arg(args, 0) {
+        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) {
+            // `TestIntegrityLevel(O, sealed)` spec : traps
+            // `isExtensible`/`ownKeys`/`getOwnPropertyDescriptor`.
+            if let Value::Bool(true) = object_is_extensible(e, Value::Undefined, &[arg(args, 0)])? {
+                return Ok(Value::Bool(false));
+            }
+            for k in e.own_keys_trapped(id)? {
+                if let Some(d) = e.get_own_prop(id, &k)? {
+                    if d.configurable() {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+            }
+            return Ok(Value::Bool(true));
+        }
+    }
     Ok(Value::Bool(match arg(args, 0) {
         Value::Obj(id) => e.heap.obj(id).is_some_and(|o| {
             !o.extensible

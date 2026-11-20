@@ -53,19 +53,10 @@ pub(crate) fn has_own(e: &Engine, id: ObjId, key: &str) -> bool {
 
 /// `Object.entries(o)` → `[[k, v], …]` (own enumerable).
 pub(crate) fn object_entries(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let Value::Obj(id) = arg(args, 0) else {
-        return Ok(e.new_array(Vec::new()));
-    };
-    let keys = e.own_enum_keys_trapped(id)?;
-    let mut out = Vec::with_capacity(keys.len());
-    for k in keys {
-        // Spec `Object.entries` : paires des props **string**
-        // énumérables — les clés-symboles sont exclues.
-        if crate::builtins::bigint::is_sentinel_key(&k) {
-            continue;
-        }
-        // Lecture `[[Get]]` (getters et traps proxy déclenchés).
-        let v = e.get_prop_value(Value::Obj(id), &k)?;
+    let id = crate::builtins::to_object_this(e, arg(args, 0))?;
+    let props = e.enum_own_props(id, true)?;
+    let mut out = Vec::with_capacity(props.len());
+    for (k, v) in props {
         let ks = e.str_val(k);
         let kv = e.new_array(vec![ks, v]);
         out.push(kv);
@@ -73,38 +64,128 @@ pub(crate) fn object_entries(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     Ok(e.new_array(out))
 }
 
-/// `Object.fromEntries(iterable)` — `[k, v]` pairs → object.
+/// `IteratorClose(it, completion)` — `it.return()` si callable ;
+/// erreurs de la fermeture remplacées par la complétion entrante
+/// (les appelants l'invoquent avant de rendre leur `Err` — la
+/// complétion throw prime, spec §7.4.6).
+fn iter_close(e: &mut Engine, it: &Value) -> JsResult<()> {
+    let rf = e.get_prop_value(it.clone(), "return")?;
+    if matches!(rf, Value::Undefined | Value::Null) {
+        return Ok(());
+    }
+    if !e.is_callable(rf.clone()) {
+        return Err(e.type_error("iterator return is not callable"));
+    }
+    if !matches!(e.call_value(rf, it.clone(), &[])?, Value::Obj(_)) {
+        return Err(e.type_error("iterator result is not an object"));
+    }
+    Ok(())
+}
+
+/// `Object.fromEntries(iterable)` — spec `AddEntriesFromIterable` :
+/// chaque entry est un **objet** lu par `Get(0)`/`Get(1)` (pas
+/// son itérateur), défini par `CreateDataPropertyOrThrow`, et
+/// toute complétion abrupte ferme l'itérateur.
 pub(crate) fn object_from_entries(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let it_v = arg(args, 0);
+    // `RequireObjectCoercible` — `fromEntries()`/`null` → `TypeError`.
+    if matches!(it_v, Value::Undefined | Value::Null) {
+        return Err(e.type_error("Object.fromEntries requires an iterable"));
+    }
     let obj = e.new_object();
-    let pairs = match arg(args, 0) {
-        Value::Obj(id) => e.iter_values(Value::Obj(id))?,
-        _ => Vec::new(),
-    };
-    for p in pairs {
-        let pair = match p {
-            Value::Obj(id) => e.iter_values(Value::Obj(id))?,
-            _ => Vec::new(),
+    let m = e.get_prop_value(it_v.clone(), crate::interp::SYM_ITERATOR)?;
+    if !e.is_callable(m.clone()) {
+        return Err(e.type_error("object is not iterable"));
+    }
+    let it = e.call_value(m, it_v, &[])?;
+    if !matches!(it, Value::Obj(_)) {
+        return Err(e.type_error("iterator is not an object"));
+    }
+    loop {
+        // `IteratorStep` — `next` lu par `Get`, résultat objet,
+        // `done`/`value` par `Get` (accesseurs observables).
+        // Spec `IteratorStep`/`IteratorNext` : `next` non-callable,
+        // erreur d'appel ou résultat non-objet → complétion abrupte
+        // propagée **sans** `IteratorClose` (`?` nu — l'itérateur
+        // n'est refermé que sur les abrupts du corps, via
+        // `IfAbruptCloseIterator` ; `iterator-not-closed-*`).
+        let nf = match e.get_prop_value(it.clone(), "next") {
+            Ok(nf) if e.is_callable(nf.clone()) => nf,
+            Ok(_) => {
+                return Err(e.type_error("iterator next is not callable"));
+            }
+            Err(t) => return Err(t),
         };
-        if pair.len() >= 2 {
-            let k = e.prop_key(pair[0].clone())?;
-            e.set_prop_value(Value::Obj(obj), &k, pair[1].clone())?;
+        let r = e.call_value(nf, it.clone(), &[])?;
+        let Value::Obj(rid) = r else {
+            return Err(e.type_error("iterator result is not an object"));
+        };
+        let rid = Value::Obj(rid);
+        let done = e.get_prop_value(rid.clone(), "done")?;
+        if e.to_boolean(done) {
+            break;
+        }
+        let entry = e.get_prop_value(rid, "value")?;
+        // `Type(entry) is not Object` → `IteratorClose` + `TypeError`
+        // (cellule symbole = primitive — `string-entry`/`null-entry`).
+        let Value::Obj(eid) = entry else {
+            let _ = iter_close(e, &it);
+            return Err(e.type_error("fromEntries: entry is not an object"));
+        };
+        if matches!(
+            e.heap.obj(eid).map(|o| &o.kind),
+            Some(ObjKind::Symbol { .. })
+        ) {
+            let _ = iter_close(e, &it);
+            return Err(e.type_error("fromEntries: entry is not an object"));
+        }
+        // `Get(entry,"0")`/`Get(entry,"1")` sous
+        // `IfAbruptCloseIterator` — `uses-keys-not-iterator`.
+        let k = match e.get_prop_value(entry.clone(), "0") {
+            Ok(k) => k,
+            Err(t) => {
+                let _ = iter_close(e, &it);
+                return Err(t);
+            }
+        };
+        let v = match e.get_prop_value(entry.clone(), "1") {
+            Ok(v) => v,
+            Err(t) => {
+                let _ = iter_close(e, &it);
+                return Err(t);
+            }
+        };
+        let key = match e.prop_key(k) {
+            Ok(key) => key,
+            Err(t) => {
+                let _ = iter_close(e, &it);
+                return Err(t);
+            }
+        };
+        // `CreateDataPropertyOrThrow` — les setters de la chaîne
+        // `Object.prototype` ne tirent pas (`uses-define-semantics`).
+        match e.create_data_prop_spec_on(obj, &key, v) {
+            Ok(true) => {}
+            Ok(false) => {
+                let _ = iter_close(e, &it);
+                return Err(e.type_error("fromEntries: cannot define entry key"));
+            }
+            Err(t) => {
+                let _ = iter_close(e, &it);
+                return Err(t);
+            }
         }
     }
     Ok(Value::Obj(obj))
 }
 
-/// `Object.hasOwn(o, k)` — own prop, no proto walk.
+/// `Object.hasOwn(o, k)` — own prop, no proto walk. Spec :
+/// `ToObject(O)` **avant** `ToPropertyKey(P)` — `null`/`undefined`
+/// → `TypeError`, primitif → wrapper (`toobject_*`).
 pub(crate) fn object_has_own(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let id = crate::builtins::to_object_this(e, arg(args, 0))?;
     let key = e.prop_key(arg(args, 1))?;
-    Ok(Value::Bool(match arg(args, 0) {
-        Value::Obj(id)
-            if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) =>
-        {
-            e.get_own_prop(id, &key)?.is_some()
-        }
-        Value::Obj(id) => has_own(e, id, &key),
-        _ => false,
-    }))
+    Ok(Value::Bool(e.get_own_prop(id, &key)?.is_some()))
 }
 
 // -- Array: index helpers --------------------------------------------
