@@ -84,6 +84,11 @@ pub(crate) struct MiscState {
     /// `KeyframeEffect.prototype` paresseux + singleton
     /// `document.timeline` (JS-C461 — WAAPI constructible).
     pub(crate) kfe_proto: Option<ObjId>,
+    /// `DOMStringMap.prototype` adopté à l'install
+    /// (§B-209) — les objets `el.dataset` (host live
+    /// `data-*`) le chaînent : `dataset instanceof
+    /// DOMStringMap` réel (whatsapp `_btldrLoadedSrcs`).
+    pub(crate) dsm_proto: Option<ObjId>,
     doc_timeline: Option<ObjId>,
     anims: Vec<Rc<RefCell<AnimData>>>,
     /// `ViewTransition.prototype` paresseux (CAP-187).
@@ -118,6 +123,7 @@ impl MiscState {
             self.css_anim_proto,
             self.css_trans_proto,
             self.kfe_proto,
+            self.dsm_proto,
             self.doc_timeline,
             self.vt_proto,
             self.xr_proto,

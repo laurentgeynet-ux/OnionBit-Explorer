@@ -5510,6 +5510,12 @@ impl Engine {
             "ProcessingInstruction",
             "DocumentType",
             "DOMTokenList",
+            // §B-209 — interface globale de `el.dataset`
+            // (whatsapp : `e.dataset instanceof window.
+            // DOMStringMap` jetait `instanceof requires an
+            // object` — ctor absent). Proto adopté par les
+            // wrappers `DatasetHost` (`misc.dsm_proto`).
+            "DOMStringMap",
             "NodeList",
             "HTMLCollection",
             "NamedNodeMap",
@@ -5555,6 +5561,7 @@ impl Engine {
                 match name {
                     "Animation" => self.misc.anim_proto = Some(p),
                     "KeyframeEffect" => self.misc.kfe_proto = Some(p),
+                    "DOMStringMap" => self.misc.dsm_proto = Some(p),
                     _ => {}
                 }
                 // Chaîne d'héritage des protos DOM (J5) —
@@ -13002,10 +13009,22 @@ impl Host for NodeHost {
             // `dataset` — live host view over `data-*` attrs
             // (`el.dataset.fooBar` ≙ `data-foo-bar`).
             "dataset" => {
-                return Ok(Some(e.new_host_object(Rc::new(DatasetHost {
+                let v = e.new_host_object(Rc::new(DatasetHost {
                     dom: self.dom.clone(),
                     node,
-                }))));
+                }));
+                // §B-209 — chaîne `DOMStringMap.prototype`
+                // (WebIDL) : `el.dataset instanceof
+                // DOMStringMap` réel — l'observateur
+                // `_btldrLoadedSrcs` de whatsapp s'en sert.
+                if let Value::Obj(id) = v {
+                    if let Some(p) = e.misc.dsm_proto {
+                        if let Some(o) = e.heap.obj_mut(id) {
+                            o.set_proto(Value::Obj(p));
+                        }
+                    }
+                }
+                return Ok(Some(v));
             }
             // `shadowRoot.host` (CAP-191 tranche 1) — l'hôte
             // de la racine ; absent (`undefined` fallthrough)

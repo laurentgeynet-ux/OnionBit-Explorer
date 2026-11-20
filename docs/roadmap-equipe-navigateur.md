@@ -8311,6 +8311,22 @@ MCP = adaptateur, jamais la base.
   `csp_script_src_nonce_allows_data_url_script`. Release :
   verbatim `__d` 0 — anomalie suivante révélée
   (`DOMStringMap` absent, §B-209).
+- [x] **Étape 330. §B-209 soldée : `window.DOMStringMap`
+  installé + `dataset` chaîne `DOMStringMap.prototype` —
+  verbatim whatsapp `instanceof requires an object`**
+  (`explorer-jscore` `dom_host.rs` + `misc_apis.rs`).
+  L'observateur `_btldrLoadedSrcs` teste `e.dataset
+  instanceof window.DOMStringMap` pour extraire les
+  marqueurs `data-bootloader-hash` ; le RHS était
+  `undefined` → `TypeError` → mort de l'observateur.
+  `DOMStringMap` rejoint la liste des interfaces globales
+  (`install_dom`, bouchon `illegal constructor` spec) ;
+  `misc.dsm_proto` adopte `DOMStringMap.prototype` à
+  l'install (motif `anim_proto`/`kfe_proto`) et les
+  host objects `DatasetHost` le chaînent — `instanceof`
+  réel, vue live `data-*` inchangée. Verrou :
+  `b209_domstringmap` 2/2 (ctor, verbatim `? :`,
+  get/set/delete camelCase↔kebab).
 - [x] **Étape 327. §B-204 soldée : `TextDecoder`
   `utf-16le`/`utf-16be` implémentés — verbatim diagrams.net
   (Emscripten `UTF16ToString`)** (`explorer-jscore`
