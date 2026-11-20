@@ -6954,3 +6954,55 @@ fn persist_throttle_borne_et_vidange() {
     std::thread::sleep(std::time::Duration::from_millis(50));
     assert!(t.ready("cookies"), "fenêtre échue → réécriture");
 }
+
+/// §B-192 — un apply de resynchro miroir doit conserver le
+/// mode **standards** du document source : la sérialisation
+/// jscore ré-émet `<!doctype html>` ; sans lui le re-parse
+/// basculait en quirks et les `height:%` traversaient les
+/// ancêtres `auto` (vol898 webmd : `li`/`a` uniformément
+/// −9 px — 35,55 vs 44,7).
+#[test]
+fn b192_sync_miroir_conserve_le_mode_standards() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><p id=\"x\">avant</p></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/").unwrap());
+        e.js = eng;
+    }
+    // Mutation miroir → dirty → sync cléé → apply : le DOM
+    // commis doit garder NoQuirks (le doctype ré-émis fait
+    // la décision, pas l'héritage).
+    let k = {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let eng = e.js.as_mut().unwrap();
+        let _ = eng.eval("document.body.appendChild(document.createElement('div'))");
+        eng.sync_dom_keyed()
+    };
+    let Some(k) = k else {
+        panic!("sync_dom_keyed attendue après mutation");
+    };
+    assert!(
+        k.html.starts_with("<!doctype html>"),
+        "la sérialisation miroir ré-émet le doctype : {}",
+        &k.html[..40.min(k.html.len())]
+    );
+    s.apply_dom_sync(tab, &k.html, None, true, Some(k.ids), Some(k.tags));
+    let mode = s
+        .tabs
+        .get(&tab)
+        .and_then(|e| e.dom.as_ref())
+        .map(explorer_dom::Dom::document_mode);
+    assert_eq!(
+        mode,
+        Some(explorer_dom::DocumentMode::NoQuirks),
+        "le DOM commis reste standards après resynchro miroir"
+    );
+}

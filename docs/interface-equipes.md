@@ -4345,3 +4345,24 @@ contrôle posable).
   workspace. Retouche mécanique d'une ligne, aucune
   sémantique changée ; également `tests/geometry.rs`
   (fn déplacé avant statements — même commit).
+
+## 2026-11-20 — Fix NAV §B-192 (quirks fantôme) par PIPELINE
+
+- **`explorer-jscore`** (`dom.rs`) : les sérialisations
+  miroir (`serialize_document`/`serialize_keyed`) ré-émettent
+  désormais `<!doctype html>` quand le parse en a vu un
+  (`had_doctype`). Sans lui, chaque re-parse de resynchro
+  (`apply_payload`, explorer-core) basculait en mode quirks
+  — règle « `height:%` traversant les ancêtres `auto` »
+  active partout → anomalie webmd `dh=-9` uniforme ×107
+  (liens `height:100%` écrasés au `cb_h` de l'absolu parent,
+  35,55 vs 44,7 ref). La fiction est cohérente avec
+  `document.compatMode` = `CSS1Compat` constant déjà servi
+  par `dom_host`. Mesure site réel : `li`/`a` = ref Chrome
+  au dixième. Conséquence : le mode document des pages à
+  doctype est désormais **standards en continu** (avant :
+  quirks dès la 1ʳᵉ resynchro miroir) — les geodiffs
+  archivés ont été capturés sous quirks, divergence attendue.
+- Test session ajouté côté **`explorer-core`**
+  (`b192_sync_miroir_conserve_le_mode_standards`) — verrou
+  e2e du contrat miroir→apply, aucun changement d'API.

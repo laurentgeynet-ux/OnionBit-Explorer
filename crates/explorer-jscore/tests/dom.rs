@@ -7885,9 +7885,10 @@ fn c291_marqueur_enfants_illegaux_sous_head() {
     d.append(ic, svg);
     d.append(head, ic);
     let (h, _ids, tags) = d.serialize_keyed();
+    // §B-192 — le doctype vu au parse est ré-émis en tête.
     assert_eq!(
         h,
-        "<html><head><title>t</title><template data-obreloc><iron-iconset-svg><svg></svg></iron-iconset-svg></template></head><body><script>1</script></body></html>",
+        "<!doctype html><html><head><title>t</title><template data-obreloc><iron-iconset-svg><svg></svg></iron-iconset-svg></template></head><body><script>1</script></body></html>",
         "{h}"
     );
     // Les clés voyagent normalement, sans entrée pour le marqueur.
@@ -8480,5 +8481,31 @@ fn li_dans_ul_imbrique_ne_ferme_pas_li_ancetre() {
              document.querySelector('ol').children.length"
         ),
         "1"
+    );
+}
+
+/// §B-192 — les sérialisations miroir ré-émettent
+/// `<!doctype html>` quand le parse en a vu un : sans lui le
+/// re-parse session basculerait en mode quirks (absence de
+/// doctype = quirks, spec HTML) et les `height:%`
+/// traverseraient les ancêtres `auto` — uniforme −9 px sur
+/// les `li`/`a` de la nav webmd (vol898).
+#[test]
+fn b192_serialize_reemet_le_doctype() {
+    let d = Dom::from_html("<!doctype html><html><body><p>x</p></body></html>");
+    assert!(
+        d.serialize_document().starts_with("<!doctype html>"),
+        "serialize_document : {}",
+        &d.serialize_document()[..40.min(d.serialize_document().len())]
+    );
+    let (h, _ids, _tags) = d.serialize_keyed();
+    assert!(h.starts_with("<!doctype html>"), "serialize_keyed : {h}");
+    // Source sans doctype (page réellement quirks) → rien
+    // d'injecté : le re-parse doit rester quirks.
+    let q = Dom::from_html("<html><body><p>x</p></body></html>");
+    assert!(
+        !q.serialize_document().starts_with("<!doctype"),
+        "document sans doctype : {}",
+        q.serialize_document()
     );
 }

@@ -1556,7 +1556,19 @@ impl Dom {
     /// parse moteur (`<tbody>` synthétisé…).
     #[must_use]
     pub fn serialize_keyed(&self) -> (String, Vec<u64>, Vec<String>) {
-        let mut out = String::new();
+        // §B-192 — le miroir doit ré-émettre le doctype : sans
+        // lui le re-parse moteur bascule en mode quirks
+        // (absence de doctype = quirks, spec HTML) et les
+        // `height:%` traversent les ancêtres `auto` — uniforme
+        // −9 px sur les `li`/`a` webmd. La fiction moteur est
+        // déjà « standards » côté JS (`document.compatMode` =
+        // `CSS1Compat` constant, dom_host) : `<!doctype html>`
+        // transporte la même décision jusqu'au layout.
+        let mut out = if self.had_doctype {
+            String::from("<!doctype html>")
+        } else {
+            String::new()
+        };
         let mut ids = Vec::new();
         let mut tags = Vec::new();
         for &c in self.serial_children(self.root) {
@@ -2852,6 +2864,14 @@ impl Dom {
     pub fn serialize_document(&self) -> String {
         let t0 = std::time::Instant::now();
         let s = self.inner_html(self.root);
+        // §B-192 — même garde que `serialize_keyed` : ré-émettre
+        // `<!doctype html>` quand le parse en a vu un, sinon le
+        // re-parse session retombe en quirks (cf. ci-dessus).
+        let s = if self.had_doctype {
+            format!("<!doctype html>{s}")
+        } else {
+            s
+        };
         // JS-C37/C39 : coût de la resynchro DOM → host instrumenté
         // (appels + octets + micros cumulés, lus par
         // `serialize_stats`).
