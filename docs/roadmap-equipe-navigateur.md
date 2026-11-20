@@ -15868,6 +15868,36 @@ chaque gain rapporté contre les **deux** archétypes.
   escape-non-whitespace{,-u180e}` (14 fichiers) **28/28** ;
   `unicodeSets` **292/304** stable (RGI_Emoji catalogué) ;
   gates `\s`-sensibles tous verts.
+- [x] **JS-C638 — quantificateurs/atomes :
+  `DecimalDigits` non borné (u64 saturé — borne >
+  `u32::MAX` → `(?!)` émis, jamais de match),
+  lookahead quantifié enveloppé `(?:…)` (Annex B),
+  collapse `(?:(?:…))` (profondeur backend), identity
+  escape `\x{..}` — 966 → **972/984** (492 fichiers)**
+  (`regexp.rs` `parse_quantifier`, `Trans.grp_pos`,
+  `sole_group`, gate `tests/c638_quantifiers.rs`
+  **4/4**).
+  **`{n,m}`** : parse u64 saturant — `b{9007199254740991}`
+  compile (`(?!)`, lazy `?` absorbé), `{lo,huge}` →
+  `{lo,}`. **Lookahead dans `(?:…)` quantifié** :
+  `grp_pos` (pos `out` + `groups_open` à l'ouverture)
+  identifie le `(?:` à enfant unique ; min=0 →
+  `(?:((?!))…|)` — les groupes internes restent
+  enregistrés (alignement captures) mais ne capturent
+  jamais → `undefined` (spec `RepeatMatcher` étape 4,
+  `lookahead-quantifier-match-groups`) ; min≥1 → forme
+  nue (captures conservées). Même règle appliquée au
+  cas direct `(?=x)?` (était `(?:x|)` — captures
+  fuyaient). **Collapse** `(?:(?:X))` → `(?:X)` :
+  `S15.10.2.8_A3_T16` (200 `(?:` imbriqués) passe sous
+  `MAX_RECURSION=64`. **`\<`/`\>` & cie** → `\x{..}`
+  émis (fancy lisait `\<` en frontière de mot —
+  `S15.10.2.10_A5.1_T1`), `\\` verbatim conservé.
+  **Reste catalogué backend** (fancy-regex) : reset de
+  captures par itération `*` (T4/T6/A2_T1), 200 groupes
+  capturants (T15, incompressible — captures
+  observables), quantificateur lazy nullable
+  (`nullable-quantifier`), T18.
 - [x] **JS-C634 — `RegExp(pattern, flags)` spec :
   `IsRegExp` (`@@match` observable), early-return sur
   `SameValue(newTarget, pattern.constructor)`, regexp-like

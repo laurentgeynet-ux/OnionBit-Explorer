@@ -599,6 +599,7 @@ fn translate_pattern(
         open_stack: Vec::new(),
         look_pos: Vec::new(),
         mod_stack: Vec::new(),
+        grp_pos: Vec::new(),
         closed: std::collections::BTreeSet::new(),
         class_depth: 0,
     };
@@ -1080,11 +1081,13 @@ fn translate_pattern(
                     t.emitted.push(String::new());
                     out.push('(');
                 }
+                t.grp_pos.push((out.len(), t.groups_open));
             }
             ')' if !in_class => {
                 if let Some(Some(n)) = t.open_stack.pop() {
                     t.closed.insert(n);
                 }
+                let (gstart, g_at_open) = t.grp_pos.pop().unwrap_or_default();
                 // Groupe de modificateurs `(?ims-ims:…)` — restaure
                 // les états effectifs sauvegardés à l'ouverture.
                 if let Some(Some((fold, dotall, eff_i))) = t.mod_stack.pop() {
@@ -1119,13 +1122,84 @@ fn translate_pattern(
                             qend += 1;
                         }
                         if lo == 0 {
-                            let g = out[pos..].to_string();
+                            // min=0 : la répétition d'un atome à
+                            // largeur nulle se comporte comme si
+                            // elle était sautée — captures
+                            // réinitialisées (`RepeatMatcher`
+                            // étape 4, `lookahead-quantifier-
+                            // match-groups`). Émettre `(?:)`.
+                            // `(?:((?!))…|)` : groupes internes
+                            // enregistrés pour l'alignement des
+                            // captures, jamais capturés.
+                            let n_inner = t.groups_open - g_at_open;
                             out.truncate(pos);
                             out.push_str("(?:");
-                            out.push_str(&g);
+                            for _ in 0..n_inner {
+                                out.push_str("((?!))");
+                            }
                             out.push_str("|)");
                         }
+                        // min≥1 : évaluation unique de la forme
+                        // nue, captures conservées (`{1,1}` →
+                        // `["a","abc"]`).
                         i = qend - 1;
+                    }
+                } else {
+                    // `(?:` non capturant, sans modifiers —
+                    // contenu = un seul groupe imbriqué ?
+                    if gstart >= 3
+                        && out.as_bytes()[gstart - 3..gstart] == *b"(?:"
+                        && out.ends_with(')')
+                    {
+                        let body = out[gstart..out.len() - 1].to_string();
+                        if sole_group(&body) {
+                            let la = body.starts_with("(?=") || body.starts_with("(?!");
+                            let q = match cs.get(i + 1) {
+                                Some('*' | '?') => Some((0u64, i + 2)),
+                                Some('+') => Some((1u64, i + 2)),
+                                Some('{') => {
+                                    parse_quantifier(&cs, i + 1).map(|(lo, _hi, next)| (lo, next))
+                                }
+                                _ => None,
+                            };
+                            if la && q.is_some() {
+                                // Lookahead pur quantifié via
+                                // `(?:…)` — même réécriture que
+                                // `look_pos` (Annex B).
+                                let (lo, mut qend) = q.unwrap_or_default();
+                                if t.unicode {
+                                    return Err(format!(
+                                        "quantifiable lookahead in `u` regex /{src}/"
+                                    ));
+                                }
+                                if cs.get(qend) == Some(&'?') {
+                                    qend += 1;
+                                }
+                                let n_inner = t.groups_open - g_at_open;
+                                out.truncate(gstart - 3);
+                                if lo == 0 {
+                                    // min=0 : sautée → captures
+                                    // undefined.
+                                    out.push_str("(?:");
+                                    for _ in 0..n_inner {
+                                        out.push_str("((?!))");
+                                    }
+                                    out.push_str("|)");
+                                } else {
+                                    // min≥1 : le lookahead nu
+                                    // conserve ses captures.
+                                    out.push_str(&body);
+                                }
+                                i = qend - 1;
+                            } else if body.starts_with("(?:") {
+                                // Collapse `(?:(?:X))` → `(?:X)`
+                                // — réduit la profondeur vue par
+                                // le backend (`MAX_RECURSION=64`,
+                                // S15.10.2.8_A3_T16 200×).
+                                out.truncate(gstart - 3);
+                                out.push_str(&body);
+                            }
+                        }
                     }
                 }
             }
@@ -1143,13 +1217,28 @@ fn translate_pattern(
                             return Err(format!("invalid quantifier range in /{src}/"));
                         }
                     }
-                    out.push_str(&cs[i..next].iter().collect::<String>());
+                    // JS-C638 : `DecimalDigits` non borné côté
+                    // spec (`b{9007199254740991}` légal — ne
+                    // matche jamais : aucun input n'a cette
+                    // taille). Au-delà de u32::MAX, émettre
+                    // `(?!)` ; `{lo,}`/`{lo,huge}` → `{lo,}`.
+                    let huge = lo > u64::from(u32::MAX);
+                    if huge {
+                        out.push_str("(?!)");
+                    } else if hi.is_none_or(|h| h > u64::from(u32::MAX)) {
+                        out.push_str(&format!("{{{lo},}}"));
+                    } else {
+                        out.push_str(&cs[i..next].iter().collect::<String>());
+                    }
                     last_atom = false;
                     i = next;
-                    // `?` modifieur lazy (`{n,m}?`) — syntaxe
-                    // identique côté backend, émis tel quel.
                     if cs.get(i) == Some(&'?') {
-                        out.push('?');
+                        // Lazy `?` — inerte sur `(?!)` (et le
+                        // backend y verrait une assertion
+                        // quantifiée invalide).
+                        if !huge {
+                            out.push('?');
+                        }
                         i += 1;
                     }
                     continue;
@@ -1349,6 +1438,12 @@ struct Trans {
     /// `(?ims-ims:)` — restauré au `)` (JS-C630,
     /// `UpdateModifiers`).
     mod_stack: Vec<Option<(bool, bool, bool)>>,
+    /// Parallèle à `open_stack` : position dans `out` juste
+    /// après la tête de groupe émise — permet de reconnaître
+    /// un `(?:` dont le contenu est un groupe unique
+    /// (collapse, profondeur backend `MAX_RECURSION=64`) ou un
+    /// lookahead pur quantifié (JS-C638).
+    grp_pos: Vec<(usize, usize)>,
     /// Numéros de groupes **fermés** avant la position courante —
     /// seule une backref vers un groupe clos peut réellement
     /// capturer (`\3` dans `(\3)…(…)` matche vide, spec 21.2.2.9).
@@ -2311,16 +2406,41 @@ fn astral_class(cs: &[char], i: usize, hi: u32, unicode: bool) -> Option<(String
 }
 
 /// `{n}` / `{n,}` / `{n,m}` à `cs[i]` → `(lo, hi, next)`.
-fn parse_quantifier(cs: &[char], i: usize) -> Option<(u32, Option<u32>, usize)> {
+/// `body` = contenu d'un groupe (sans les parenthèses externes)
+/// émis dans `out`. `true` s'il est exactement **un** groupe
+/// imbriqué équilibré (`(?:…)`, `(?=…)`…) — conservateur :
+/// un `[`/`\\` échappé ou en classe invalide le décompte
+/// naïf de parenthèses, on renonce (JS-C638).
+fn sole_group(body: &str) -> bool {
+    if !body.starts_with('(') || !body.ends_with(')') || body.contains(['[', '\\']) {
+        return false;
+    }
+    let mut depth = 0i32;
+    for (idx, ch) in body.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return idx == body.len() - 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn parse_quantifier(cs: &[char], i: usize) -> Option<(u64, Option<u64>, usize)> {
     if cs.get(i) != Some(&'{') {
         return None;
     }
     let mut j = i + 1;
-    let mut lo = 0u32;
+    let mut lo = 0u64;
     let mut digits = 0;
     while let Some(&d) = cs.get(j) {
         if let Some(v) = d.to_digit(10) {
-            lo = lo.checked_mul(10)?.checked_add(v)?;
+            lo = lo.saturating_mul(10).saturating_add(u64::from(v));
             digits += 1;
             j += 1;
         } else {
@@ -2334,11 +2454,11 @@ fn parse_quantifier(cs: &[char], i: usize) -> Option<(u32, Option<u32>, usize)> 
         Some('}') => Some((lo, Some(lo), j + 1)),
         Some(',') => {
             j += 1;
-            let mut hi = 0u32;
+            let mut hi = 0u64;
             let mut hdigits = 0;
             while let Some(&d) = cs.get(j) {
                 if let Some(v) = d.to_digit(10) {
-                    hi = hi.checked_mul(10)?.checked_add(v)?;
+                    hi = hi.saturating_mul(10).saturating_add(u64::from(v));
                     hdigits += 1;
                     j += 1;
                 } else {
@@ -2376,6 +2496,7 @@ fn translate_group(
             t.mod_stack.push(None);
             out.push_str("(?");
             out.push(cs[i + 2]);
+            t.grp_pos.push((out.len(), t.groups_open));
             Ok(i + 3)
         }
         Some('<') if matches!(cs.get(i + 3), Some('=' | '!')) => {
@@ -2384,6 +2505,7 @@ fn translate_group(
             t.mod_stack.push(None);
             out.push_str("(?<");
             out.push(cs[i + 3]);
+            t.grp_pos.push((out.len(), t.groups_open));
             Ok(i + 4)
         }
         Some('<') => {
@@ -2421,6 +2543,7 @@ fn translate_group(
             out.push_str("(?P<");
             out.push_str(&emit_name);
             out.push('>');
+            t.grp_pos.push((out.len(), t.groups_open));
             Ok(j)
         }
         Some('P' | '#') => Err(err()),
@@ -2520,6 +2643,7 @@ fn translate_group(
             } else {
                 out.push_str("(?:");
             }
+            t.grp_pos.push((out.len(), t.groups_open));
             Ok(j + 1)
         }
     }
@@ -2950,7 +3074,15 @@ impl Trans {
                 return Err(format!("invalid escape `\\{c}` in `u` regex /{src}/"));
             }
         }
-        Ok((format!("\\{c}"), i + 2))
+        // Identity escape littéral : `\x{..}` plutôt que
+        // `\{c}` — fancy interprète `\<`/`\>` comme des
+        // frontières de mot (JS-C638 `S15.10.2.10`). `\\`
+        // reste verbatim (escape backend valide).
+        Ok(if c == '\\' {
+            ("\\\\".to_string(), i + 2)
+        } else {
+            (format!("\\x{{{:x}}}", u32::from(c)), i + 2)
+        })
     }
 
     /// Corps de classe `GetWordCharacters` : 63 ASCII + extras
