@@ -907,7 +907,26 @@ fn translate_pattern(
                     class_prev = Some(ClassAtom::Char(u32::from('-')));
                     class_prev_bound = false;
                 } else if is_range {
-                    if let (Some(ClassAtom::Char(lo)), ClassAtom::Char(hi)) = (class_prev, next) {
+                    // §B-187 — borne `Sentinel` (unit surrogate
+                    // ré-encodée par `re_encode`) = l'unit qu'elle
+                    // encode ; `Char` reste le scalaire (un escape
+                    // `\u{F0000}` désigne bien le char astral).
+                    // Sans décodage, `hi = F07FF` partait en
+                    // décomposition astrale `hi > 0xFFFF` —
+                    // plages renversées → `error parsing pattern`
+                    // (doordash/zendesk/gmaps §B-187).
+                    let bound = |a: ClassAtom| -> Option<u32> {
+                        match a {
+                            ClassAtom::Char(cp) => Some(cp),
+                            // Non-`u` : l'unit qu'elle encode ;
+                            // `u` : le scalaire (domaine points).
+                            ClassAtom::Sentinel(cp) => {
+                                Some(if unicode { cp } else { cp - 0xF_0000 + 0xD800 })
+                            }
+                            _ => None,
+                        }
+                    };
+                    if let (Some(lo), Some(hi)) = (class_prev.and_then(bound), bound(next)) {
                         if lo > hi {
                             return Err(format!("empty class range in /{src}/"));
                         }
@@ -1195,13 +1214,22 @@ fn translate_pattern(
                 if !unicode && !genuine && (0xF_0000..0xF_0800).contains(&(c as u32)) {
                     // Sentinelle surrogate — déjà dans le domaine
                     // units : atome/membre = la sentinelle seule.
-                    out.push_str(&format!("\\x{{{:x}}}", c as u32));
+                    // Borne de range (`sent`-`atome`) : rien n'est
+                    // émis ici — l'union units sort au site range,
+                    // comme la voie `\uD8xx` escape.
                     if in_class {
+                        let is_bound = class_dash
+                            || (cs.get(i + 1) == Some(&'-')
+                                && !matches!(class_atom_of(&cs, i + 2), ClassAtom::End));
+                        if !is_bound {
+                            out.push_str(&format!("\\x{{{:x}}}", c as u32));
+                        }
                         class_emitted = true;
-                        class_prev = Some(ClassAtom::Char(c as u32));
+                        class_prev = Some(ClassAtom::Sentinel(c as u32));
                         class_prev_bound = class_dash;
                         class_dash = false;
                     } else {
+                        out.push_str(&format!("\\x{{{:x}}}", c as u32));
                         last_atom = true;
                     }
                 } else if in_class && !unicode && (c as u32) >= 0x1_0000 {
@@ -2027,6 +2055,11 @@ fn frag_char(frag: &str) -> Option<char> {
 enum ClassAtom {
     /// Literal char (escape ou brut).
     Char(u32),
+    /// Char **sentinelle** brut `U+F0000..U+F07FF` — code unit
+    /// surrogate ré-encodé par `re_encode` (`JsStr` à units,
+    /// §B-187). Distinct de `Char` : un escape `\u{F0000}`
+    /// désigne le scalaire réel, la sentinelle désigne l'unit.
+    Sentinel(u32),
     /// `\d`/`\s`/`\w` et négations — ne peut borner une range `u`.
     Escape,
     /// Fin de classe / EOF — `-` devient littéral.
@@ -2185,7 +2218,14 @@ fn class_atom_of(cs: &[char], i: usize) -> ClassAtom {
             Some(&c) => ClassAtom::Char(u32::from(c)),
             None => ClassAtom::End,
         },
-        Some(&c) => ClassAtom::Char(u32::from(c)),
+        Some(&c) => {
+            let v = u32::from(c);
+            if (0xF_0000..0xF_0800).contains(&v) {
+                ClassAtom::Sentinel(v)
+            } else {
+                ClassAtom::Char(v)
+            }
+        }
     }
 }
 
@@ -2738,6 +2778,18 @@ impl Trans {
                     .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '=')
             {
                 return Err(format!("invalid \\p{{ name in `u` regex /{src}/"));
+            }
+            // `\p{Cs}` — catégorie `Surrogate` absente des tables
+            // du backend (§B-187, claude) : domaine sentinelle —
+            // les units isolés sont `U+F0000..U+F07FF`, exactement
+            // le set recherché (astral = paire jointe, jamais `Cs`).
+            if body == "Cs" || body == "Surrogate" {
+                let frag = if c == 'p' {
+                    "[\\x{f0000}-\\x{f07ff}]"
+                } else {
+                    "[^\\x{f0000}-\\x{f07ff}]"
+                };
+                return Ok((frag.to_string(), end + 1));
             }
             // `\P{P}` + `i` : le jeu spec est `{c : canon(c) ∉
             // P}` — canon sur l'**input** (complément d'abord) :

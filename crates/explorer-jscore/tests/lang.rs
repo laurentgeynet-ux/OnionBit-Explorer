@@ -1162,9 +1162,11 @@ fn regexp_class_escape_bounds() {
         ev_str("new RegExp('[\\\\u2020-\\\\u2030]').test('a')"),
         "false"
     );
-    // `\u{…}` (hors flag u, Annex B autorise la syntaxe sloppy).
+    // `\u{…}` sloppy non-`u` : V8 lit `\u` identité + littéraux —
+    // la range `0-\u`… `}-u` ressort désordonnée → SyntaxError
+    // (verrou JS-C622 dans regexp.rs `class_escape_bounds_decode`).
     assert_eq!(
-        ev_str("new RegExp('[\\\\u{1F600}-\\\\u{1F64F}]').test('\\u{1F610}')"),
+        ev_str("try { new RegExp('[\\\\u{1F600}-\\\\u{1F64F}]'); 'no' } catch (e) { e instanceof SyntaxError }"),
         "true"
     );
     // `\0` NUL en borne basse.

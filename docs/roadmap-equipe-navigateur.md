@@ -15746,6 +15746,27 @@ chaque gain rapporté contre les **deux** archétypes.
   modifier/word-char. **Écarts catalogués restants** :
   `\P{P}`+i sur props à pré-image de fold non triviale,
   `\d` Unicode fancy (`character-class-digit-*`).
+- [x] **JS-C635 — §B-187 : collision sentinelle surrogate dans
+  les classes multi-plages (units réels `U+F0000..F07FF` lus
+  comme bornes astrales → plages renversées) + `\p{Cs}`/`\P{Cs}`
+  traduits — verbatims doordash/fedex/zendesk compilés**
+  (`regexp.rs`, gate `tests/b187_re_sentinelles.rs` **8/8**).
+  **`ClassAtom::Sentinel`** : un char sentinelle brut
+  (`re_encode` des units surrogates, fichiers servis `\ud800`
+  simple backslash) n'est plus un `Char` scalaire — `bound`
+  décode `F0000+v → D800+v` en non-`u` (scalaire en `u`),
+  le site range n'entre plus en décomposition astrale sur une
+  borne sentinelle (`\x{f0000}-\x{d7ff}` renversé →
+  `error parsing pattern 0` verbatim vols 937/946/951).
+  L'escape `\u{F0000}` reste le vrai codepoint (voie `Char`).
+  **`\p{Cs}`** : catégorie `Surrogate` absente des tables
+  fancy → émise `[\x{f0000}-\x{f07ff}]` (`\P` niée) — les
+  units isolés sont exactement `Cs`, un astral = paire jointe.
+  **Test `lang` corrigé** : `[\u{1F600}-\u{1F64F}]` non-`u`
+  = `SyntaxError` (V8 : `\u` identité sloppy → range `}-u`
+  désordonnée — le verrou lib JS-C622 était le bon).
+  **Reliquat honnête** : doordash/zendesk inatteignables sous
+  debug — disjoncteur éval antérieur aux regex (A/B ±fix).
 - [x] **JS-C632 — reliquats named-groups/match-indices :
   échappements `\u` dans les noms, backref vers groupe
   ouvert = vide, `groups`/`indices.groups` à proto nul —
