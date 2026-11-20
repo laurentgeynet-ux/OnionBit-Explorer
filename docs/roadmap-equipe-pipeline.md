@@ -5010,3 +5010,24 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   atome réelle, `middle` x-height, `text-top` em box,
   first/last distincts — inline.rs). Gates : block
   146/146, inline 57/57, **WPT 203/203**, clippy/fmt.
+- [x] **R-316 — `vertical-align` sur runs texte : boîte
+  alignée = content area (§10.8.1) — borne R-315 levée**
+  (`explorer-layout`, suite directe du même pilotage vol
+  `inline-measure`/`line-metric`). **Levée de la borne** :
+  les fragments texte reçoivent les armes sémantiques —
+  `middle` centre la **content area** (`ascent+descent`)
+  sur `baseline + x-height/2` parent ; `text-top`/
+  `text-bottom` ancrent ses bords à l'em box parente
+  (`rect.y` = bord haut de la content area — les glyphes
+  peignent à `rect.y + f.baseline`, vérifié
+  `display.rs`). **`top`/`bottom` inchangés** (margin
+  edge = box `lh`, spec §10.8.1) ; `baseline`/`sub`/
+  `super`/longueurs/`%` inchangés. **`frag_descent`** :
+  descente réelle du run (`shaped.metrics`), repli
+  `baseline×0,25` = convention non-shapée 0,8/0,2 em —
+  le repli `lh − ascent` surestimait (régression
+  `it.h=52,8` reproduite). Passe 1 : extension texte =
+  bas de glyphe (`base + d`), `dy>0` étend vers le bas
+  seul. Verrou `vertical_align_runs_texte_content_area`
+  (5 cas, inline.rs). Gates : inline 58/58, block
+  146/146, **WPT 203/203**, clippy/fmt.

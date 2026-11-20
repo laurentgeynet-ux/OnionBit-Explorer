@@ -2268,6 +2268,16 @@ fn va_dy(f: &Fragment, va: &str, strut_lh: f32, ctx: &BlockCtx) -> f32 {
     }
 }
 
+/// Descente positive d'un fragment texte (R-316) —
+/// métrique `shaped` si présente, sinon `baseline × 0,25`
+/// (même convention 0,8/0,2 em que la baseline non-shapée
+/// `fs × 0,8` ; `lh − ascent` surestimerait).
+fn frag_descent(f: &Fragment) -> f32 {
+    f.shaped
+        .as_ref()
+        .map_or(f.baseline * 0.25, |s| -s.metrics.descent)
+}
+
 /// Position `rect.y` d'un fragment dans la ligne (R-315) —
 /// `geom` = (y ligne, h ligne, baseline), `p` = métriques
 /// de la fonte parente (ascent, descent, x-height),
@@ -2308,12 +2318,20 @@ fn va_place_y(
             _ => y + (base - lb) + f.marg_t + dy,
         }
     } else {
+        // Run texte (R-316) : boîte alignée = **content
+        // area** (ascent+descent — `rect.y` = son bord haut
+        // puisque les glyphes peignent à `rect.y +
+        // f.baseline`). `top`/`bottom` restent ancrés aux
+        // bords de ligne (margin edge = box `lh`).
+        let em = f.baseline + frag_descent(f);
         match va {
-            "top" | "text-top" | "hanging" | "text-before-edge" => y + f.marg_t,
-            "bottom" | "text-bottom" | "ideographic" | "text-after-edge" => {
-                y + h - (f.rect.height + f.marg_b)
+            "text-top" => y + base - p_ascent + f.marg_t,
+            "text-bottom" => y + base + p_descent - em - f.marg_b,
+            "middle" | "center" | "central" | "mathematical" => {
+                y + base + p_xh / 2.0 - em / 2.0 + f.marg_t
             }
-            "middle" | "center" | "central" | "mathematical" => y + (h - mbox_h) / 2.0 + f.marg_t,
+            "top" | "hanging" | "text-before-edge" => y + f.marg_t,
+            "bottom" | "ideographic" | "text-after-edge" => y + h - (f.rect.height + f.marg_b),
             _ => y + (base - lb) + f.marg_t + dy,
         }
     }
@@ -2484,30 +2502,47 @@ impl LineAcc {
         // les boîtes ancrées aux bords de ligne (`top`/`bottom`)
         // exigent `h ≥ margin box`).
         for f in &self.frags {
-            // Extension mesurée = atomes seulement : pour un
-            // run texte, la boîte `rect.height` = line-height
-            // posée asymétriquement (baseline = ascent, pas
-            // ascent+½leading) — compter son bord bas gonflerait
-            // la ligne au-delà de la spec (la content area est
-            // centrée dans lh ; Chrome garde la ligne à lh).
-            if !f.atomic {
-                continue;
-            }
             let va = va_of(f);
             let (fb, lb) = self.frag_baselines(f);
             let mbox = f.rect.height + f.marg_t + f.marg_b;
             let dy = va_dy(f, va, self.strut_lh, ctx);
-            let ext = match va {
-                "top" | "hanging" | "text-before-edge" => f.marg_t + f.rect.height + f.marg_b,
-                "bottom" | "ideographic" | "text-after-edge" => mbox,
-                "text-top" => base - self.p_ascent + mbox,
-                "text-bottom" => base + self.p_descent,
-                "middle" | "center" | "central" | "mathematical" => {
-                    base + self.p_xh / 2.0 + mbox / 2.0
+            let ext = if f.atomic {
+                match va {
+                    "top" | "hanging" | "text-before-edge" => f.marg_t + f.rect.height + f.marg_b,
+                    "bottom" | "ideographic" | "text-after-edge" => mbox,
+                    "text-top" => base - self.p_ascent + mbox,
+                    "text-bottom" => base + self.p_descent,
+                    "middle" | "center" | "central" | "mathematical" => {
+                        base + self.p_xh / 2.0 + mbox / 2.0
+                    }
+                    "first-baseline" => base - fb + mbox,
+                    "last-baseline" => base - lb + mbox,
+                    _ => base - lb + dy + mbox,
                 }
-                "first-baseline" => base - fb + mbox,
-                "last-baseline" => base - lb + mbox,
-                _ => base - lb + dy + mbox,
+            } else {
+                // Run texte : la boîte qui compte pour
+                // l'alignement est la **content area**
+                // (ascent+descent — §10.8.1), pas le box
+                // `lh` posé asymétriquement du moteur
+                // (baseline = ascent, pas ascent+½leading).
+                // Compter `rect.height` gonflait la ligne
+                // (régression it.h=52,8) ; `em` borne au
+                // bas de glyphe réel.
+                let d = frag_descent(f);
+                let em = f.baseline + d;
+                match va {
+                    "text-top" => base - self.p_ascent + em,
+                    "text-bottom" => base + self.p_descent,
+                    "middle" | "center" | "central" | "mathematical" => {
+                        base + self.p_xh / 2.0 + em / 2.0
+                    }
+                    // `top`/`bottom` : margin edge = box lh,
+                    // déjà couverte par `max_lh`. Baseline/
+                    // sub/super : bas de glyphe ; `dy>0`
+                    // (sub, longueur positive) grandit la
+                    // ligne si le contenu déborde.
+                    _ => base + d + dy.max(0.0),
+                }
             };
             h = h.max(ext);
         }

@@ -1996,3 +1996,74 @@ fn vertical_align_semantique_spec() {
         y_first - y_last
     );
 }
+
+/// R-316 — `vertical-align` sur **runs texte** : la boîte
+/// alignée est la content area (ascent+descent — §10.8.1),
+/// pas le box `lh` brut. `middle`/`text-top`/`text-bottom`
+/// ancrent aux métriques de la fonte parente ; `top`/
+/// `bottom` restent aux bords de ligne (margin edge = lh).
+#[test]
+fn vertical_align_runs_texte_content_area() {
+    // Fixture 0,8/0,2 em : fs10 → fb 8, d 2 ; fs20 → fb 16,
+    // d 4, em 20. Parent fs10 lh30 → base 18, p_a 8, p_d 2,
+    // xh 5.
+    let text_frag_y = |va: &str| {
+        let (dom, bx) = laid(
+            "<p>x<span>s</span></p>",
+            &format!(
+                "p{{font-size:10px;line-height:30px}}\
+                 span{{font-size:20px;vertical-align:{va}}}"
+            ),
+        );
+        let p = find(&bx, by_tag(&dom, "p"));
+        let f = p.children[0].lines[0]
+            .fragments
+            .iter()
+            .find(|f| !f.atomic && f.text == "s")
+            .expect("fragment texte du span");
+        (f.rect.y, f.baseline)
+    };
+
+    // `middle` : centre de la content area à base + xh/2
+    // → y = 18 + 2,5 − em/2(10) = 10,5 (le centrage
+    // géométrique de ligne donnerait ~3).
+    let (mid_y, _) = text_frag_y("middle");
+    assert!(
+        (mid_y - 10.5).abs() < 1.5,
+        "middle texte : y={mid_y} attendu≈10.5"
+    );
+
+    // `text-top` : haut de la content area au haut de l'em
+    // box parente → y = base − p_ascent = 10 (l'ancre `top`
+    // historique donnait 0).
+    let (texttop_y, _) = text_frag_y("text-top");
+    assert!(
+        (texttop_y - 10.0).abs() < 1.5,
+        "text-top texte : y={texttop_y} attendu≈10"
+    );
+
+    // `text-bottom` : bas de la content area au bas de l'em
+    // box parente → y = base + p_descent − em = 0.
+    let (textbot_y, _) = text_frag_y("text-bottom");
+    assert!(
+        (textbot_y - 0.0).abs() < 1.5,
+        "text-bottom texte : y={textbot_y} attendu≈0"
+    );
+
+    // `top` reste ancré au bord haut de ligne (margin edge
+    // = box lh) — inchangé.
+    let (topline_y, _) = text_frag_y("top");
+    assert!(
+        topline_y.abs() < 0.5,
+        "top texte : y={topline_y} attendu≈0 (bord de ligne)"
+    );
+
+    // Baseline par défaut inchangée : y = base − fb = 2,
+    // glyphe peint à y+fb = 18 = base.
+    let (base_y, fb) = text_frag_y("baseline");
+    assert!(
+        (base_y + fb - 18.0).abs() < 1.0,
+        "baseline texte : y+fb={} attendu≈18",
+        base_y + fb
+    );
+}
