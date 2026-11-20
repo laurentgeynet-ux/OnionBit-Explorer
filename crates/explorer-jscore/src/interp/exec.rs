@@ -637,11 +637,30 @@ impl Engine {
             Stmt::FunctionDecl(f) => {
                 if let Some(name) = &f.name {
                     let hoisted = matches!(self.env_get(env, name), Some(Value::Obj(id)) if {
-                        matches!(
-                            self.heap.obj(id).map(|o| &o.kind),
-                            Some(ObjKind::Fun(Fun::Script { lit, .. }))
-                                if Rc::ptr_eq(lit, f)
-                        )
+                        match self.heap.obj(id).map(|o| &o.kind) {
+                            // La liaison tient une fonction de script :
+                            // on la conserve si c'est l'instance de
+                            // CETTE déclaration (ptr_eq — statiques
+                            // préservés) **ou si son nom diffère du
+                            // nom déclaré** — la liaison a été
+                            // explicitement réassignée entre le hoist
+                            // et la position de la déclaration. La
+                            // position d'une déclaration n'exécute rien
+                            // (spec) : écraser ici cassait le motif
+                            // auto-défense obfuscator `function r4(){
+                            // …; return r4=function(){return e},r4()}`
+                            // (fr24 §B-208 : la déclaration re-liée
+                            // reconstruisait un tableau de chaînes
+                            // non tourné → décodeurs désalignés →
+                            // `_0x16a433 is not defined`). Un lit de
+                            // MÊME nom différent = déclaration sœur
+                            // en boucle → nouvelle closure conservée.
+                            Some(ObjKind::Fun(Fun::Script { lit, .. })) => {
+                                Rc::ptr_eq(lit, f)
+                                    || lit.name.as_deref() != Some(name.as_ref())
+                            }
+                            _ => false,
+                        }
                     });
                     if !hoisted {
                         let fv = self.make_function(f, env, Value::Undefined);

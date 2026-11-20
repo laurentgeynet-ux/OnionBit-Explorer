@@ -8327,6 +8327,27 @@ MCP = adaptateur, jamais la base.
   réel, vue live `data-*` inchangée. Verrou :
   `b209_domstringmap` 2/2 (ctor, verbatim `? :`,
   get/set/delete camelCase↔kebab).
+- [x] **Étape 331. §B-208 soldée : `ReferenceError:
+  _0x16a433 is not defined` fr24 — la position d'une
+  `FunctionDeclaration` ne re-lie plus une liaison
+  réassignée** (`explorer-jscore` `interp/exec.rs`).
+  Boilerplate auto-défense javascript-obfuscator :
+  `function r4(){const e=[…];return r4=function(){return
+  e},r4()}` — la déclaration se réassigne à une fermeture
+  sur le tableau de chaînes capturé. Atteindre la position
+  de la déclaration ré-instanciait et re-liait `r4` (lit
+  différent → nouvelle closure) : le décodeur `zn` relisait
+  alors un tableau non tourné → clés décodées fausses →
+  `bTCTB(a!==b)` tombait sur l'identifiant empoisonné
+  `_0x16a433` jamais déclaré. Le garde conserve désormais
+  la liaison quand elle tient une `Fun::Script` de nom
+  différent du nom déclaré (réassignation explicite —
+  spec : la position est un no-op), tout en gardant la
+  nouvelle closure pour un lit de même nom (déclaration
+  sœur en boucle) et l'installation sur liaison
+  `undefined`. Sonde verbatim vol 958 rejouée sous Node
+  et le moteur : rotation 31, clés `DaoeC`/`vRsjj`,
+  identiques. Verrou : `b208_fn_decl_rebind` 2/2.
 - [x] **Étape 327. §B-204 soldée : `TextDecoder`
   `utf-16le`/`utf-16be` implémentés — verbatim diagrams.net
   (Emscripten `UTF16ToString`)** (`explorer-jscore`
