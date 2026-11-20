@@ -187,9 +187,23 @@ impl Engine {
     /// délègue à [`rewrite_bare_specifier`] (même règle
     /// consommée par le prefetch session — issue #6).
     /// `None` hors map : le `ModuleLoader` garde son message
-    /// d'erreur actuel.
+    /// d'erreur actuel. §B-175-bis : la **cible** est résolue
+    /// ici contre la base du document (`hooks.page_url`) —
+    /// la spec enregistre une URL absolue par entrée, jamais
+    /// une résolution contre le référent de l'import (windy :
+    /// la cible `v/x/leaflet-gl.js` se résolvait contre
+    /// `v/x/index.js` → chemin doublé → 404 → « module non
+    /// chargé »). Page non hiérarchique → brut inchangé
+    /// (borné, la base effective aval re-tentera).
     fn resolve_bare(&self, spec: &str) -> Option<String> {
-        rewrite_bare_specifier(&self.import_map, spec)
+        let t = rewrite_bare_specifier(&self.import_map, spec)?;
+        if crate::builtins::url::url_parse_absolute(&t).is_some() {
+            return Some(t);
+        }
+        crate::builtins::url::url_parse_absolute(&self.hooks.page_url)
+            .and_then(|base| crate::builtins::url::url_parse(&t, Some(&base)))
+            .map(|u| crate::builtins::url::url_href(&u))
+            .or(Some(t))
     }
 
     /// Fetch a dependency's source through the injected loader —

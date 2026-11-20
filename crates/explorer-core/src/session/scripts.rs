@@ -394,11 +394,19 @@ pub(crate) fn parse_import_map(json: &str) -> Vec<(String, String)> {
 
 /// Fusion additive des maps d'une page (spec « merge » — la
 /// première cible d'une clé l'emporte, comme le moteur).
-pub(crate) fn merge_import_maps(maps: &[String]) -> Vec<(String, String)> {
+/// §B-175-bis : les **cibles** sont résolues contre `base`
+/// (la base du document) ici — la spec veut une URL absolue
+/// enregistrée, jamais une résolution contre le référent de
+/// l'import (windy : la cible `v/x/leaflet-gl.js` doublait
+/// le chemin du module importeur → fetch 404 → « module non
+/// chargé »). Une cible déjà absolue passe telle quelle ;
+/// irrésolvable → brute conservée (borné).
+pub(crate) fn merge_import_maps(maps: &[String], base: &Url) -> Vec<(String, String)> {
     let mut merged: Vec<(String, String)> = Vec::new();
     for json in maps {
         for (k, t) in parse_import_map(json) {
             if merged.iter().all(|(ek, _)| *ek != k) {
+                let t = Url::resolve(base, &t).map(|u| u.to_string()).unwrap_or(t);
                 merged.push((k, t));
             }
         }

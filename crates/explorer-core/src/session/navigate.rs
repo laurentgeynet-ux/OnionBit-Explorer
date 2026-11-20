@@ -1149,7 +1149,7 @@ impl Session {
         } else {
             Vec::new()
         };
-        let import_specs = merge_import_maps(&import_maps);
+        let import_specs = merge_import_maps(&import_maps, &base);
         // §B-51-adjacent (twitch vol 98 — silence total :
         // « évals reçus vs scripts du DOM » inobservable).
         // Le comptage collecté est émis ici — `script: eval…`

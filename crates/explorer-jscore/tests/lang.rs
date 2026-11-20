@@ -3710,6 +3710,33 @@ fn import_map_dynamic_import() {
     assert_eq!(global(&mut e, "__r"), "7");
 }
 
+#[test]
+fn import_map_target_resout_contre_base_document() {
+    // §B-175-bis windy : une cible de carte `v/x/leaflet-gl.js`
+    // se résout contre la **base du document** — jamais contre
+    // le référent de l'import `v/x/index.js` (sinon le chemin
+    // double `v/x/v/x/…` → 404 → « module non chargé »).
+    let mut e = Engine::new();
+    e.set_page_url("https://www.windy.com/");
+    e.set_import_map(r#"{"imports":{"@leafletGl":"v/51.4.4.ind.c444/leaflet-gl.js"}}"#);
+    let loader = MapLoader(
+        [(
+            "https://www.windy.com/v/51.4.4.ind.c444/leaflet-gl.js",
+            "export default 'gl-ok';",
+        )]
+        .iter()
+        .copied()
+        .collect(),
+    );
+    e.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    e.eval_module(
+        "import g from '@leafletGl'; globalThis.__r = g;",
+        "https://www.windy.com/v/51.4.4.ind.c444/index.js",
+    )
+    .unwrap_or_else(|err| panic!("windy -> {err}"));
+    assert_eq!(global(&mut e, "__r"), "gl-ok");
+}
+
 // -- TypedArrays / ArrayBuffer / DataView (JS-C6) --------------------
 
 #[test]
