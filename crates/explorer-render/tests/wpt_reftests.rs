@@ -98,6 +98,19 @@ fn diff_stats(a: &Frame, b: &Frame) -> (usize, usize) {
 static AHEM: LazyLock<Vec<u8>> =
     LazyLock::new(|| std::fs::read(data_dir().join("ahem.ttf")).expect("ahem.ttf"));
 
+/// Fontes de diagnostic des baselines (css-inline
+/// alignment-baseline/text-box-trim) — métriques marquées
+/// par paliers de 100/1000 d'em (ascent 800, alphabetic 50
+/// ou 0 selon la variante).
+static BASELINE_DIAGNOSTIC: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    std::fs::read(data_dir().join("fonts/baseline-diagnostic/BaselineDiagnostic.ttf"))
+        .expect("BaselineDiagnostic.ttf")
+});
+static BASELINE_DIAGNOSTIC_AZ: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    std::fs::read(data_dir().join("fonts/baseline-diagnostic/BaselineDiagnosticAlphabeticZero.ttf"))
+        .expect("BaselineDiagnosticAlphabeticZero.ttf")
+});
+
 fn data_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/wpt")
 }
@@ -110,10 +123,20 @@ impl FontSource for Ahem {
     // Ahem à toute requête faisait déborder « flt lef » à
     // 7×1em = 112 px → wrap fantôme (margin-collapse-039).
     fn font_data(&self, req: &FontRequest) -> Option<Vec<u8>> {
+        if req.families.iter().any(|f| f.eq_ignore_ascii_case("ahem")) {
+            return Some(AHEM.clone());
+        }
+        if req
+            .families
+            .iter()
+            .any(|f| f.eq_ignore_ascii_case("baselinediagnostic"))
+        {
+            return Some(BASELINE_DIAGNOSTIC.clone());
+        }
         req.families
             .iter()
-            .any(|f| f.eq_ignore_ascii_case("ahem"))
-            .then(|| AHEM.clone())
+            .any(|f| f.eq_ignore_ascii_case("baselinediagnosticalphabeticzero"))
+            .then(|| BASELINE_DIAGNOSTIC_AZ.clone())
     }
 }
 
@@ -260,6 +283,46 @@ fn meta_flags(dom: &Dom) -> Vec<String> {
     out
 }
 
+/// `<meta name="variant" content="?class=a,b">` — les tests
+/// multi-variantes WPT (css-inline/text-box-trim…) attendent
+/// `variant-class.js`, qui pose les classes de la variante
+/// demandée sur `<html>` ; l'infra WPT exécute la première
+/// par défaut et passe la même query à la ref. Le harnais est
+/// statique : on extrait la première variante et on pose les
+/// classes nous-mêmes, test et ref à l'identique.
+fn first_variant_classes(dom: &Dom) -> Option<String> {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "meta") {
+            let name = dom.attribute(n, "name").ok().flatten().unwrap_or_default();
+            if name.eq_ignore_ascii_case("variant") {
+                if let Some(v) = dom.attribute(n, "content").ok().flatten() {
+                    if let Some(c) = v.strip_prefix("?class=") {
+                        return Some(c.replace(',', " "));
+                    }
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    None
+}
+
+/// Pose `class` sur l'élément `<html>` (variante WPT).
+fn apply_classes(dom: &mut Dom, classes: &str) {
+    let Some(html) = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+    else {
+        return;
+    };
+    let _ = dom.set_attribute(html, "class", classes);
+}
+
 /// Premier `<link rel="match|mismatch">` — `(kind, href)`.
 fn ref_link(dom: &Dom) -> Option<(&'static str, String)> {
     let mut queue = vec![dom.document()];
@@ -296,7 +359,7 @@ fn collect_images(dom: &Dom, file_dir: &Path) -> (HashMap<NodeId, (f32, f32)>, I
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "img") {
             if let Some(src) = dom.attribute(n, "src").ok().flatten() {
-                let path = file_dir.join(&src);
+                let path = resolve_in(file_dir, &src);
                 if let Ok(bytes) = std::fs::read(&path) {
                     if let Some(img) = decode_image(&bytes, IMG_MAX_PX) {
                         sizes.insert(n, (img.width as f32, img.height as f32));
@@ -341,7 +404,7 @@ fn collect_backgrounds(dom: &Dom, styles: &explorer_css::StyleMap, file_dir: &Pa
                 if url.starts_with("data:") {
                     continue;
                 }
-                if let Some(img) = std::fs::read(file_dir.join(&url))
+                if let Some(img) = std::fs::read(resolve_in(file_dir, &url))
                     .ok()
                     .and_then(|bytes| decode_image(&bytes, IMG_MAX_PX))
                 {
@@ -360,8 +423,13 @@ fn collect_backgrounds(dom: &Dom, styles: &explorer_css::StyleMap, file_dir: &Pa
 /// layout → display list → raster RGBA. `file_dir` = dossier
 /// du fichier source (résolution des `src`/`url()` d'images).
 #[allow(clippy::cast_precision_loss)] // pixels image ≪ 2^23
-fn render(src: &str, file_dir: &Path, tag: &str) -> Option<Frame> {
-    let dom = TreeBuilder::parse(strip_xml_prolog(src));
+fn render(src: &str, file_dir: &Path, tag: &str, variant: Option<&str>) -> Option<Frame> {
+    let mut dom = TreeBuilder::parse(strip_xml_prolog(src));
+    let own = first_variant_classes(&dom);
+    let classes = variant.map(str::to_owned).or(own);
+    if let Some(c) = classes {
+        apply_classes(&mut dom, &c);
+    }
     let mut eng = StyleEngine::new();
     eng.add_css(&collect_css(&dom, file_dir), Origin::Author);
     let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
@@ -555,9 +623,16 @@ fn run_case(dir: &Path, rel: &str) -> Verdict {
         .map(Path::to_path_buf)
         .unwrap_or_default();
     let ref_dir = ref_path.parent().map(Path::to_path_buf).unwrap_or_default();
+    // Même query `?class=` côté test et ref (variant-class.js).
+    let variant = first_variant_classes(&test_dom);
     let (Some(a), Some(b)) = (
-        render(&src, &test_dir, &name),
-        render(&ref_src, &ref_dir, &format!("{name}(ref)")),
+        render(&src, &test_dir, &name, variant.as_deref()),
+        render(
+            &ref_src,
+            &ref_dir,
+            &format!("{name}(ref)"),
+            variant.as_deref(),
+        ),
     ) else {
         return Verdict::Fail(format!("{name}: rendu impossible"));
     };

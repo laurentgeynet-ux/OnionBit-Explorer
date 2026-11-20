@@ -551,6 +551,20 @@ pub(crate) fn layout_inline(
     // atomes/enfants soient posés sur leurs fragments ;
     // `bot_trim` est retranché de la hauteur rendue.
     let bot_trim = apply_text_box_trim(&st, &mut lines, y, fs, ctx);
+    // R-317 — `position: relative` sur une boîte **inline**
+    // non atomique : ses fragments texte se décalent d'un
+    // même vecteur (top/left + insets logiques en repli,
+    // §9.3.3). Les atomes relatifs sont déjà gérés à leur
+    // pose (`assign_atomic_rects` lit `rel_offsets`).
+    for line in &mut lines {
+        for f in &mut line.fragments {
+            if !f.atomic && f.style.get("position") == Some("relative") {
+                let (dx, dy) = crate::block::rel_offsets_style(&f.style, w, fs, ctx);
+                f.rect.x += dx;
+                f.rect.y += dy;
+            }
+        }
+    }
     // Atomes d'abord : leur sous-arbre a été posé en (0,0)
     // par `size_atomics` — translation au rect du fragment
     // (R-23 : sans elle, les enfants d'un atome — valeur d'un
@@ -2202,7 +2216,13 @@ fn va_of(f: &Fragment) -> &str {
     if let Some(v) = f.style.get("vertical-align") {
         v
     } else if let Some(bs) = f.style.get("baseline-shift") {
-        bs
+        // css-inline-3 §4.2.3 : longueurs/%/sub/super =
+        // mêmes décalages que `vertical-align` ;
+        // `top`/`bottom` alignent le sous-arbre sur les bords
+        // de la line box (`vertical-align: top|bottom`) ;
+        // `center` le centre sur le centre de la line box —
+        // distinct de `middle` (x-height), traité à part.
+        bs.trim()
     } else if let Some(ab) = f.style.get("alignment-baseline") {
         // R-269 — `top`/`bottom` = bords de ligne ;
         // `above`/`over`/`below`/`under` = termes
@@ -2310,7 +2330,10 @@ fn va_place_y(
             "text-top" => y + base - p_ascent + f.marg_t,
             "bottom" | "ideographic" | "text-after-edge" => y + h - (f.rect.height + f.marg_b),
             "text-bottom" => y + base + p_descent - f.rect.height - f.marg_b,
-            "middle" | "center" | "central" | "mathematical" => {
+            // `center` (baseline-shift, §4.2.3) : centre de
+            // la margin box sur le centre de la **line box**.
+            "center" => y + h / 2.0 - mbox_h / 2.0 + f.marg_t,
+            "middle" | "central" | "mathematical" => {
                 y + base + p_xh / 2.0 - mbox_h / 2.0 + f.marg_t
             }
             "first-baseline" => y + (base - fb) + f.marg_t,
@@ -2327,9 +2350,10 @@ fn va_place_y(
         match va {
             "text-top" => y + base - p_ascent + f.marg_t,
             "text-bottom" => y + base + p_descent - em - f.marg_b,
-            "middle" | "center" | "central" | "mathematical" => {
-                y + base + p_xh / 2.0 - em / 2.0 + f.marg_t
-            }
+            // `center` : centre de la content area sur le
+            // centre de la line box (≠ `middle` en x-height).
+            "center" => y + h / 2.0 - em / 2.0 + f.marg_t,
+            "middle" | "central" | "mathematical" => y + base + p_xh / 2.0 - em / 2.0 + f.marg_t,
             "top" | "hanging" | "text-before-edge" => y + f.marg_t,
             "bottom" | "ideographic" | "text-after-edge" => y + h - (f.rect.height + f.marg_b),
             _ => y + (base - lb) + f.marg_t + dy,
@@ -2509,12 +2533,13 @@ impl LineAcc {
             let ext = if f.atomic {
                 match va {
                     "top" | "hanging" | "text-before-edge" => f.marg_t + f.rect.height + f.marg_b,
-                    "bottom" | "ideographic" | "text-after-edge" => mbox,
+                    // `center` (§4.2.3) : la line box grandit
+                    // pour contenir le sous-arbre centré —
+                    // même extension que `bottom`.
+                    "bottom" | "ideographic" | "text-after-edge" | "center" => mbox,
                     "text-top" => base - self.p_ascent + mbox,
                     "text-bottom" => base + self.p_descent,
-                    "middle" | "center" | "central" | "mathematical" => {
-                        base + self.p_xh / 2.0 + mbox / 2.0
-                    }
+                    "middle" | "central" | "mathematical" => base + self.p_xh / 2.0 + mbox / 2.0,
                     "first-baseline" => base - fb + mbox,
                     "last-baseline" => base - lb + mbox,
                     _ => base - lb + dy + mbox,
@@ -2533,9 +2558,12 @@ impl LineAcc {
                 match va {
                     "text-top" => base - self.p_ascent + em,
                     "text-bottom" => base + self.p_descent,
-                    "middle" | "center" | "central" | "mathematical" => {
-                        base + self.p_xh / 2.0 + em / 2.0
-                    }
+                    // `center` : la ligne ne doit que
+                    // contenir la content area (centrée —
+                    // la baseline est déjà comptée par le
+                    // `max` initial).
+                    "center" => em,
+                    "middle" | "central" | "mathematical" => base + self.p_xh / 2.0 + em / 2.0,
                     // `top`/`bottom` : margin edge = box lh,
                     // déjà couverte par `max_lh`. Baseline/
                     // sub/super : bas de glyphe ; `dy>0`

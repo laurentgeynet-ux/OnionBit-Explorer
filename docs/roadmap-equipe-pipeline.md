@@ -5031,3 +5031,55 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   seul. Verrou `vertical_align_runs_texte_content_area`
   (5 cas, inline.rs). Gates : inline 58/58, block
   146/146, **WPT 203/203**, clippy/fmt.
+- [x] **R-317 — Salve css-inline : manifeste WPT +93 tests
+  (`css/css-inline` passait de 0 à 93 entrées comptées) +
+  harnais (variantes `?class=`, images chemins absolus,
+  fontes BaselineDiagnostic) + moteur (insets logiques sur
+  `position:relative`, relative sur boîtes inline,
+  `baseline-shift: center` §4.2.3) — 234/295 mesurés, 61
+  échecs réels catalogués non skippés**
+  (`explorer-layout`, `explorer-render` tests — suite du
+  pilotage vol `inline-measure`/`line-metric`).
+  **Couverture** : `wpt-scan` recensait ~201 reftests
+  css-inline dont zéro comptés ; salve retenue hors
+  ruby/initial-letter/multicol/scroll/dynamic/line-clamp/
+  fieldset/fragmented/text-emphasis (surfaces d'autres
+  chantiers) → 93 entrées (alignment-baseline ×9,
+  baseline-shift ×4, baseline-source, br-* ×8,
+  dominant-baseline ×4, empty/phantom ×7, inline-block
+  baselines, text-box-trim ×55).
+  **Harnais** : émulation de `variant-class.js` — la
+  première variante `<meta name="variant" content=
+  "?class=…">` est posée en classes de `<html>` test et
+  ref à l'identique (comportement infra WPT) — exposé
+  ~8 tests qui « passaient » sans style appliqué ;
+  `resolve_in` appliqué aux `img src`/`url()` absolus
+  (`/css/support/*.png` ne chargeaient jamais — 3 assets
+  + `fonts/ahem.css` + `baseline-diagnostic-font.css`
+  téléchargés) ; `FontSource` sert `BaselineDiagnostic` +
+  `BaselineDiagnosticAlphabeticZero` (familles exactes).
+  **Moteur** : `rel_offsets` lit les **insets logiques**
+  en repli du physique (`inset-block-start`/`inset-inline-
+  *` mappés `logical_insets` — étaient ignorés ; la ref
+  `text-box-trim-start-001` s'en sert pour simuler le
+  trim) ; `position:relative` sur boîte **inline non
+  atomique** translate désormais ses fragments texte
+  (`rel_offsets_style` partagé, §9.3.3) ;
+  `baseline-shift: center` = centrage du sous-arbre sur
+  le **centre de la line box** (≠ `middle` en x-height —
+  atome : margin box ; texte : content area).
+  **Résultat honnête : 234/295** — le score brut a
+  *baissé* par rapport au pré-manifeste (203/203) parce
+  que 61 échecs réels sont désormais **comptés** : 
+  `text-box-trim` profond (accumulation, inline-box,
+  block-in-inline, first-line, floats ~40 cas),
+  `alignment-baseline` métriques réelles (BASE/ideographic
+  — nos replis top/middle/baseline), phantom line boxes
+  §2.3 + collapse-through (6), `br` line-height propre
+  (5), `baseline-shift` micro-écarts, `writing-mode`
+  vertical — file moteur documentée, pas de skip-list
+  (ADR-0010 : un échec réel reste compté).
+  Verrous : `baseline_shift_center_et_relative_inline`
+  (inline) + `relative_offset_insets_logiques` (block).
+  Gates : inline 59/59, block 147/147, WPT cliquet 234 ≥
+  203, clippy/fmt.

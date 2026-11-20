@@ -4030,3 +4030,143 @@ fn all_unset_netablit_pas_de_containing_block() {
         n2.rect.width
     );
 }
+
+/// R-313 — un conteneur `position:absolute` `top`+`bottom`
+/// (`height:auto`) connaît sa hauteur stretchée AVANT le
+/// flot du contenu : les items flex `align-items:stretch`
+/// (row) et les bases `flex-basis:%` (column) s'y
+/// résolvent. Sans ça, `#map` d'openstreetmap.org —
+/// flex-item de `#content{position:absolute;top:55px;
+/// bottom:0;display:flex}` — gardait sa hauteur de contenu
+/// (0) au lieu des 845 px du stretch (anomalie vol 898).
+#[test]
+fn abs_stretch_alimente_flex_items() {
+    // Row : `align-items:stretch` par défaut — l'item prend
+    // la hauteur cross du conteneur stretché (600−50 = 550).
+    let (dom, bx) = laid(
+        "<div id=c><div id=m>x</div></div>",
+        "#c{position:absolute;top:50px;bottom:0;width:100%;display:flex;flex-direction:row}\
+         #m{flex-grow:1}",
+    );
+    let m = find(&bx, by_tag_id(&dom, "m"));
+    assert_eq!(
+        m.rect.height, 550.0,
+        "item row dans abs top+bottom : height={} — attendu 550 (stretch cross)",
+        m.rect.height
+    );
+    // Column : `flex-basis:50%` se résout contre la hauteur
+    // main définie — la base déclarée doit être écrite sur
+    // `height`, pas laisser le rect à sa hauteur mesurée.
+    let (dom2, bx2) = laid(
+        "<div id=c><div id=m>x</div></div>",
+        "#c{position:absolute;top:50px;bottom:0;width:100%;display:flex;flex-direction:column}\
+         #m{flex-basis:50%}",
+    );
+    let m2 = find(&bx2, by_tag_id(&dom2, "m"));
+    assert_eq!(
+        m2.rect.height, 275.0,
+        "item column flex-basis:50%% : height={} — attendu 275",
+        m2.rect.height
+    );
+}
+
+/// R-314 — `justify-items`/`justify-self` sur boîtes bloc
+/// (css-align §6.1.1) : l'enfant bloc in-flow s'aligne dans
+/// l'axe inline du conteneur — auto-size = fit-content
+/// (approché par le fragment le plus large), `end` logique
+/// en rtl, marges `auto` prioritaires, `-webkit-center`
+/// cède devant `justify-self` explicite.
+#[test]
+fn justify_self_bloc_aligne_dans_le_conteneur() {
+    // width définie : alignement direct dans l'espace libre.
+    let (dom, bx) = laid(
+        "<div id=p><div id=c>x</div></div>",
+        "#p{width:400px} #c{width:100px;height:20px;justify-self:center}",
+    );
+    let c = find(&bx, by_tag_id(&dom, "c"));
+    assert!(
+        (c.rect.x - 150.0).abs() < 1.0,
+        "justify-self:center : x={} — attendu 150",
+        c.rect.x
+    );
+
+    // `end` sur le même gabarit : bord droit du conteneur.
+    let (dom, bx) = laid(
+        "<div id=p><div id=c>x</div></div>",
+        "#p{width:400px} #c{width:100px;height:20px;justify-self:end}",
+    );
+    let c = find(&bx, by_tag_id(&dom, "c"));
+    assert!(
+        (c.rect.x - 300.0).abs() < 1.0,
+        "justify-self:end : x={} — attendu 300",
+        c.rect.x
+    );
+
+    // `justify-items` du conteneur = défaut des enfants.
+    let (dom, bx) = laid(
+        "<div id=p><div id=c>x</div></div>",
+        "#p{width:400px;justify-items:center} #c{width:100px;height:20px}",
+    );
+    let c = find(&bx, by_tag_id(&dom, "c"));
+    assert!(
+        (c.rect.x - 150.0).abs() < 1.0,
+        "justify-items:center hérité : x={} — attendu 150",
+        c.rect.x
+    );
+
+    // rtl : `start` logique = bord droit.
+    let (dom, bx) = laid(
+        "<div id=p dir=rtl><div id=c>x</div></div>",
+        "#p{width:400px} #c{width:100px;height:20px;justify-self:start}",
+    );
+    let c = find(&bx, by_tag_id(&dom, "c"));
+    assert!(
+        (c.rect.x - 300.0).abs() < 1.0,
+        "justify-self:start rtl : x={} — attendu 300",
+        c.rect.x
+    );
+
+    // Marge `auto` prioritaire : §10.3.3 centre déjà —
+    // `justify-self:end` ne re-déplace pas.
+    let (dom, bx) = laid(
+        "<div id=p><div id=c>x</div></div>",
+        "#p{width:400px} #c{width:100px;height:20px;margin-left:auto;margin-right:auto;justify-self:end}",
+    );
+    let c = find(&bx, by_tag_id(&dom, "c"));
+    assert!(
+        (c.rect.x - 150.0).abs() < 1.0,
+        "marges auto + justify-self:end : x={} — attendu 150",
+        c.rect.x
+    );
+}
+
+#[test]
+fn relative_offset_insets_logiques() {
+    // R-317 — `inset-block-start`/`inset-inline-start` sur
+    // `position:relative` : mapping css-logical-1 vers les
+    // côtés physiques (`logical_insets`) — physique
+    // prioritaire quand les deux sont déclarés.
+    let (dom, bx) = laid(
+        "<div id=a>x</div><div id=b>x</div>",
+        "#a{position:relative;inset-block-start:-20px;inset-inline-start:15px;height:10px}",
+    );
+    let a = find(&bx, by_tag_id(&dom, "a"));
+    assert!(
+        (a.rect.y + 20.0).abs() < 0.5 && (a.rect.x - 15.0).abs() < 0.5,
+        "insets logiques : x={} y={} attendus 15/-20",
+        a.rect.x,
+        a.rect.y
+    );
+
+    // Physique prioritaire sur logique pour le même côté.
+    let (dom2, bx2) = laid(
+        "<div id=a>x</div>",
+        "#a{position:relative;top:7px;inset-block-start:-20px;height:10px}",
+    );
+    let a2 = find(&bx2, by_tag_id(&dom2, "a"));
+    assert!(
+        (a2.rect.y - 7.0).abs() < 0.5,
+        "top physique prioritaire : y={} attendu 7",
+        a2.rect.y
+    );
+}

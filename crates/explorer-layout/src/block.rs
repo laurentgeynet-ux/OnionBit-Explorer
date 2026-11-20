@@ -2762,11 +2762,32 @@ pub(crate) fn rel_offsets(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) ->
     if bx.position != Position::Relative {
         return (0.0, 0.0);
     }
+    rel_offsets_style(&bx.style, cb_w, fs, ctx)
+}
+
+/// Décalage `position: relative` lu sur un style calculé —
+/// partagé entre les boîtes bloc (`rel_offsets`) et les
+/// boîtes **inline** non atomiques (R-317 : leurs fragments
+/// de texte suivent le même décalage, §9.3.3).
+pub(crate) fn rel_offsets_style(
+    st: &ComputedStyle,
+    cb_w: f32,
+    fs: f32,
+    ctx: &BlockCtx,
+) -> (f32, f32) {
+    // Physique prioritaire, logique en repli — le nom logique
+    // alimentant chaque côté suit `writing-mode`/`direction`
+    // (`logical_insets`, même règle que l'ancrage absolu).
+    let (log_l, log_r, log_t, log_b) = logical_insets(st);
+    let side = |phys: &str, log: &str| {
+        st.get(phys)
+            .and_then(|_| css_px(st, phys, cb_w, fs, ctx))
+            .or_else(|| css_px(st, log, cb_w, fs, ctx))
+            .unwrap_or(0.0)
+    };
     (
-        css_px(&bx.style, "left", cb_w, fs, ctx).unwrap_or(0.0)
-            - css_px(&bx.style, "right", cb_w, fs, ctx).unwrap_or(0.0),
-        css_px(&bx.style, "top", cb_w, fs, ctx).unwrap_or(0.0)
-            - css_px(&bx.style, "bottom", cb_w, fs, ctx).unwrap_or(0.0),
+        side("left", log_l) - side("right", log_r),
+        side("top", log_t) - side("bottom", log_b),
     )
 }
 

@@ -2067,3 +2067,53 @@ fn vertical_align_runs_texte_content_area() {
         base_y + fb
     );
 }
+
+#[test]
+fn baseline_shift_center_et_relative_inline() {
+    // `baseline-shift: center` (css-inline-3 §4.2.3) :
+    // centre de la content area sur le centre de la LINE
+    // BOX — distinct de `middle` (baseline + xh/2 parente).
+    // fs20 → em 20 ; ligne 30 (strut) → y = 15 − 10 = 5.
+    let (dom, bx) = laid(
+        "<p>x<span>s</span></p>",
+        "p{font-size:10px;line-height:30px}\
+         span{font-size:20px;baseline-shift:center}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let f = p.children[0].lines[0]
+        .fragments
+        .iter()
+        .find(|f| !f.atomic && f.text == "s")
+        .expect("fragment texte du span");
+    assert!(
+        (f.rect.y - 5.0).abs() < 1.5,
+        "center : y={} attendu≈5 (centre ligne 15)",
+        f.rect.y
+    );
+
+    // `position: relative` + `inset-block-start` sur une
+    // boîte INLINE non atomique : le fragment suit le
+    // décalage logique (R-317 — `inset-*` n'étaient lus que
+    // pour les boîtes posées).
+    let frag_y = |css: &str| {
+        let (dom, bx) = laid("<p>x<span>s</span></p>", css);
+        let p = find(&bx, by_tag(&dom, "p"));
+        p.children[0].lines[0]
+            .fragments
+            .iter()
+            .find(|f| !f.atomic && f.text == "s")
+            .expect("fragment texte")
+            .rect
+            .y
+    };
+    let plain = frag_y("p{font-size:10px;line-height:30px}span{font-size:20px}");
+    let shifted = frag_y(
+        "p{font-size:10px;line-height:30px}\
+         span{font-size:20px;position:relative;inset-block-start:-10px}",
+    );
+    assert!(
+        (shifted - (plain - 10.0)).abs() < 0.5,
+        "inset-block-start relative : {plain} → {shifted} attendu {}",
+        plain - 10.0
+    );
+}
