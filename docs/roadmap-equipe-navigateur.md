@@ -8367,6 +8367,27 @@ MCP = adaptateur, jamais la base.
   vide par défaut. Verrou : `navigator_is_fixed_and_poor`
   réécrit. Reliquat : `sec-ch-ua*` absents,
   `navigator.vendor` vide.
+- [x] **Étape 332. §B-210 soldée — cluster entier
+  (a)-(e), une racine : regex `i`, les littéraux
+  échappés `\[`,`\.`,`\(`,`\)`,`\|`… sont émis échappés
+  au backend, plus bruts** (`explorer-jscore`
+  `regexp.rs` `push_folded`). Vol 967 : 5 signatures
+  à l'octet sur 11 sites — (b) `\[native` → `[` nu,
+  classe backend invalide @593 (fr24
+  `extractLocation`/error-stack-parser) ; (d) `\+`/`\*`
+  nus → quantificateur sans atome (gtag Google —
+  airbnb/globo/fonts) ; (c) `\?` nu + `\S`→classe →
+  `(?[` lu group-flag @240 (natgeo — la « régression
+  JS-C638 » était cette racine, pas une régression) ;
+  (a)+(e) `\)` nu ferme un groupe tôt → « end of
+  string not reached » @398/@281 (imgur/dropbox/
+  odysee/zendesk/discord). `\.` sous `i` matchait aussi
+  tout en silence (sémantique perdue). La branche sans
+  variante de casse émet via `class_char` (`\x{…}` —
+  sûr dans et hors classe). Verbatims des 5 signatures
+  compilent sous `''/i` ; sonde verbatim = Node à
+  l'identique ; release fr24 + imgur : `invalid
+  regex` 0. Verrou : `b210_regex_fold_escape` 2/2.
 - [x] **Étape 327. §B-204 soldée : `TextDecoder`
   `utf-16le`/`utf-16be` implémentés — verbatim diagrams.net
   (Emscripten `UTF16ToString`)** (`explorer-jscore`

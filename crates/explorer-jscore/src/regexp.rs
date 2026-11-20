@@ -2088,7 +2088,13 @@ fn push_folded(out: &mut String, c: char, fold: bool) {
             return;
         }
     }
-    out.push(c);
+    // §B-210 — `c` est un char LITTÉRAL : sans variante de casse
+    // il doit être échappé pour le backend, jamais émis brut —
+    // `\[` rendait `[` nu → ouvrait une classe backend
+    // (« Invalid character class », regex `extractLocation` /
+    // sentry de fr24, flag `i`) et `\.`/`\(`/`\|`/`\+`/`\*`/`\?`/
+    // `\{`/`\}`/`\^`/`$`/`\\` perdaient leur sens littéral.
+    class_char(out, u32::from(c));
 }
 
 /// Variantes de casse d'un char pour le fold non-`u` : uppercase
@@ -3264,7 +3270,7 @@ mod tests {
         assert_eq!(tr(r"\uD83D\uDCA5"), "(?:\\x{f003d}\\x{f04a5})");
         assert_eq!(
             tr(r"\uD83C\uDFFB-\uD83C\uDFFF"),
-            "(?:\\x{f003c}\\x{f07fb})-(?:\\x{f003c}\\x{f07ff})"
+            "(?:\\x{f003c}\\x{f07fb})\\x{2d}(?:\\x{f003c}\\x{f07ff})"
         );
         // Isolé (pas de paire) → sentinelle + astrals du lead.
         assert_eq!(tr(r"\uD83Dx"), "[\\x{f003d}\\x{1f400}-\\x{1f7ff}]x");
