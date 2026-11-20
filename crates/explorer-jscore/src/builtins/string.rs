@@ -739,10 +739,15 @@ pub(crate) fn match_result(
     // (énumerables — `named-groups/groups-object` test262).
     e.set_own(arr, "index", Value::Num(pos(m.index) as f64), true);
     e.set_own(arr, "input", Value::Str(input.clone()), true);
+    // JS-C632 : l'objet `groups` est un `ObjectCreate(null)` —
+    // proto nul (`(?<__proto__>…)` reste une entrée ordinaire).
     let groups_v = if m.named.is_empty() {
         Value::Undefined
     } else {
         let gobj = e.new_object();
+        if let Some(o) = e.heap.obj_mut(gobj) {
+            o.set_proto(Value::Null);
+        }
         for (k, v) in &m.named {
             let vv = match v {
                 Some(t) => re_str_val(e, t, dec),
@@ -769,8 +774,15 @@ pub(crate) fn match_result(
         let Value::Obj(ia) = e.new_array(idx) else {
             return Value::Obj(arr);
         };
-        if !m.named_indices.is_empty() {
+        // JS-C632 : `indices.groups` est toujours une prop own
+        // (`undefined` sans groupes nommés — spec MatchIndices).
+        let gi = if m.named_indices.is_empty() {
+            Value::Undefined
+        } else {
             let gobj = e.new_object();
+            if let Some(o) = e.heap.obj_mut(gobj) {
+                o.set_proto(Value::Null);
+            }
             for (k, r) in &m.named_indices {
                 let v = match r {
                     Some((s, t)) => {
@@ -780,8 +792,9 @@ pub(crate) fn match_result(
                 };
                 e.set_own(gobj, k, v, true);
             }
-            e.set_own(ia, "groups", Value::Obj(gobj), true);
-        }
+            Value::Obj(gobj)
+        };
+        e.set_own(ia, "groups", gi, true);
         e.set_own(arr, "indices", Value::Obj(ia), true);
     }
     Value::Obj(arr)

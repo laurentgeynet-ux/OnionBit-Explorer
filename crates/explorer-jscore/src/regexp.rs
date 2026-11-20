@@ -588,6 +588,7 @@ fn translate_pattern(
         eff_i: icase,
         n_groups,
         names: std::collections::BTreeSet::new(),
+        name_num: std::collections::BTreeMap::new(),
         all_names,
         emitted: Vec::new(),
         need_synth,
@@ -1279,6 +1280,10 @@ struct Trans {
     n_groups: usize,
     /// Noms déclarés *avant* la position courante.
     names: std::collections::BTreeSet<String>,
+    /// JS-C632 : nom → numéro de groupe — une backref `\k<name>`
+    /// ne capture que si le groupe est **clos** ici (`closed`),
+    /// sinon elle matche vide (`\k<a>` dans `(?<a>…)` propre).
+    name_num: std::collections::BTreeMap<String, usize>,
     /// Tous les noms du pattern (backref avant déclaration).
     all_names: std::collections::BTreeSet<String>,
     /// Nom **émis** par numéro de groupe (0-indexé) — le nom
@@ -1911,18 +1916,10 @@ fn prescan(cs: &[char]) -> (std::collections::BTreeSet<String>, usize, bool) {
             '(' if !in_class => {
                 if cs.get(i + 1) == Some(&'?') {
                     if cs.get(i + 2) == Some(&'<') && !matches!(cs.get(i + 3), Some('=' | '!')) {
-                        let mut j = i + 3;
-                        let mut name = String::new();
-                        while let Some(&d) = cs.get(j) {
-                            if d == '>' {
-                                break;
-                            }
-                            name.push(d);
-                            j += 1;
-                        }
-                        if cs.get(j) == Some(&'>') && valid_group_name(&name) {
+                        if let Some((name, j)) = scan_group_name(cs, i + 3) {
                             all.insert(name);
                             n += 1;
+                            i = j - 1;
                         }
                     }
                 } else {
@@ -2351,25 +2348,14 @@ fn translate_group(
         }
         Some('<') => {
             // Groupe nommé : `name` = IdentifierName, unique.
-            let mut j = i + 3;
-            let mut name = String::new();
-            while let Some(&c) = cs.get(j) {
-                if c == '>' {
-                    break;
-                }
-                name.push(c);
-                j += 1;
-            }
-            if cs.get(j) != Some(&'>') {
+            let Some((name, j)) = scan_group_name(cs, i + 3) else {
                 return Err(err());
-            }
-            if !valid_group_name(&name) {
-                return Err(err());
-            }
+            };
             if !t.names.insert(name.clone()) {
                 return Err(format!("duplicate group name `{name}` in /{src}/"));
             }
             t.groups_open += 1;
+            t.name_num.insert(name.clone(), t.groups_open);
             t.open_stack.push(Some(t.groups_open));
             t.look_pos.push(None);
             t.mod_stack.push(None);
@@ -2395,7 +2381,7 @@ fn translate_group(
             out.push_str("(?P<");
             out.push_str(&emit_name);
             out.push('>');
-            Ok(j + 1)
+            Ok(j)
         }
         Some('P' | '#') => Err(err()),
         _ => {
@@ -2514,6 +2500,69 @@ fn valid_group_name(name: &str) -> bool {
     cs.all(crate::lexer::is_ident_part_pub)
 }
 
+/// JS-C632 : scanne un `RegExpIdentifierName` de `cs[j]` jusqu'à
+/// `>` — les `UnicodeEscapeSequence` `\uXXXX`/`\u{H+}` sont
+/// **décodés** avant validation (`(?<\u{03C0}>…)` ≡ `(?<π>…)`,
+/// `\u{104A4}` astral et paire `\uD8\uDC` acceptés). Retourne
+/// `(nom décodé, index après `>`)` ou `None` (malformé, escape
+/// non-`\u`, surrogate orphelin, nom non-identifier).
+fn scan_group_name(cs: &[char], mut j: usize) -> Option<(String, usize)> {
+    let mut name = String::new();
+    let mut lead: Option<u32> = None;
+    while let Some(&c) = cs.get(j) {
+        if c == '>' {
+            break;
+        }
+        let cp = if c == '\\' {
+            if cs.get(j + 1) != Some(&'u') {
+                return None;
+            }
+            if cs.get(j + 2) == Some(&'{') {
+                let mut k = j + 3;
+                let mut v: u32 = 0;
+                let mut nd = 0;
+                while let Some(h) = cs.get(k).and_then(|d| d.to_digit(16)) {
+                    v = v.checked_mul(16)?.checked_add(h)?;
+                    nd += 1;
+                    k += 1;
+                }
+                if nd == 0 || v > 0x10_FFFF || cs.get(k) != Some(&'}') {
+                    return None;
+                }
+                j = k + 1;
+                v
+            } else {
+                let mut v: u32 = 0;
+                for k in j + 2..j + 6 {
+                    v = v * 16 + cs.get(k)?.to_digit(16)?;
+                }
+                j += 6;
+                v
+            }
+        } else {
+            j += 1;
+            c as u32
+        };
+        if let Some(l) = lead.take() {
+            let astral = 0x10000 + ((l - 0xD800) << 10) + cp.checked_sub(0xDC00)?;
+            if !(0xDC00..=0xDFFF).contains(&cp) {
+                return None;
+            }
+            name.push(char::from_u32(astral)?);
+            continue;
+        }
+        match cp {
+            0xD800..=0xDBFF => lead = Some(cp),
+            0xDC00..=0xDFFF => return None,
+            _ => name.push(char::from_u32(cp)?),
+        }
+    }
+    if lead.is_some() || cs.get(j) != Some(&'>') || !valid_group_name(&name) {
+        return None;
+    }
+    Some((name, j + 1))
+}
+
 impl Trans {
     /// Un échappement `\…` à `cs[i]` → fragment natif + validation.
     /// Retourne `(fragment, next_index)` ou une erreur `SyntaxError`.
@@ -2596,29 +2645,31 @@ impl Trans {
             // forme `\k<name>` est exigée (malformée → SyntaxError).
             let strict_k = self.unicode || !self.all_names.is_empty();
             if cs.get(i + 2) == Some(&'<') {
-                let mut j = i + 3;
-                let mut name = String::new();
-                while let Some(&d) = cs.get(j) {
-                    if d == '>' {
-                        break;
-                    }
-                    name.push(d);
-                    j += 1;
-                }
-                if cs.get(j) == Some(&'>') && valid_group_name(&name) {
+                if let Some((name, j)) = scan_group_name(cs, i + 3) {
                     if self.names.contains(&name) {
+                        // Le groupe est déclaré mais pas encore
+                        // **fermé** (`\k<a>` dans `(?<a>…)`) — il
+                        // ne peut pas avoir capturé → la backref
+                        // matche vide (spec 21.2.2.9, comme `\N`).
+                        let closed = self
+                            .name_num
+                            .get(&name)
+                            .is_some_and(|n| self.closed.contains(n));
+                        if !closed {
+                            return Ok(("(?:)".into(), j));
+                        }
                         // JS-C624 : groupe renommé → `\k<synth>`.
                         let nm = self
                             .orig_to_synth
                             .get(&name)
                             .map_or(name.as_str(), String::as_str);
-                        return Ok((self.wrap_backref(format!("\\k<{nm}>")), j + 1));
+                        return Ok((self.wrap_backref(format!("\\k<{nm}>")), j));
                     }
                     if self.all_names.contains(&name) {
                         // Référence avant déclaration : le groupe ne
                         // peut pas avoir capturé ici → la backref
                         // matche la chaîne vide (spec 21.2.2.9).
-                        return Ok(("(?:)".into(), j + 1));
+                        return Ok(("(?:)".into(), j));
                     }
                     if strict_k {
                         return Err(format!("unknown group `{name}` in /{src}/"));

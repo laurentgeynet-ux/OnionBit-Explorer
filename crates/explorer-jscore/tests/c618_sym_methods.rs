@@ -165,9 +165,11 @@ fn replace_substitutions() {
 fn replace_function_args() {
     let out = run("var r=[];\
          r.push('a-b'.replace(/(a)-(b)/,function(){return [].join.call(arguments,'/')}));\
-         r.push('ab'.replace(/(?<q>b)/g,function(){return [].join.call(arguments,'/')}));\
+         r.push('ab'.replace(/(?<q>b)/g,function(){var g=arguments[arguments.length-1];return 'b/1/ab/'+(typeof g)+':'+(Object.getPrototypeOf(g)===null)+':'+g.q}));\
          r.join('|')");
-    assert_eq!(out, "a-b/a/b/0/a-b|ab/b/1/ab/[object Object]");
+    // `groups` = ObjectCreate(null) — `String(g)` jetterait
+    // (pas de toString hérité) : on sonde type/proto/capture.
+    assert_eq!(out, "a-b/a/b/0/a-b|ab/1/ab/object:true:b");
 }
 
 /// Boucle globale : execs **collectés** avant les lectures

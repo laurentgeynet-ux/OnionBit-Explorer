@@ -15736,6 +15736,39 @@ chaque gain rapporté contre les **deux** archétypes.
   modifier/word-char. **Écarts catalogués restants** :
   `\P{P}`+i sur props à pré-image de fold non triviale,
   `\d` Unicode fancy (`character-class-digit-*`).
+- [x] **JS-C632 — reliquats named-groups/match-indices :
+  échappements `\u` dans les noms, backref vers groupe
+  ouvert = vide, `groups`/`indices.groups` à proto nul —
+  `named-groups`+`match-indices` 68 → 78/80 (+10)**
+  (`regexp.rs` + `builtins/string.rs`, gate
+  `tests/c632_named_groups.rs` **4/4**).
+  **`scan_group_name`** partagé (déclaration `(?<…>`,
+  référence `\k<…>`, prescan `all_names`) : les
+  `UnicodeEscapeSequence` `\uXXXX`/`\u{H+}` sont décodées
+  avant validation `IdentifierName` — astral via `\u{…}`
+  ou paire de surrogates `\uD8\uDC` (`(?<\u{03C0}>)` ≡
+  `(?<π>`, `(?<ಠ_ಠ>)`, `(?<$𐒤>)`) ; escape non-`\u`,
+  surrogate orphelin, `>` absent → `SyntaxError`.
+  **`name_num`** (nom → numéro) : une backref `\k<name>`
+  vers un groupe **ouvert** à sa position — propre groupe
+  `(?<a>\k<a>…)` ou groupe déclaré plus loin — matche la
+  chaîne vide (spec 21.2.2.9, même règle que `\N` via
+  `closed`). **`groups`** est désormais un
+  `ObjectCreate(null)` : `__proto__` y est une entrée
+  ordinaire (`/(?<__proto__>.)/.exec('a').groups.__proto__`
+  = `'a'`, `Object.getPrototypeOf` = `null`) — le gate
+  c618 `replace_function_args` ajusté : `join` sur des
+  arguments contenant `groups` jette `TypeError` comme V8
+  (pas de `toString` hérité). **`indices.groups`** est
+  toujours une prop own (`undefined` sans groupes nommés,
+  spec MatchIndices), proto nul avec groupes.
+  **Mesures** : `named-groups`+`match-indices` (50
+  fichiers) **78/80** — reste `lookbehind.js` ×1 fichier
+  (2 modes, lookbehind à taille non constante = limite
+  fancy-regex, catalogué) ; 10 fichiers `regexp-duplicate-
+  named-groups` skippés (feature non supportée). RegExp+
+  String nogen : pas de régression (échecs = pools
+  catalogués).
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,
