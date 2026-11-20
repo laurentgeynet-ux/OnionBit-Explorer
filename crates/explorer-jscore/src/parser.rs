@@ -1790,17 +1790,20 @@ impl Parser {
     }
 
     /// Early errors des paramètres de fonction : doublons si le
-    /// corps est strict ou les params non-simples, nom de
-    /// function-expression ∩ params (`function f(f)`), et params
-    /// ∩ `LexicallyDeclaredNames` du corps (corps éager). Pour un
+    /// corps est strict ou les params non-simples, et params ∩
+    /// `LexicallyDeclaredNames` du corps (corps éager). Pour un
     /// corps différé la vérification est différée à sa
     /// matérialisation — déviation documentée (V-5a).
+    ///
+    /// NB : `function f(f)` en expression est LÉGAL — le nom de la
+    /// function-expression se lie dans l'environnement qui
+    /// enveloppe les paramètres, qui le masquent (V8 accepte en
+    /// strict comme en sloppy ; verbatim indeed §B-170).
     fn check_fn_params(
         &self,
         params: &[Param],
         body: Option<&[Stmt]>,
         strict_eff: bool,
-        expr_name: Option<&str>,
     ) -> Result<()> {
         let mut names: Vec<Rc<str>> = Vec::new();
         for p in params {
@@ -1816,13 +1819,6 @@ impl Parser {
                         return Err(self.err(format!("duplicate parameter name `{}`", names[i])));
                     }
                 }
-            }
-        }
-        if let Some(n) = expr_name {
-            if names.iter().any(|p| &**p == n) {
-                return Err(self.err(format!(
-                    "function name `{n}` may not be used as a parameter name"
-                )));
             }
         }
         if let Some(b) = body {
@@ -2774,7 +2770,7 @@ impl Parser {
                     rest: false,
                 }];
                 if let FnBody::Parsed(b) = &body {
-                    self.check_fn_params(&params, Some(b), true, None)?;
+                    self.check_fn_params(&params, Some(b), true)?;
                 }
                 let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
@@ -2814,7 +2810,7 @@ impl Parser {
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
                 if let FnBody::Parsed(b) = &body {
-                    self.check_fn_params(&params, Some(b), true, None)?;
+                    self.check_fn_params(&params, Some(b), true)?;
                 }
                 let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
@@ -2859,7 +2855,7 @@ impl Parser {
                     rest: false,
                 }];
                 if let FnBody::Parsed(b) = &body {
-                    self.check_fn_params(&params, Some(b), true, None)?;
+                    self.check_fn_params(&params, Some(b), true)?;
                 }
                 let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
@@ -2894,7 +2890,7 @@ impl Parser {
                     self.next();
                     let (body, strict) = self.arrow_body(no_in)?;
                     if let FnBody::Parsed(b) = &body {
-                        self.check_fn_params(&params, Some(b), true, None)?;
+                        self.check_fn_params(&params, Some(b), true)?;
                     }
                     let eoff = self.off_prev_end();
                     return Ok(Some(Expr::Function(Rc::new(FnLit {
@@ -3549,7 +3545,7 @@ impl Parser {
                         self.in_gen = false; // get/set : jamais générateurs
                         let (body, strict) = self.fn_body_or_deferred()?;
                         if let FnBody::Parsed(b) = &body {
-                            self.check_fn_params(&params, Some(b), strict, None)?;
+                            self.check_fn_params(&params, Some(b), strict)?;
                         }
                         self.in_gen = outer_gen;
                         let fun = Rc::new(FnLit {
@@ -3581,7 +3577,7 @@ impl Parser {
                         self.in_gen = gen;
                         let (body, strict) = self.fn_body_or_deferred()?;
                         if let FnBody::Parsed(b) = &body {
-                            self.check_fn_params(&params, Some(b), strict, None)?;
+                            self.check_fn_params(&params, Some(b), strict)?;
                         }
                         self.in_gen = outer_gen;
                         props.push(ObjProp::Prop(
@@ -3760,16 +3756,15 @@ impl Parser {
         self.in_gen = gen;
         let (body, strict) = self.fn_body_or_deferred()?;
         // Early errors params↔corps : doublons (strict ou
-        // non-simples), nom d'expression ∩ params, params ∩
-        // lexicales du corps — corps différé : la part `corps`
-        // attend la matérialisation (déviation V-5a).
+        // non-simples) et params ∩ lexicales du corps — corps
+        // différé : la part `corps` attend la matérialisation
+        // (déviation V-5a).
         {
             let body_stmts = match &body {
                 FnBody::Parsed(b) => Some(&b[..]),
                 FnBody::Deferred(_) => None,
             };
-            let expr_name = if decl { None } else { name.as_deref() };
-            self.check_fn_params(&params, body_stmts, strict, expr_name)?;
+            self.check_fn_params(&params, body_stmts, strict)?;
         }
         // `fn_body` restaure la valeur **posée juste avant** —
         // sans ce second restore, un `function(){}` non-générateur
@@ -4169,7 +4164,7 @@ impl Parser {
                 b
             } else {
                 let b = self.scoped_fn_body(true)?;
-                self.check_fn_params(&params, Some(&b), true, None)?;
+                self.check_fn_params(&params, Some(&b), true)?;
                 FnBody::Parsed(Rc::new(b))
             };
             self.strict = outer_strict;

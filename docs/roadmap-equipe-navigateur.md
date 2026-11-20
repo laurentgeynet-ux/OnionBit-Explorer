@@ -8367,6 +8367,30 @@ MCP = adaptateur, jamais la base.
   vide par défaut. Verrou : `navigator_is_fixed_and_poor`
   réécrit. Reliquat : `sec-ch-ua*` absents,
   `navigator.vendor` vide.
+- [x] **Étape 335. §B-170 soldée : `function e(e)` en
+  function-expression est LÉGAL — le check
+  « nom d'expression ∩ params » (JS-C611) était une
+  early-error inventée** (`explorer-jscore` `parser.rs`).
+  Cluster vols 894-972 : `SyntaxError: function name
+  'e' may not be used as a parameter name` — twitch ×5
+  vagues (:1:36129, **boot-mort**), bilibili :457153,
+  tiktok :80509, vimeo storm ×17, indeed ×6 vagues.
+  Spec : le nom d'une function-expression se lie dans
+  l'environnement qui ENVELOPPE les paramètres — un
+  paramètre homonyme le masque légitimement (V8
+  accepte sloppy ET strict ; aucune early error
+  `BoundNames(FormalParameters) ∩ nom` n'existe). Le
+  paramètre `expr_name` de `check_fn_params` retiré ;
+  les vraies early errors préservées (doublons strict
+  / non-simples, params ∩ lexicales du corps,
+  `eval`/`arguments`). Verrou :
+  `b170_fnexpr_name_param` 2/2 — sémantique = Node
+  (param masque le nom, `rec` visible en corps,
+  strict idem). Bonus validation : assertion
+  `lang.rs` obsolète corrigée — `Array.isArray(
+  arguments)` = `false` en spec (JS-C640 avait rendu
+  le moteur correct, l'attendu vérifiait l'ancien
+  comportement faux).
 - [x] **Étape 334. §B-212 soldée : `querySelectorAll`
   rend un `NodeList` statique, pas un `Array` — le
   mini-jQuery d'OneTrust dispatche dessus**

@@ -8034,10 +8034,13 @@ fn c24_mapped_arguments() {
         ev_str("(function f(){return arguments.callee===f})()"),
         "true"
     );
-    // `arguments` est un Array exotique (spec `Array.isArray` → true).
+    // `arguments` n'est PAS un Array exotique — spec
+    // `IsArray` → false (objet ordinaire à [[ParameterMap]],
+    // JS-C640 ; l'assertion historique vérifiait le comportement
+    // faux de l'implémentation).
     assert_eq!(
         ev_str("(function(){return Array.isArray(arguments)})(1)"),
-        "true"
+        "false"
     );
 }
 
