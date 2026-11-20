@@ -15914,6 +15914,15 @@ chaque gain rapporté contre les **deux** archétypes.
   capturants (T15, incompressible — captures
   observables), quantificateur lazy nullable
   (`nullable-quantifier`), T18.
+- [x] **JS-C639 — `Symbol.matchAll` `IsRegExp` :
+  appel unique via `Construct`, ordre observable
+  `ToString(arg)`→`Get(flags)`→`@@match`, propagation
+  d'erreur du getter — **4/4**, comportement déjà livré
+  par JS-C634 — verrou**
+  (`tests/c639_matchall_isregexp.rs` **2/2**).
+  Aucun code moteur requis : le `regexp_ctor` spec de
+  C634 appelle `IsRegExp` dans `Construct` — ordre et
+  propagation corrects mesurés ; le gate verrouille.
 - [x] **JS-C634 — `RegExp(pattern, flags)` spec :
   `IsRegExp` (`@@match` observable), early-return sur
   `SameValue(newTarget, pattern.constructor)`, regexp-like
