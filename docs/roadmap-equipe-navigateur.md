@@ -8367,6 +8367,28 @@ MCP = adaptateur, jamais la base.
   vide par défaut. Verrou : `navigator_is_fixed_and_poor`
   réécrit. Reliquat : `sec-ch-ua*` absents,
   `navigator.vendor` vide.
+- [x] **Étape 337. §B-215 soldée : appel bare `f()`
+  dans `with(o)` reçoit `this = o` — verbatim ars
+  `cannot read 'excludedCategories' of Undefined`
+  ×68 groupés soldé** (`explorer-jscore` `heap.rs`
+  `Env::any_with` + `interp/mod.rs` `with_this_of` +
+  `interp/eval.rs` bras `Expr::Ident` de `Call`).
+  Alpine évalue ses bindings via `new Function(
+  "scope","with(scope){ let r = <expr>; return r }")`
+  — un appel bare dans un `with` a pour `this`
+  l'objet `with` (spec `GetThisValue` d'une référence
+  à base object-env). Le moteur passait `Undefined`
+  → `this.excludedCategories`/`isCategoryExcluded`/
+  `date` jetaient (arstechnica vols 932→972). Fix :
+  flag `any_with` hérité à la création d'env (coût
+  nul hors `with`) ; le bras `Call` sur `Ident`
+  résout le receiver via `with_this_of` (marche la
+  chaîne dans l'ordre d'`env_get_seen` — `with`
+  porteur → son objet, record déclaratif →
+  `undefined`). Sonde : 11/11 cas identiques à Node
+  (forme verbatim `new Function`, imbriqués, let-
+  shadow, `@@unscopables`, `var` traversant,
+  fn-scope). Verrou : `b215_with_this` 1/1.
 - [x] **Étape 336. §B-213 soldée : surface CSSOM
   priorité — `getPropertyPriority` + 3ᵉ arg
   `priority` de `setProperty` + suffixe

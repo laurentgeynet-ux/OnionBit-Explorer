@@ -618,8 +618,10 @@ impl Engine {
             }
             Expr::Call(callee, arg_exprs, call_pos) => {
                 enum Callee {
-                    /// `expr(…)` — f pre-evaluated, global receiver.
-                    Bare(Value),
+                    /// `expr(…)` — f pre-evaluated + receiver
+                    /// (`Undefined` sauf résolution d'ident via un
+                    /// `with` — §B-215, `GetThisValue` object-env).
+                    Bare(Value, Value),
                     /// `o.m(…)`/`o[k](…)` — receiver is the base ;
                     /// `usize` = site AST du callee (IC JS-C500).
                     Member(Value, Rc<str>, usize),
@@ -674,7 +676,22 @@ impl Engine {
                         let k = self.eval_expr(env, this.clone(), key)?;
                         Callee::Super(Rc::from(self.prop_key(k)?))
                     }
-                    _ => Callee::Bare(self.eval_expr(env, this.clone(), callee)?),
+                    Expr::Ident(n) => {
+                        let f = self.eval_expr(env, this.clone(), callee)?;
+                        // §B-215 — `with (o) { f() }` : `this` =
+                        // l'objet `with` si `f` s'y résout
+                        // (Alpine évalue ses bindings via
+                        // `new Function("scope", "with (scope){…}")`
+                        // — le `this` du composant passait à
+                        // `undefined`, verbatim ars ×68).
+                        let recv = if env.borrow().any_with {
+                            self.with_this_of(env, n).unwrap_or(Value::Undefined)
+                        } else {
+                            Value::Undefined
+                        };
+                        Callee::Bare(f, recv)
+                    }
+                    _ => Callee::Bare(self.eval_expr(env, this.clone(), callee)?, Value::Undefined),
                 };
                 let args = self.eval_args(env, this.clone(), arg_exprs)?;
                 // N1.1 — site d'appel de CE `Call` : posé après
@@ -688,7 +705,7 @@ impl Engine {
                     // Receiver `undefined` — le callee sloppy le
                     // coercera vers l'objet global, le strict le
                     // garde (spec `OrdinaryCallBindThis`).
-                    Callee::Bare(f) => {
+                    Callee::Bare(f, recv) => {
                         if direct_eval
                             && matches!((f.clone(), self.eval_fn.clone()), (Value::Obj(a), Value::Obj(b)) if a == b)
                         {
@@ -710,8 +727,7 @@ impl Engine {
                                 None => Ok(Value::Undefined),
                             };
                         }
-                        let r =
-                            self.call_value_masked(mask_slot, f.clone(), Value::Undefined, &args);
+                        let r = self.call_value_masked(mask_slot, f.clone(), recv, &args);
                         match r {
                             Err(t) if matches!(f, Value::Undefined | Value::Null) => {
                                 Err(match &callee_lbl {

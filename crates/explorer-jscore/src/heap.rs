@@ -2899,6 +2899,13 @@ pub struct Env {
     /// lieu de remonter au parent. `false` partout ailleurs —
     /// le comportement historique « Uninit = absent » reste.
     pub tdz: bool,
+    /// §B-215 — la chaîne de portées contient un `EnvKind::With`
+    /// (soi-même ou un ancêtre) : les appels bare `f()` doivent
+    /// alors résoudre le receiver `with`-object (spec
+    /// `GetThisValue` d'une référence à base object-env). Flag
+    /// hérité à la création — le scan du receiver ne court que
+    /// quand un `with` existe réellement.
+    pub any_with: bool,
 }
 
 /// Storage flavour of an [`Env`].
@@ -3481,10 +3488,12 @@ impl Env {
     pub fn local(parent: EnvRef) -> EnvRef {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
+        let any_with = parent.borrow().any_with;
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Local(Bindings::new(std::panic::Location::caller())),
             parent: Some(parent),
             tdz: false,
+            any_with,
         }))
     }
 
@@ -3497,6 +3506,7 @@ impl Env {
             kind: EnvKind::Global(Bindings::new(std::panic::Location::caller())),
             parent: None,
             tdz: false,
+            any_with: false,
         }))
     }
 
@@ -3506,10 +3516,12 @@ impl Env {
     pub fn block(parent: EnvRef) -> EnvRef {
         crate::j17_tick(&crate::J17_ENV);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
+        let any_with = parent.borrow().any_with;
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Block(Bindings::new(std::panic::Location::caller())),
             parent: Some(parent),
             tdz: false,
+            any_with,
         }))
     }
 
@@ -3532,6 +3544,7 @@ impl Env {
             kind: EnvKind::With(obj),
             parent: Some(parent),
             tdz: false,
+            any_with: true,
         }))
     }
 }

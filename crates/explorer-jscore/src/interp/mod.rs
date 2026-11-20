@@ -7359,6 +7359,71 @@ impl Engine {
         Ok(true)
     }
 
+    /// §B-215 — receiver d'un appel bare `f()` quand la chaîne de
+    /// portées contient un `with` (spec `GetThisValue` d'une
+    /// référence à base object-env) : si `name` se résout sur un
+    /// `EnvKind::With`, l'objet `with` est le `this` ; résolution
+    /// sur tout autre record → `undefined` (None). Marche la
+    /// chaîne dans le même ordre qu'`env_get_seen`, arrêtée au
+    /// premier record porteur. Ne doit être invoquée que si
+    /// `env.any_with` (coût nul hors `with` — `YouTube` ~67M gets).
+    pub(crate) fn with_this_of(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
+        let mut cur = Some(env.clone());
+        while let Some(e) = cur {
+            enum Next {
+                Up(Option<EnvRef>),
+                Alias(EnvRef, String),
+                /// Liaison trouvée sur un record déclaratif →
+                /// receiver `undefined`.
+                Decl,
+            }
+            let (with_oid, next) = {
+                let b = e.borrow();
+                match &b.kind {
+                    EnvKind::With(oid) => (Some(*oid), None),
+                    EnvKind::Local(m) | EnvKind::Block(m) | EnvKind::Global(m) => (
+                        None,
+                        Some(match m.get(name) {
+                            Some(EnvCell::Bind(_) | EnvCell::LazyArgs(_)) => Next::Decl,
+                            Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
+                            Some(EnvCell::Uninit) => {
+                                if b.tdz {
+                                    Next::Decl
+                                } else {
+                                    Next::Up(b.parent.clone())
+                                }
+                            }
+                            None => Next::Up(b.parent.clone()),
+                        }),
+                    ),
+                }
+            };
+            if let Some(oid) = with_oid {
+                let bound = match self.with_has(oid, name) {
+                    Ok(b) => b,
+                    Err(Thrown(v)) => {
+                        self.env_err = Some(v);
+                        return None;
+                    }
+                };
+                cur = {
+                    let b = e.borrow();
+                    b.parent.clone()
+                };
+                if bound {
+                    return Some(Value::Obj(oid));
+                }
+                continue;
+            }
+            match next {
+                Some(Next::Up(p)) => cur = p,
+                Some(Next::Alias(t, n)) => return self.with_this_of(&t, &n),
+                Some(Next::Decl) | None => return None,
+            }
+        }
+        None
+    }
+
     /// JS-C628 — `delete x` : marche les envs dans l'ordre —
     /// `with` → `[[Delete]]` sur l'objet environnant (spec
     /// `ObjectEnvironmentRecord.DeleteBinding`) ; record
