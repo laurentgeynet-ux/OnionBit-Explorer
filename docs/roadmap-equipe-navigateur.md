@@ -16267,6 +16267,32 @@ chaque gain rapporté contre les **deux** archétypes.
   nogen 4 903/5 033 (échecs = pools catalogués :
   property-escapes, lookbehind variable, capture-reset
   `*`/`+` non borné, nullable-lazy, depth 200).
+- [x] **JS-C643 — `\p{…}` mode `u`/`v` : match **exact**
+  des noms/valeurs spec — propriétés retirées
+  (`Hyphen`, `Other_*`, `Grapheme_Link`,
+  `Prepended_Concatenation_Mark`), variantes loose
+  (`Ascii`, `ANY`, `gc=uppercaseletter`, espaces,
+  `_-_…_-_`), `Name` binaire + `=`, `Is`/`In` préfixés
+  et `\p` nu → `SyntaxError` — dossier
+  `property-escapes` non-généré 286 → **288/288**
+  (144 fichiers, 0 skip)**
+  (`regexp.rs` `prop_escape_frag` + tables, gate
+  `tests/c643_prop_escape_names.rs` **5/5**).
+  **Tables** : `BINARY_PROPS` (noms + alias normatifs
+  `AHex`/`CI`/`Hex`/`IDC`…), `GC_VALS` (noms longs +
+  alias `LC`/`Lu`…), `SCRIPT_VALS` (noms + ISO 15924 +
+  `Common`/`Inherited`/`Unknown`). **`Name=Value`** :
+  `Name ∈ {General_Category, gc, Script, sc,
+  Script_Extensions, scx}` seul — `ASCII=T`,
+  `IsScript=…` → `SyntaxError`. **Émissions** :
+  `sc(x)=Unknown`/`Zzzz` → `\p{Cn}` (fancy ignore
+  `sc=Unknown`, jeu quasi `Unassigned`) ;
+  `CWKCF`/`Changes_When_NFKC_Casefolded` → borne
+  inférieure honnête `[\p{Lu}\p{Lt}]` (table NFKC_CF
+  absente du backend — catalogué JS-C641). **`\p` nu**
+  en `u`/`v` → `SyntaxError` (`\pL`, le backend le
+  lisait `\p{L}`). Passthrough non-`u` (§B-210/§B-212)
+  inchangé.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,
