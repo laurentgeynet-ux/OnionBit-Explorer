@@ -38,11 +38,21 @@
 // calculés utiles sont embarqués dans le geodiff — le JSON
 // devient auto-porteur pour la transposition vers WPT.
 //
+// État de page différent : un delta |dy|/|dh| > --pagestate-tol
+// (2 000 px) n'est pas un bug par élément mais un appariement
+// au plus proche entre deux états de page (pub/lazy-load/DOM
+// divergent — sofascore +54 000, nypost −45 000) : flag
+// `page_state` + compteur dédié + pattern, sans les sortir
+// du score (la page diverge réellement).
+// Orphelins : `eng_only_top`/`ref_only_top` = top 20 clés
+// — un ref_only massif qualifie un mur JS/hydration en un
+// coup d'œil, sans lire la liste plate.
+//
 // Usage :
 //   node scripts/geo_diff.mjs site.geom.json site.ref.json
 //     [--tol 2] [--out site.geodiff.json] [--top 12]
 //     [--text] [--min-matched 20] [--moved-tol 50]
-//     [--styles site.styles.json]
+//     [--pagestate-tol 2000] [--styles site.styles.json]
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
@@ -50,7 +60,7 @@ const args = process.argv.slice(2);
 // Options qui consomment la valeur suivante — toute nouvelle
 // option à valeur DOIT être ajoutée ici, sinon sa valeur
 // devient un positionnel (crash ENOENT sur engFile).
-const VALUE_OPTS = new Set(['--tol', '--out', '--top', '--min-matched', '--moved-tol', '--styles']);
+const VALUE_OPTS = new Set(['--tol', '--out', '--top', '--min-matched', '--moved-tol', '--styles', '--pagestate-tol']);
 const positional = args.filter((a, i) => !a.startsWith('--') &&
   !VALUE_OPTS.has(args[i - 1]));
 const opt = (n, d) => {
@@ -67,6 +77,7 @@ const topN = Number(opt('top', 12));
 const out = opt('out', '');
 const minMatched = Number(opt('min-matched', 20));
 const movedTol = Number(opt('moved-tol', 50));
+const pageStateTol = Number(opt('pagestate-tol', 2000));
 const keepText = args.includes('--text');
 
 const eng = JSON.parse(readFileSync(engFile, 'utf8'));
@@ -170,7 +181,8 @@ const dist = (e, r) => Math.max(
 
 const divergent = [];
 const engOnlyBoxes = [];
-let ok = 0, engOnly = 0, refOnly = 0, moved = 0;
+const engOnlyKeys = {}, refOnlyKeys = {};
+let ok = 0, engOnly = 0, refOnly = 0, moved = 0, pageState = 0;
 const allKeys = new Set([...em.keys(), ...rm.keys()]);
 for (const k of allKeys) {
   const eb = em.get(k) || [], rb = rm.get(k) || [];
@@ -198,6 +210,7 @@ for (const k of allKeys) {
     }
     if (best < 0) {
       engOnly++;
+      engOnlyKeys[k] = (engOnlyKeys[k] || 0) + 1;
       // Orphelin moteur = boîte produite sans pendant réf —
       // conservée bornée pour attribution (élément que le
       // navigateur ne boxifie pas : display/content trou).
@@ -220,6 +233,13 @@ for (const k of allKeys) {
       },
     };
     if (bestD > movedTol) { dv.moved = true; moved++; }
+    // État de page différent : au-delà de --pagestate-tol en
+    // vertical, ce n'est plus un écart d'élément — la paire
+    // ne représente pas le même contenu (appariement au plus
+    // proche entre deux rendus). Reste compté divergent.
+    if (Math.max(Math.abs(dv.d.dy), Math.abs(dv.d.dh)) > pageStateTol) {
+      dv.page_state = true; pageState++;
+    }
     // Attribution (--styles) : famille de feature + zone WPT
     // candidate + chaîne d'ancêtres de boîtes.
     if (stylesByNode) {
@@ -227,11 +247,14 @@ for (const k of allKeys) {
       dv.node = e.node;
       Object.assign(dv, classify(k.split('|')[0], { ...dv.d, moved: !!dv.moved },
         se && se.computed));
+      if (dv.page_state) { dv.class = 'page-state'; dv.suspect = []; }
       dv.ancestors = ancestorsOf(e.node, 4);
     }
     divergent.push(dv);
   }
-  refOnly += rb.length - used.size;
+  const leftover = rb.length - used.size;
+  refOnly += leftover;
+  if (leftover) refOnlyKeys[k] = (refOnlyKeys[k] || 0) + leftover;
 }
 const matched = ok + divergent.length;
 
@@ -258,6 +281,16 @@ if (refVpW && eng.width && Math.abs(eng.width - refVpW) >= 4) {
     axis: 'viewport', blocking: true,
     eng_w: eng.width, ref_w: refVpW,
     delta: +(eng.width - refVpW).toFixed(1),
+  });
+}
+// État de page différent : une fraction notable de deltas
+// verticaux géants signale que les deux rendus ne sont pas
+// dans le même état (mur JS, pubs, lazy-load) — lire les
+// orphelins plutôt que ces paires.
+if (pageState) {
+  patterns.push({
+    axis: 'page-state', n: pageState, of: divergent.length,
+    note: `>${pageStateTol} px vertical — appariement entre états de page différents, pas un bug CSS`,
   });
 }
 if (divergent.length >= 4) {
@@ -290,6 +323,13 @@ const result = {
   matched, ok_n: ok, divergent_n: divergent.length,
   moved_n: moved,
   eng_only: engOnly, ref_only: refOnly,
+  // Top 20 des clés orphelines — un ref_only massif se lit
+  // comme un mur JS/hydration sans parcourir la liste.
+  eng_only_top: Object.entries(engOnlyKeys).sort((a, b) => b[1] - a[1]).slice(0, 20)
+    .map(([key, n]) => ({ key, n })),
+  ref_only_top: Object.entries(refOnlyKeys).sort((a, b) => b[1] - a[1]).slice(0, 20)
+    .map(([key, n]) => ({ key, n })),
+  page_state_n: pageState,
   text_dropped: textDropped, ref_truncated: refTruncated,
   score_partial: refTruncated,
   eng_doc: { w: eng.width, h: eng.height },
@@ -328,6 +368,7 @@ if (!measurable) {
     `geo : ${score}% divergents (${divergent.length}/${matched} appariés, ` +
     `${ok} ok, +${engOnly} moteur-seuls, +${refOnly} réf-seuls)` +
     `${moved ? ` — dont ${moved} déplacés (>${movedTol} px)` : ''}` +
+    `${pageState ? ` — ${pageState} état-page (>${pageStateTol} px, appariement non fiable)` : ''}` +
     `${patterns.some(p => p.blocking) ? ' — VIEWPORT divergent, mesure biaisée' : ''}` +
     `${refTruncated ? ' — ref tronquée (4000), score partiel' : ''}` +
     `${textDropped ? ` — ${textDropped} #text ignorés` : ''}`);
