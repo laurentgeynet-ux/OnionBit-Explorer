@@ -1902,11 +1902,12 @@ impl Session {
             .ok()
             .filter(|u| !is_mixed_content(req_page, u))
             .filter(|u| {
-                explorer_net::csp::csp_allows(
+                explorer_net::csp::csp_allows_element(
                     csp,
                     req_page,
                     explorer_net::http::FetchDest::Script,
                     u,
+                    d.nonce.as_deref(),
                 )
             })
         else {

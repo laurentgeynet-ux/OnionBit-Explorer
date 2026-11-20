@@ -290,11 +290,22 @@ fn push_external_script(
 ) {
     let async_ = dom.attribute_str(n, "async").ok().flatten().is_some();
     let defer = !async_ && dom.attribute_str(n, "defer").ok().flatten().is_some();
+    // CSP3 : le `nonce=` de l'élément satisfait une source
+    // `'nonce-…'` indépendamment de l'URL — préludes
+    // `data:` whatsapp (§B-206) que `script-src` n'énumère
+    // pas en scheme-source.
+    let nonce = dom.attribute_str(n, "nonce").ok().flatten();
     let resolved = Url::resolve(base, raw.trim())
         .ok()
         .filter(|u| !is_mixed_content(page, u))
         .filter(|u| {
-            explorer_net::csp::csp_allows(csp, page, explorer_net::http::FetchDest::Script, u)
+            explorer_net::csp::csp_allows_element(
+                csp,
+                page,
+                explorer_net::http::FetchDest::Script,
+                u,
+                nonce,
+            )
         });
     if resolved.is_none() {
         // Plan-time — vol 33 radiogarden : un

@@ -8298,6 +8298,19 @@ MCP = adaptateur, jamais la base.
   (position spec). Verrous :
   `init_ui_event_carries_view_and_detail` +
   `init_ui_event_on_ctor_path`.
+- [x] **Étape 329. §B-206 soldée : `__d is not defined`
+  whatsapp — `nonce=` d'élément admis pour `<script src>`
+  (CSP3)** (`explorer-net` `csp.rs` + `explorer-core`
+  `scripts.rs`/`net.rs`). whatsapp : `script-src 'nonce-N'
+  https://static.whatsapp.net` sans `data:` → préambules
+  `<script src="data:" nonce>` refusés → `__d` jamais posé.
+  `csp_allows_element` : URL **ou** nonce concordant
+  (script/style), aux bras parser-inserted et insertion
+  dynamique (`d.nonce`). Verrous : net
+  `element_nonce_allows_beyond_url_sources` + session
+  `csp_script_src_nonce_allows_data_url_script`. Release :
+  verbatim `__d` 0 — anomalie suivante révélée
+  (`DOMStringMap` absent, §B-209).
 - [x] **Étape 327. §B-204 soldée : `TextDecoder`
   `utf-16le`/`utf-16be` implémentés — verbatim diagrams.net
   (Emscripten `UTF16ToString`)** (`explorer-jscore`

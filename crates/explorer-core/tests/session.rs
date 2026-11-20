@@ -10637,6 +10637,35 @@ async fn csp_script_src_nonce_allows_matching_inline_only() {
     );
 }
 
+/// §B-206 — `<script src="data:…" nonce=abc>` sous
+/// `script-src 'nonce-abc'` : le nonce de l'élément
+/// satisfait la source **sans** énumération `data:` (CSP3)
+/// — préludes whatsapp (`__d`/`requireLazy` stubs) réarmés ;
+/// le voisin sans nonce reste refusé.
+#[tokio::test]
+async fn csp_script_src_nonce_allows_data_url_script() {
+    let (mut s, t) = test_session();
+    t.route_headers(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <div id=\"x\">avant</div><div id=\"y\">avant</div>\
+         <script nonce=\"abc\" src=\"data:text/javascript;base64,ZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ3gnKS50ZXh0Q29udGVudD0nQVAnKydSRVMn\"></script>\
+         <script src=\"data:text/javascript;base64,ZG9jdW1lbnQuZ2V0RWxlbWVudEJ5SWQoJ3knKS50ZXh0Q29udGVudD0nQVAnKydSRVMn\"></script>\
+         </body></html>",
+        &[("content-security-policy", "script-src 'nonce-abc'")],
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(id).unwrap();
+    assert_eq!(
+        dump.matches("APRES").count(),
+        1,
+        "seul le script noncé exécuté : {dump}"
+    );
+}
+
 /// `script-src 'self'` : le script cross-origin est refusé,
 /// le script same-origin est fetché.
 #[tokio::test]

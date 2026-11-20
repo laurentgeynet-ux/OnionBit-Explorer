@@ -8,8 +8,8 @@
 //! `upgrade-insecure-requests`, interdits `<meta>`.
 
 use explorer_net::csp::{
-    csp_allows, csp_base_uri_allowed, csp_form_action_allowed, csp_inline_allowed, csp_upgrade,
-    CspPolicy, InlineKind,
+    csp_allows, csp_allows_element, csp_base_uri_allowed, csp_form_action_allowed,
+    csp_inline_allowed, csp_upgrade, CspPolicy, InlineKind,
 };
 use explorer_net::http::FetchDest;
 use explorer_net::url::Url;
@@ -511,5 +511,73 @@ fn malformed_headers_degrade_closed_per_directive() {
         &page,
         FetchDest::Script,
         &u("https://h.test/x")
+    ));
+}
+
+/// §B-206 — `csp_allows_element` : le `nonce=` de l'élément
+/// satisfait `'nonce-…'` indépendamment de l'URL — le
+/// `<script src="data:…" nonce>` des préludes whatsapp
+/// (`script-src 'nonce-N' https://static.whatsapp.net`,
+/// sans `data:`) passe ; sans nonce ou nonce différent :
+/// refus. Le nonce est ignoré des destinations non
+/// script/style.
+#[test]
+fn element_nonce_allows_beyond_url_sources() {
+    let page = u(PAGE);
+    let data = u("data:text/javascript;base64,QUJD");
+    let csp = p("script-src 'nonce-abc' https://static.whatsapp.net");
+    // Sans nonce : `data:` absent des sources → refus.
+    assert!(!csp_allows_element(
+        &csp,
+        &page,
+        FetchDest::Script,
+        &data,
+        None
+    ));
+    // Nonce concordant → admis quoique `data:` ne soit pas
+    // énuméré (préludes `__d`/`requireLazy` whatsapp).
+    assert!(csp_allows_element(
+        &csp,
+        &page,
+        FetchDest::Script,
+        &data,
+        Some("abc")
+    ));
+    // Nonce non concordant → refus.
+    assert!(!csp_allows_element(
+        &csp,
+        &page,
+        FetchDest::Script,
+        &data,
+        Some("zzz")
+    ));
+    // URL admise sans nonce — comportement inchangé.
+    assert!(csp_allows_element(
+        &csp,
+        &page,
+        FetchDest::Script,
+        &u("https://static.whatsapp.net/x.js"),
+        None
+    ));
+    // Le nonce ne vaut pas pour les destinations autres
+    // que script/style (image `data:` sous `img-src`).
+    let csp_img = p("img-src 'nonce-abc' https://h.test");
+    assert!(!csp_allows_element(
+        &csp_img,
+        &page,
+        FetchDest::Image,
+        &u("data:image/png;base64,QUJD"),
+        Some("abc")
+    ));
+    // Politique cumulative : le nonce doit lever le blocage
+    // dans CHAQUE politique.
+    let mut two = p("script-src 'nonce-abc' https://static.whatsapp.net");
+    two.extend(p("script-src https://static.whatsapp.net"));
+    assert!(!csp_allows_element(
+        &two,
+        &page,
+        FetchDest::Script,
+        &data,
+        Some("abc")
     ));
 }

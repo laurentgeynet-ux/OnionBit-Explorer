@@ -149,6 +149,38 @@ pub fn csp_allows(policies: &[CspPolicy], page: &Url, dest: FetchDest, target: &
     })
 }
 
+/// Fetch `target` admis comme [`csp_allows`] **ou** par le
+/// `nonce` de l'élément émetteur — CSP3 : `<script src>` et
+/// `<link rel=stylesheet>` dont l'attribut `nonce=` égale
+/// une source `'nonce-…'` de leur directive passent même si
+/// l'URL ne matche aucune source (préludes `data:` whatsapp
+/// sous `script-src 'nonce-…' https://static.whatsapp.net` —
+/// §B-206). Le nonce ne vaut que pour `script-src`/
+/// `style-src` — ignoré des autres destinations.
+#[must_use]
+pub fn csp_allows_element(
+    policies: &[CspPolicy],
+    page: &Url,
+    dest: FetchDest,
+    target: &Url,
+    nonce: Option<&str>,
+) -> bool {
+    let Some(chain) = dest_chain(dest) else {
+        return true;
+    };
+    let nonce_eligible = matches!(dest, FetchDest::Script | FetchDest::Style);
+    policies.iter().all(|p| {
+        let Some(srcs) = p.sources(chain) else {
+            return true;
+        };
+        srcs.iter().any(|s| source_matches(s, page, target))
+            || (nonce_eligible
+                && nonce.is_some_and(|n| {
+                    !n.is_empty() && srcs.iter().any(|s| s.as_str() == format!("'nonce-{n}'"))
+                }))
+    })
+}
+
 /// `<form action>` admis par `form-action` (spec : pas de
 /// repli `default-src`) — chaîne propre.
 #[must_use]
