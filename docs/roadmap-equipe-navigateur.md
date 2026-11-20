@@ -15812,6 +15812,25 @@ chaque gain rapporté contre les **deux** archétypes.
   named-groups` skippés (feature non supportée). RegExp+
   String nogen : pas de régression (échecs = pools
   catalogués).
+- [x] **JS-C637 — `CharacterClassEscape` exacts :
+  `\d`/`\D` = `0-9` ASCII, `\s`/`\S` = whitespace JS
+  **sans** NEL (U+0085) **+** FEFF — corps explicites comme
+  `\w` (C631), 16 → **28/28** sur le cluster**
+  (`regexp.rs` `escape()`, gate
+  `tests/c637_class_escapes.rs` **2/2**).
+  Le `\d` du backend couvrait `Nd` Unicode entier (chiffres
+  arabes `0660`, devanagari, fullwidth `FF10`… matchaient à
+  tort) → `\d` émis `[0-9]`, `\D` `[^0-9]`, corps nu en
+  classe. Le `\s` backend = `White_Space` Unicode qui
+  **inclut** U+0085 NEL — la spec JS l'exclut et ajoute
+  FEFF → `\s` émis en classe explicite `\t\n\x{b}\x{c}
+  \r SP\x{a0}\x{1680}\x{2000}-\x{200a}\x{2028}\x{2029}
+  \x{202f}\x{205f}\x{3000}\x{feff}`, `\S` niée ; en corps
+  de classe `\D`/`\S` restent bruts (compromis `\W`).
+  **Mesures** : `CharacterClassEscapes` ×12 + `character-class-
+  escape-non-whitespace{,-u180e}` (14 fichiers) **28/28** ;
+  `unicodeSets` **292/304** stable (RGI_Emoji catalogué) ;
+  gates `\s`-sensibles tous verts.
 - [x] **JS-C634 — `RegExp(pattern, flags)` spec :
   `IsRegExp` (`@@match` observable), early-return sur
   `SameValue(newTarget, pattern.constructor)`, regexp-like

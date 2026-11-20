@@ -2825,6 +2825,43 @@ impl Trans {
             };
             return Ok((frag, i + 2));
         }
+        // `\d`/`\D` : JS = `0-9` ASCII — le `\d` du backend
+        // couvre `Nd` Unicode entier. `\s`/`\S` : JS =
+        // White_Space **sans** NEL (U+0085) **+** FEFF — le
+        // `\s` backend inclut NEL (JS-C635). En corps de
+        // classe : corps nu fusionnable ; `\D`/`\S` niés en
+        // classe restent bruts (même compromis que `\W`).
+        if c == 'd' || c == 'D' {
+            let frag = if c == 'd' {
+                if self.class_depth > 0 {
+                    "0-9".to_string()
+                } else {
+                    "[0-9]".to_string()
+                }
+            } else if self.class_depth > 0 {
+                "\\D".to_string()
+            } else {
+                "[^0-9]".to_string()
+            };
+            return Ok((frag, i + 2));
+        }
+        if c == 's' || c == 'S' {
+            const JS_WS: &str = "\\t\\n\\x{b}\\x{c}\\r \\x{a0}\\x{1680}\
+                \\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\
+                \\x{3000}\\x{feff}";
+            let frag = if c == 's' {
+                if self.class_depth > 0 {
+                    JS_WS.to_string()
+                } else {
+                    format!("[{JS_WS}]")
+                }
+            } else if self.class_depth > 0 {
+                "\\S".to_string()
+            } else {
+                format!("[^{JS_WS}]")
+            };
+            return Ok((frag, i + 2));
+        }
         if (c == 'b' || c == 'B') && self.class_depth == 0 {
             // Quantificateur direct sur l'assertion (`\b+`) :
             // la forme brute conserve le refus du backend.
