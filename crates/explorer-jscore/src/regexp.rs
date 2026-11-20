@@ -2893,9 +2893,14 @@ impl Trans {
             let v = u32::from(cs[i + 2]) % 32;
             return Ok((format!("\\x{{{v:x}}}"), i + 3));
         }
-        if (c == 'p' || c == 'P') && self.unicode && cs.get(i + 2) == Some(&'{') {
+        if (c == 'p' || c == 'P') && cs.get(i + 2) == Some(&'{') {
             // `\p{Name}` / `\p{Name=Value}` — classe Unicode
-            // passée telle quelle à fancy-regex.
+            // passée telle quelle à fancy-regex. Hors mode `u`
+            // aussi : avant §B-210, `\p` échappé + `{Nom}`
+            // littéral reconstituaient `\p{Nom}` brut pour le
+            // backend (cas `Pat_Syn`/`Pat_WS`, b56_probe) —
+            // l'émission `\x{7b}` du `{` cassait ce passage ;
+            // l'émettre explicitement le préserve.
             let rel_end = cs[i + 2..]
                 .iter()
                 .position(|&ch| ch == '}')

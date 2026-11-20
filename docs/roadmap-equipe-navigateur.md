@@ -8367,6 +8367,42 @@ MCP = adaptateur, jamais la base.
   vide par défaut. Verrou : `navigator_is_fixed_and_poor`
   réécrit. Reliquat : `sec-ch-ua*` absents,
   `navigator.vendor` vide.
+- [x] **Étape 334. §B-212 soldée : `querySelectorAll`
+  rend un `NodeList` statique, pas un `Array` — le
+  mini-jQuery d'OneTrust dispatche dessus**
+  (`explorer-jscore` `dom_host.rs` `dom_collection` +
+  `misc.nl_proto`/`hc_proto`). Cluster verbatim
+  `TypeError: cannot read 'appendChild' of Null` —
+  netflix vols 956/971, playstation 932, larousse 939,
+  sketchfab 958 (toutes versions d'`otBannerSdk`) :
+  `insertPcHtml` construit le centre de préférences dans
+  un `DocumentFragment` puis `m(sel).append(fragment.
+  querySelectorAll(…))` ; le wrapper `a.prototype.append`
+  branche `Array.isArray(e)` → branche
+  `document.querySelector(this.selector)` avec
+  `this.selector` = un Element → `null` → crash — le PC
+  ne se montait jamais. Fix : collection = objet
+  ordinaire chaîné `NodeList.prototype`/
+  `HTMLCollection.prototype` (adoptés à `install_dom`,
+  racines GC), props indexées propres énumérables +
+  `length` non-énumérable + `item`/`namedItem` +
+  `forEach`/`keys`/`values`/`entries`/`@@iterator`
+  (itérateurs live spec `CreateArrayIterator`).
+  `collection_item`/`namedItem` relisent les props
+  indexées. Verrou : `b212_nodelist_not_array` 2/2
+  (`isArray:false`, `instanceof`, toStringTag, itérations,
+  chemin verbatim `m(el).append(nodelist)`). Sonde live :
+  netflix **0 erreur pipeline**, larousse verbatim 0 —
+  le PC OneTrust se monte (reliques site :
+  `access`/`setCookie is not defined`, callbacks de
+  catégories postérieurs au crash). Reliquat consigné :
+  `querySelector(selecteur invalide)` rend `null` au
+  lieu de `SyntaxError` — tolérance à aligner (spec).
+  Réparation embarquée : §B-210 avait cassé le
+  passthrough non-`u` `\p{Pat_Syn}`/`\p{Pat_WS}`
+  (`{` échappé `\x{7b}` → backend rejetait) —
+  `Trans::escape` réémet désormais `\p{Nom}` brut
+  quel que soit le mode (`b56_probe` 8/8 à nouveau).
 - [x] **Étape 333. §B-211 soldée : `finally`/`catch`
   async = blocs FRERES du try, `var` des blocs async
   traverse au scope fonction** (`explorer-jscore`

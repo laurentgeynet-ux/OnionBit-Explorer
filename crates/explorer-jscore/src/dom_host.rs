@@ -3973,13 +3973,28 @@ fn attr_ns_match(key: &str, ns_null: bool, local: &str) -> bool {
 /// `collection.item(i)` — `null` hors-bornes (spec `NodeList`/
 /// `HTMLCollection` ; l'accès indexé `collection[i]` rend
 /// `undefined`, différence assumée).
+/// Éléments d'une collection DOM (`dom_collection`) :
+/// `length` puis `[[Get]]` par index — même lecture que
+/// `CreateArrayIterator` (§B-212 : les collections ne sont
+/// plus des `ObjKind::Array` depuis l'alignement `NodeList`).
+fn collection_elems(e: &mut Engine, t: &Value) -> Vec<Value> {
+    let Value::Obj(id) = t else {
+        return Vec::new();
+    };
+    let n = match e.get_prop(*id, "length") {
+        Some(Value::Num(x)) if x >= 0.0 => x as usize,
+        _ => 0,
+    };
+    (0..n)
+        .map(|i| e.get_prop(*id, &i.to_string()).unwrap_or(Value::Undefined))
+        .collect()
+}
+
 fn collection_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     let i = e.to_number(arg(args, 0))? as usize;
     if let Value::Obj(id) = t {
-        if let Some(o) = e.heap.obj(id) {
-            if let ObjKind::Array(elems) = &o.kind {
-                return Ok(elems.get(i).cloned().unwrap_or(Value::Null));
-            }
+        if let Some(v) = e.get_prop(id, &i.to_string()) {
+            return Ok(v);
         }
     }
     Ok(Value::Null)
@@ -3991,25 +4006,66 @@ fn collection_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> 
 /// `RadioNodeList`.
 fn collection_named_item(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
     let name = e.to_js_string(arg(args, 0))?;
-    if let Value::Obj(id) = t {
-        let elems = match e.heap.obj(id) {
-            Some(o) => match &o.kind {
-                ObjKind::Array(elems) => elems.to_vec(),
-                _ => Vec::new(),
-            },
-            None => Vec::new(),
-        };
-        for v in elems {
-            for key in ["id", "name"] {
-                if let Ok(Value::Str(s)) = e.get_prop_value(v.clone(), key) {
-                    if s.as_str() == name {
-                        return Ok(v);
-                    }
+    for v in collection_elems(e, &t) {
+        for key in ["id", "name"] {
+            if let Ok(Value::Str(s)) = e.get_prop_value(v.clone(), key) {
+                if s.as_str() == name {
+                    return Ok(v);
                 }
             }
         }
     }
     Ok(Value::Null)
+}
+
+/// `collection.forEach(cb, thisArg?)` — surface `NodeList`
+/// spec (`cb(v, i, collection)`).
+fn collection_for_each(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let this_arg = arg(args, 1);
+    if e.is_callable(cb.clone()) {
+        for (i, v) in collection_elems(e, &t).into_iter().enumerate() {
+            e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), t.clone()],
+            )?;
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `collection.values()`/`keys()`/`entries()` — itérateur
+/// **live** spec `CreateArrayIterator` (length + `[[Get]]`
+/// relus à chaque pas), proto `%ArrayIteratorPrototype%`.
+fn collection_values(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let p = e.protos.array_iter;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        t,
+        crate::heap::LiveIterKind::ArrValues,
+        p,
+    ))
+}
+
+fn collection_keys(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let p = e.protos.array_iter;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        t,
+        crate::heap::LiveIterKind::ArrKeys,
+        p,
+    ))
+}
+
+fn collection_entries(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let p = e.protos.array_iter;
+    Ok(crate::collections::live_iter_obj(
+        e,
+        t,
+        crate::heap::LiveIterKind::ArrEntries,
+        p,
+    ))
 }
 
 /// Collection DOM « HTMLCollection-like » (JS-C76 — déclencheur
@@ -4120,45 +4176,90 @@ fn dom_collection(
     tag: &'static str,
 ) -> Value {
     let vals: Vec<Value> = ids.iter().map(|&n| node_value(e, dom, cache, n)).collect();
-    let arr = e.new_array(vals);
-    if let Value::Obj(id) = arr {
-        // `Symbol.toStringTag` : `Object.prototype.toString.call`
-        // rend `[object NodeList]`/`[object HTMLCollection]` —
-        // les détecteurs de collection type jQuery/allocine
-        // (`/^\[object (HTMLCollection|NodeList|Object)]$/`)
-        // rejetaient nos Array nus → `arr.addEventListener` tuait
-        // le boot (vol 118).
-        let tv = e.str_val(tag);
-        e.set_own_attrs(
-            id,
-            crate::interp::SYM_TO_STRING_TAG,
-            tv,
-            crate::heap::PropAttrs {
-                writable: false,
-                enumerable: false,
-                configurable: true,
-            },
-        );
-        e.add_method(id, "item", collection_item);
-        if named {
-            e.add_method(id, "namedItem", collection_named_item);
-            for &n in ids {
-                for k in ["id", "name"] {
-                    let v = dom.borrow().attr(n, k).map(str::to_string);
-                    if let Some(v) = v {
-                        if !v.is_empty()
-                            && crate::interp::array_index(&v).is_none()
-                            && e.get_prop(id, &v).is_none()
-                        {
-                            let nv = node_value(e, dom, cache, n);
-                            e.set_own(id, &v, nv, false);
-                        }
+    // §B-212 — objet ordinaire, **pas** un `Array` : spec,
+    // `querySelectorAll` rend un NodeList statique
+    // (`Array.isArray(nl)` → `false`). OneTrust `m(sel).
+    // append(nodes)` dispatche justement sur
+    // `Array.isArray` : notre Array l'envoyait dans la
+    // branche `document.querySelector(this.selector)` —
+    // `this.selector` étant un Element → `null` →
+    // `cannot read 'appendChild' of Null` (netflix/
+    // playstation/larousse/sketchfab, tous les OneTrust
+    // récents).
+    let id = e.new_object();
+    if let Some(p) = match tag {
+        "NodeList" => e.misc.nl_proto,
+        "HTMLCollection" => e.misc.hc_proto,
+        _ => None,
+    } {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.set_proto(Value::Obj(p));
+        }
+    }
+    // Props indexées propres énumérables (spec : elles le
+    // sont sur NodeList/HTMLCollection) + `length`
+    // non-énumérable.
+    for (i, v) in vals.iter().enumerate() {
+        e.set_own(id, &i.to_string(), v.clone(), true);
+    }
+    e.set_own_attrs(
+        id,
+        "length",
+        Value::Num(vals.len() as f64),
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    // `Symbol.toStringTag` : `Object.prototype.toString.call`
+    // rend `[object NodeList]`/`[object HTMLCollection]` —
+    // les détecteurs de collection type jQuery/allocine
+    // (`/^\[object (HTMLCollection|NodeList|Object)]$/`)
+    // rejetaient nos Array nus → `arr.addEventListener` tuait
+    // le boot (vol 118).
+    let tv = e.str_val(tag);
+    e.set_own_attrs(
+        id,
+        crate::interp::SYM_TO_STRING_TAG,
+        tv,
+        crate::heap::PropAttrs {
+            writable: false,
+            enumerable: false,
+            configurable: true,
+        },
+    );
+    e.add_method(id, "item", collection_item);
+    // Surface iterable spec (`forEach`/`keys`/`values`/
+    // `entries`/`@@iterator`) — posée sur les deux
+    // collections (HTMLCollection spec n'a que `item`/
+    // `namedItem`/`length`/`@@iterator` ; le reste est un
+    // surensemble tolérant — rien ne dépend de son
+    // absence).
+    e.add_method(id, "forEach", collection_for_each);
+    e.add_method(id, "keys", collection_keys);
+    e.add_method(id, "values", collection_values);
+    e.add_method(id, "entries", collection_entries);
+    let it = e.native_fn("[Symbol.iterator]", collection_values);
+    e.set_own(id, crate::interp::SYM_ITERATOR, it, false);
+    if named {
+        e.add_method(id, "namedItem", collection_named_item);
+        for &n in ids {
+            for k in ["id", "name"] {
+                let v = dom.borrow().attr(n, k).map(str::to_string);
+                if let Some(v) = v {
+                    if !v.is_empty()
+                        && crate::interp::array_index(&v).is_none()
+                        && e.get_prop(id, &v).is_none()
+                    {
+                        let nv = node_value(e, dom, cache, n);
+                        e.set_own(id, &v, nv, false);
                     }
                 }
             }
         }
     }
-    arr
+    Value::Obj(id)
 }
 
 /// Éléments « listés » d'un `<form>`/`<fieldset>` (HTML §4.10.3 —
@@ -5592,6 +5693,11 @@ impl Engine {
                     "Animation" => self.misc.anim_proto = Some(p),
                     "KeyframeEffect" => self.misc.kfe_proto = Some(p),
                     "DOMStringMap" => self.misc.dsm_proto = Some(p),
+                    // §B-212 — `NodeList`/`HTMLCollection` :
+                    // les collections `dom_collection` chaînent
+                    // ces protos (`instanceof` + `constructor`).
+                    "NodeList" => self.misc.nl_proto = Some(p),
+                    "HTMLCollection" => self.misc.hc_proto = Some(p),
                     _ => {}
                 }
                 // Chaîne d'héritage des protos DOM (J5) —

@@ -89,6 +89,15 @@ pub(crate) struct MiscState {
     /// `data-*`) le chaînent : `dataset instanceof
     /// DOMStringMap` réel (whatsapp `_btldrLoadedSrcs`).
     pub(crate) dsm_proto: Option<ObjId>,
+    /// `NodeList.prototype`/`HTMLCollection.prototype`
+    /// adoptés à l'install (§B-212) — les collections
+    /// `querySelectorAll`/`children`/`childNodes` sont des
+    /// objets ordinaires (PAS des `Array` : spec
+    /// `Array.isArray` → `false` — le `m().append`
+    /// d'`OneTrust` dispatche dessus), chaînés pour
+    /// `instanceof`.
+    pub(crate) nl_proto: Option<ObjId>,
+    pub(crate) hc_proto: Option<ObjId>,
     doc_timeline: Option<ObjId>,
     anims: Vec<Rc<RefCell<AnimData>>>,
     /// `ViewTransition.prototype` paresseux (CAP-187).
@@ -124,6 +133,8 @@ impl MiscState {
             self.css_trans_proto,
             self.kfe_proto,
             self.dsm_proto,
+            self.nl_proto,
+            self.hc_proto,
             self.doc_timeline,
             self.vt_proto,
             self.xr_proto,
