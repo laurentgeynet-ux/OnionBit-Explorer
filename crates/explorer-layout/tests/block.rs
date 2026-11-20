@@ -4170,3 +4170,53 @@ fn relative_offset_insets_logiques() {
         a2.rect.y
     );
 }
+
+/// R-318 — « invisible line boxes » (css-inline-3 §2.3) :
+/// un contenu en-ligne entièrement fantôme « n'existe
+/// pas » pour la fusion des marges — la marge d'un frère
+/// bloc traverse le conteneur ; une marge/padding/bordure
+/// **dans l'axe inline** (les deux signes) la rend réelle.
+#[test]
+fn lignes_fantomes_collapse_through() {
+    let inner_h = |span: &str| {
+        let (dom, bx) = laid(
+            &format!("<!doctype html><section><div>{span}<aside></aside></div></section>"),
+            "section{display:flow-root}div{line-height:0}aside{margin-top:200px;height:0;display:flow-root}",
+        );
+        (
+            find(&bx, by_tag(&dom, "div")).rect.height,
+            find(&bx, by_tag(&dom, "section")).rect.height,
+        )
+    };
+
+    // Fantôme : `<span>` vide — la marge de 200 traverse,
+    // `div` reste à 0, le BFC `section` l'absorbe → 200.
+    let (i, w) = inner_h("<span></span>");
+    assert!(
+        i.abs() < 0.5 && (w - 200.0).abs() < 1.0,
+        "span vide : inner={i} wrapper={w} attendus 0/200"
+    );
+
+    // Fantôme : blanc collapsible seul — idem.
+    let (i, w) = inner_h("<span>   </span>");
+    assert!(
+        i.abs() < 0.5 && (w - 200.0).abs() < 1.0,
+        "blanc seul : inner={i} wrapper={w} attendus 0/200"
+    );
+
+    // Réelle : `padding-left:1px` (axe inline) — la ligne
+    // rompt la traversée ; la marge reste dans `div` → 200.
+    let (i, _) = inner_h("<span style=\"padding-left:1px\"></span>");
+    assert!(
+        (i - 200.0).abs() < 1.0,
+        "padding-left : inner={i} attendu 200"
+    );
+
+    // Réelle : marge inline NÉGATIVE (« non-zero », les
+    // deux signes — phantom-line-boxes-004).
+    let (i, _) = inner_h("<span style=\"margin-left:-1px\"></span>");
+    assert!(
+        (i - 200.0).abs() < 1.0,
+        "margin-left:-1px : inner={i} attendu 200"
+    );
+}

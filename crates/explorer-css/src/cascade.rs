@@ -2728,6 +2728,12 @@ pub struct ComputedStyle {
     /// peinture traverse `spawn_blocking`), cloné si déjà
     /// résolu, sinon rempli au premier accès.
     fx: std::sync::OnceLock<ResolvedFx>,
+    /// R-318 — `line-height` provient d'une **déclaration**
+    /// propre (auteur/UA/inline/hint), pas de l'héritage.
+    /// Sert à la quirk « line-height calculation »
+    /// (quirks.spec §3.3) : une boîte inline vide ne compte
+    /// qu'une line-height *spécifiée*.
+    specified_lh: bool,
 }
 
 /// R-295 — une couche d'ombre résolue : `(dx, dy)` px,
@@ -2841,6 +2847,16 @@ impl ComputedStyle {
 }
 
 impl ComputedStyle {
+    /// `line-height` a-t-elle été **déclarée** sur cet élément
+    /// (auteur/UA/inline/hint, shorthand `font` inclus) —
+    /// `false` si seulement héritée ou initiale. Sert au
+    /// quirks « line-height calculation » (quirks.spec §3.3,
+    /// R-318).
+    #[must_use]
+    pub fn has_specified_line_height(&self) -> bool {
+        self.specified_lh
+    }
+
     /// Valeur calculée d'une propriété, `None` si absente
     /// (→ valeur initiale ou héritée selon la propriété).
     #[must_use]
@@ -5469,6 +5485,10 @@ impl StyleEngine {
                 }
             }
         }
+        // R-318 — avant l'héritage : `line-height` présent =
+        // déclaré (auteur/UA/inline/hint/shorthand `font`) ;
+        // inséré par la boucle ci-dessous = hérité.
+        let specified_lh = props.contains_key("line-height");
         // 3. Héritage : propriétés héritées non déclarées.
         if let Some(p) = parent {
             for name in INHERITED_PROPS {
@@ -5821,6 +5841,7 @@ impl StyleEngine {
             props,
             vars,
             fx: std::sync::OnceLock::new(),
+            specified_lh,
         }
     }
 

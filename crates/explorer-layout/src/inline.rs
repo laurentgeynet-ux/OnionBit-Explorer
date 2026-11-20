@@ -2497,11 +2497,12 @@ impl LineAcc {
             return;
         }
         self.reorder_bidi(base_rtl, band_right);
-        // R-182 — quirks « images en cellule » (HTML
-        // Standard §quirks) : une ligne sans aucun texte
-        // (tout en atomes) n'impose pas le strut — le
-        // remplacé descend au bas de sa cellule.
-        if ctx.quirks.get() && !self.frags.is_empty() && self.frags.iter().all(|f| f.atomic) {
+        // Quirks (quirks.spec §3.4 « blocks ignore
+        // line-height ») : le strut du conteneur n'impose
+        // pas le plancher de la ligne — seules les boîtes
+        // inline réelles comptent (R-182 l'appliquait déjà
+        // aux lignes tout-atomes ; §3.4 le généralise).
+        if ctx.quirks.get() && !self.frags.is_empty() {
             self.strut_base = 0.0;
             self.strut_lh = 0.0;
         }
@@ -3450,6 +3451,21 @@ fn break_into_lines(
                 // — `atomic` la met à l'abri du retrait
                 // des blancs de `close`.
                 if piece.hard_after {
+                    // R-318 — la boîte du `<br>` ne gonfle
+                    // pas la ligne de sa `line-height` en
+                    // standards (WPT `br-line-height` /
+                    // `br-font-size`, Mozilla #1927699 : le
+                    // rendu doit égaler celui sans style sur
+                    // `br`). En quirks (quirks.spec §3.3) une
+                    // boîte inline vide ne compte que sa
+                    // line-height **spécifiée** — héritée ou
+                    // initiale → 0 (`br{lh:5px}` → ligne 5 px,
+                    // `br` héritant `lh:100` → 0).
+                    let br_lh = if ctx.quirks.get() && frag_style.has_specified_line_height() {
+                        lh
+                    } else {
+                        0.0
+                    };
                     acc.frags.push(Fragment {
                         node: item.node,
                         owner: item.owner,
@@ -3461,9 +3477,9 @@ fn break_into_lines(
                             x: cursor_x,
                             y: cursor_y,
                             width: 0.0,
-                            height: lh,
+                            height: br_lh,
                         },
-                        baseline: fs * 0.8,
+                        baseline: 0.0,
                         shaped: None,
                         trail_w: 0.0,
                         marg_l: 0.0,
@@ -3473,8 +3489,7 @@ fn break_into_lines(
                         deco: Vec::new(),
                         level: para_lv,
                     });
-                    acc.max_lh = acc.max_lh.max(lh);
-                    acc.max_base = acc.max_base.max(fs * 0.8);
+                    acc.max_lh = acc.max_lh.max(br_lh);
                     new_line!();
                 }
                 continue;
@@ -4104,7 +4119,10 @@ fn line_height_of(style: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> f32 {
         return normal;
     }
     if let Ok(n) = raw.parse::<f32>() {
-        return (n * fs).max(1.0);
+        // §10.8.1 : `line-height: 0` est légal — pas de
+        // plancher artificiel (R-318, `br lh:0` doit
+        // collapsar sa ligne en quirks).
+        return (n * fs).max(0.0);
     }
     css_px(style, "line-height", fs, fs, ctx).unwrap_or(normal)
 }

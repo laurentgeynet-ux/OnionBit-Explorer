@@ -5111,3 +5111,64 @@ sous-features, `font-stretch`/`font-width` (fontes variables),
   (inline) + `relative_offset_insets_logiques` (block).
   Gates : inline 59/59, block 147/147, WPT cliquet 234 ≥
   203, clippy/fmt.
+
+- [x] **R-318 — Lignes fantômes §2.3 (invisible line
+  boxes) + traversée collapse-through, `<br>` line-height
+  propre (quirks §3.3/§3.4, `0`), ordre de peinture des
+  outlines, auto-skip `reftest-wait` — 234 → 248/292**
+  (`explorer-layout`, `explorer-css`, `explorer-render` —
+  file css-inline ouverte par R-317).
+  **Fantômes** : prédicat partagé `child_phantom`/
+  `phantom_inline_box`/`phantom_text` — une ligne n'est
+  « invisible » que si **aucun** contenu réel (texte non
+  blanc ou blanc préservé, atome) ET aucune arête
+  **inline-axis** non nulle (marges des DEUX signes,
+  padding, bordures — `padding-top/bottom` seuls laissent
+  la ligne fantôme, `padding-left/right` la rendent
+  réelle : axe inline uniquement, WPT
+  `phantom-line-boxes-001/004`). Branché uniformément :
+  `margin_transparent` (une ligne RÉELLE même h=0 bloque
+  la transparence), `collapsed_top_margin` (saute les
+  anons fantômes au lieu de tout `AnonymousBlock`),
+  `chain_transparent`/`candidate_chain`/`margin_chain`,
+  `escaped_bottom_run` (`in_flow` = non-fantôme),
+  `flow_children` (l'anon fantôme ne consomme pas
+  `first`). La sémantique §8.3.1 existante était déjà
+  correcte — seule la détection manquait ; un écart de
+  modèle temporaire (cursor avancé par `gap`/`first`-skip
+  sur l'inside-add) a régressé 13 `margin-collapse-*`
+  CSS2 puis été retiré : la marge fusionnée
+  collapse-through est UNE marge appliquée une fois.
+  **`<br>`** : en standards la sentinelle de coupure dure
+  ne contribue rien à la hauteur de ligne ; en quirks
+  elle contribue sa line-height **déclarée** (0 si
+  héritée — §3.3) et les conteneurs inline perdent leur
+  strut (§3.4) — `ComputedStyle` porte le flag
+  « line-height déclarée » capturé avant héritage ;
+  `line-height:0` reste 0 (plancher `max(1.0)` retiré) ;
+  la mesure intrinsèque max-content clôt la run sur
+  `\u{2028}` au lieu d'y ajouter sa largeur — toute la
+  famille `br-*` verte.
+  **Peinture** : l'outline d'une boîte est émise APRÈS son
+  sous-arbre (ordre spec : outlines au-dessus du contenu
+  — la bordure blanche de `.inner` recouvrait l'anneau
+  parent, `half-leading-block-box-005`).
+  **Harnais** : `reftest-wait` détecté sur la racine =
+  flag `wait` → auto-skip honnête (`empty-span-size-001`
+  dépend de `scrollIntoView` — 3 faux passes exclus :
+  `list-style-type-string-004`, `empty-span-height`,
+  `empty-span-size-001`).
+  **Résultat : 248/292** — 6 `phantom-line-boxes` + 5
+  `br-*` + outline + restauration des 13 `margin-collapse`
+  CSS2 régressés en cours de route. Échecs restants
+  comptés : `text-box-trim` profond (~36),
+  `alignment-baseline` métriques réelles (6),
+  `baseline-shift` micro-écart.
+  Verrous : `lignes_fantomes_collapse_through` (block —
+  fixture flow-root fidèle au `::after` WPT, doctype
+  explicite car quirks propage `cb_h`), test
+  `vertical_align_runs_texte_content_area` réécrit en
+  ancrages relatifs à `LineBox.baseline` (indépendant du
+  mode quirks/standards).
+  Gates : inline 59/59, block 148/148, WPT 248 ≥ 203,
+  clippy/fmt.

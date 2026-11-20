@@ -283,6 +283,30 @@ fn meta_flags(dom: &Dom) -> Vec<String> {
     out
 }
 
+/// `class="reftest-wait"` sur l'élément racine — l'autre
+/// convention WPT d'« attente JS » (le screenshot n'est pris
+/// qu'après que le script retire la classe — ici
+/// `scrollIntoView()`). Équivalente au flag `wait` : le
+/// harnais statique ne peut pas rejouer l'état final, le cas
+/// part en auto-skip documenté.
+fn root_reftest_wait(dom: &Dom) -> bool {
+    let root = dom.document();
+    let mut queue = vec![root];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "html") {
+            return dom
+                .attribute(n, "class")
+                .ok()
+                .flatten()
+                .is_some_and(|c| c.split_whitespace().any(|t| t == "reftest-wait"));
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    false
+}
+
 /// `<meta name="variant" content="?class=a,b">` — les tests
 /// multi-variantes WPT (css-inline/text-box-trim…) attendent
 /// `variant-class.js`, qui pose les classes de la variante
@@ -610,6 +634,9 @@ fn run_case(dir: &Path, rel: &str) -> Verdict {
         .find(|f| UNRUNNABLE_FLAGS.contains(&f.as_str()))
     {
         return Verdict::FlagSkip(f.clone());
+    }
+    if root_reftest_wait(&test_dom) {
+        return Verdict::FlagSkip("reftest-wait".to_string());
     }
     let Some((kind, href)) = ref_link(&test_dom) else {
         return Verdict::NoRef;

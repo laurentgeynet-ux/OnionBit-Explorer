@@ -424,6 +424,16 @@ fn content_px_unclamped(
             continue;
         }
         let cfs = font_size_px(&c.style, fs, ctx);
+        // R-318 — `<br>` (sentinelle U+2028, boxtree.rs:1046)
+        // est une coupure dure : il clôt la run intrinsèque
+        // sans contribuer de largeur — le mesurer comme un
+        // glyphe gonflait l'inline-block de ~1em
+        // (WPT `br-line-height-inherited-quirks`).
+        if c.text.as_deref() == Some("\u{2028}") {
+            best = best.max(run);
+            run = 0.0;
+            continue;
+        }
         if inline_level(c) {
             // En-ligne atomique (`inline-block`, remplacé) :
             // la contribution est la boîte de marge entière

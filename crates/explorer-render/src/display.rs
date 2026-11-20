@@ -3938,6 +3938,7 @@ fn paint_self(
     vp: (f32, f32),
     images: &crate::PaintImages,
     canvas_bg_src: Option<explorer_dom::NodeId>,
+    outline_slot: &mut Option<DisplayItem>,
 ) {
     let rect = shifted(bx.rect, off);
     // Blocs anonymes et boîtes texte clonent le style du
@@ -4204,6 +4205,11 @@ fn paint_self(
     // Style `none` → rien ; épaisseur initiale `medium` = 3 px
     // (même convention que border). Rayons suivis via
     // `corner_radii` sur le rect étendu.
+    // R-318 — l'item est différé (`outline_slot`) : la spec le
+    // peint AU-DESSUS du sous-arbre de la boîte (css-ui §5.2 —
+    // l'anneau se dessine par-dessus les descendants), sinon une
+    // bordure/fond d'enfant recouvre les côtés (WPT
+    // text-box-trim-half-leading-block-box-005).
     if !anonymous && !inline_flow {
         let ow_style = border_style(bx.style.get("outline-style"));
         if !matches!(ow_style, BorderStyle::None) {
@@ -4218,7 +4224,7 @@ fn paint_self(
                     height: rect.height + 2.0 * grow,
                 };
                 let oc = border_color_of(&bx.style, "outline-color");
-                items.push(DisplayItem::Border {
+                *outline_slot = Some(DisplayItem::Border {
                     rect: orect,
                     widths: [ow; 4],
                     colors: [oc; 4],
@@ -6492,8 +6498,20 @@ fn paint_box_impl<'a>(
             s.visibility_path.get_or_insert(p);
         });
     }
+    // R-318 — l'outline propre est différé : émis après tout le
+    // sous-arbre (avant les `PopClip`/`PopTransform` géométriques)
+    // pour peindre par-dessus les descendants (css-ui §5.2).
+    let mut outline_item: Option<DisplayItem> = None;
     if !hidden {
-        paint_self(bx, items, off, cx.vp, cx.images, cx.canvas_bg_src);
+        paint_self(
+            bx,
+            items,
+            off,
+            cx.vp,
+            cx.images,
+            cx.canvas_bg_src,
+            &mut outline_item,
+        );
         paint_replaced(bx, items, off, cx.images);
     }
     // `ListItem` ouvre aussi : sa puce est du contenu même
@@ -6742,6 +6760,12 @@ fn paint_box_impl<'a>(
             cx.clip_stack.pop();
         }
         cx.pos_floor = saved_pos_floor;
+    }
+    // R-318 — l'outline de CETTE boîte au-dessus de tout son
+    // sous-arbre (hors clip `overflow` propre — l'anneau n'est
+    // pas du contenu rognable — mais DANS `clip-path`/`transform`).
+    if let Some(it) = outline_item {
+        items.push(it);
     }
     if geo_clip.is_some() {
         items.push(DisplayItem::PopClip);

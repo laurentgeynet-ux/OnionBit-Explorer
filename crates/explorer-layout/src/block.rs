@@ -1904,6 +1904,85 @@ pub(crate) fn border_px(
     }
 }
 
+/// R-318 — « invisible line box » (css-inline-3 §2.3) : un
+/// fragment texte ne rend la ligne réelle QUE s'il porte
+/// du texte non blanc ou du blanc **préservé** (`pre`,
+/// `pre-wrap`, `pre-line`, `preserve-spaces`,
+/// `break-spaces`) — le blanc collapsible n'existe pas.
+fn phantom_text(c: &LayoutBox) -> bool {
+    let Some(t) = c.text.as_deref() else {
+        return true;
+    };
+    // `\u{2028}` (`<br>`) n'est pas un blanc CSS : il survit
+    // au trim → ligne réelle.
+    match crate::inline::ws_mode(&c.style).0 {
+        crate::inline::WsCollapse::Collapse | crate::inline::WsCollapse::Discard => {
+            crate::text::trim_css_ws(t).is_empty()
+        }
+        _ => t.is_empty(),
+    }
+}
+
+/// R-318 — « boîte inline fantôme » (css-inline-3 §2.3) :
+/// aucune marge/padding/bordure **non nulle dans l'axe
+/// inline** (horizontal — approximation documentée pour les
+/// modes verticaux), pas d'atome, pas de contenu réel.
+/// Un `padding-top` ou `border-top` seul la laisse fantôme ;
+/// `padding-left:1px` la rend réelle (WPT
+/// `phantom-line-boxes-001/002`).
+fn phantom_inline_box(c: &LayoutBox, fs: f32, ctx: &BlockCtx) -> bool {
+    let atomic = c.text.is_none()
+        && (matches!(
+            c.display(),
+            "inline-block" | "inline-flex" | "inline-grid" | "inline-table"
+        ) || c.intrinsic.is_some());
+    if atomic || c.float != Float::None || c.out_of_flow() {
+        return false;
+    }
+    if !phantom_text(c) {
+        return false;
+    }
+    let cfs = font_size_px(&c.style, fs, ctx);
+    // « non-zero » = les deux signes : `margin-left:-1px`
+    // rend la ligne réelle autant que `+1px`
+    // (phantom-line-boxes-004).
+    let inline_edge = ["margin-left", "margin-right"]
+        .iter()
+        .any(|p| side_px(&c.style, p, 0.0, cfs, ctx, 0.0) != 0.0)
+        || ["padding-left", "padding-right"]
+            .iter()
+            .any(|p| side_px(&c.style, p, 0.0, cfs, ctx, 0.0) > 0.0)
+        || ["border-left-width", "border-right-width"]
+            .iter()
+            .any(|p| border_px(&c.style, p, 0.0, cfs, ctx) > 0.0);
+    !inline_edge
+        && c.children
+            .iter()
+            .all(|k| explorer_common::deep(|| phantom_inline_box(k, fs, ctx)))
+}
+
+/// R-318 — un enfant `Text`/`AnonymousBlock`/en-ligne qui ne
+/// produirait QUE des lignes fantômes : « n'existe pas »
+/// pour la fusion des marges (§8.3.1) ni pour la hauteur.
+/// `parent` sert au marqueur de `<li>` : une ligne porteuse
+/// de puce n'est jamais invisible (WPT `empty-span-size-001`
+/// — `<li></li>` vide garde sa hauteur).
+fn child_phantom(parent: &LayoutBox, c: &LayoutBox, fs: f32, ctx: &BlockCtx) -> bool {
+    if matches!(parent.kind, BoxKind::ListItem) {
+        return false;
+    }
+    match c.kind {
+        BoxKind::Text => phantom_text(c),
+        BoxKind::AnonymousBlock => {
+            phantom_text(c)
+                && c.children
+                    .iter()
+                    .all(|k| explorer_common::deep(|| phantom_inline_box(k, fs, ctx)))
+        }
+        _ => c.kind.is_inline_level() && phantom_inline_box(c, fs, ctx),
+    }
+}
+
 /// Marges verticales d'une boîte (pour l'effondrement).
 fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins {
     Margins {
@@ -1918,7 +1997,17 @@ fn margins(style: &ComputedStyle, cb_w: f32, em: f32, ctx: &BlockCtx) -> Margins
 /// fusionne alors avec celle de son dernier enfant in-flow.
 fn margin_transparent(bx: &LayoutBox, cb_w: f32, fs: f32, ctx: &BlockCtx) -> bool {
     let st = &bx.style;
+    // R-318 — une ligne RÉELLE même de hauteur 0 arrête la
+    // transparence (§2.3 : seules les lignes invisibles «
+    // n'existent pas ») ; un enfant `AnonymousBlock` réel
+    // ayant émis ≥ 1 ligne, ou un enfant en-ligne réel,
+    // bloque la chaîne.
+    let real_line = bx.children.iter().any(|c| {
+        matches!(c.kind, BoxKind::AnonymousBlock) && !c.lines.is_empty()
+            || c.kind.is_inline_level()
+    } && !child_phantom(bx, c, fs, ctx));
     bx.rect.height <= 0.0
+        && !real_line
         && !matches!(bx.position, Position::Absolute | Position::Fixed)
         && bx.float == Float::None
         && !is_fc_root(bx)
@@ -1999,12 +2088,29 @@ fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx)
         return run;
     }
     if bottom_adjoining(bx, cb_w, fs, ctx) && !bx.height_raised {
-        if let Some(c) = bx.children.iter().rev().find(|c| {
-            !matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
-                && !matches!(c.position, Position::Absolute | Position::Fixed)
-                && c.float == Float::None
-        }) {
+        // R-318 — une ligne RÉELLE avant le dernier fils
+        // in-flow rompt l'adjonction : la marge basse ne
+        // traverse pas (les contenus fantômes §2.3, si).
+        let in_flow = |c: &LayoutBox| {
+            if c.out_of_flow() || c.float != Float::None {
+                return false;
+            }
+            !(matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock) || c.kind.is_inline_level())
+                || !child_phantom(bx, c, fs, ctx)
+        };
+        let last = bx.children.iter().rev().find(|c| in_flow(c));
+        if let Some(c) = last {
+            if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock) || c.kind.is_inline_level()
+            {
+                // La ligne réelle trouvée bloque — aucune
+                // marge de descendant ne s'échappe en bas.
+                return run;
+            }
             if margin_transparent(c, cb_w, fs, ctx) {
+                // Un dernier fils transparent contribue sa
+                // chaîne complète {mt,mb} : la marge
+                // fusionnée collapse-through est UNE seule
+                // marge qui s'échappe sous la boîte.
                 run.fold(explorer_common::deep(|| margin_chain(c, cb_w, fs, ctx)));
             } else {
                 run.fold(explorer_common::deep(|| {
@@ -2069,17 +2175,20 @@ fn collapsed_top_margin(
         return run;
     }
     for c in &bx.children {
-        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
-            || out_of_flow_st(&c.style)
-            || floated_st(&c.style)
-        {
+        if out_of_flow_st(&c.style) || floated_st(&c.style) {
             continue;
         }
-        // Un contenu en-ligne (line box) arrête la fusion ;
+        // Un contenu en-ligne (line box) arrête la fusion —
+        // sauf s'il est entièrement fantôme §2.3 (R-318 : il
+        // « n'existe pas » pour les marges) ;
         // `clear` empêche la marge de rejoindre le haut.
-        if c.kind.is_inline_level()
-            || matches!(c.style.get("clear"), Some("left" | "right" | "both"))
-        {
+        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock) || c.kind.is_inline_level() {
+            if child_phantom(bx, c, fs, ctx) {
+                continue;
+            }
+            break;
+        }
+        if matches!(c.style.get("clear"), Some("left" | "right" | "both")) {
             break;
         }
         if chain_transparent(c, cb_w, cb_h, fs, ctx) {
@@ -2124,10 +2233,11 @@ fn chain_transparent(
 ) -> bool {
     transparent_candidate(bx, cb_w, cb_h, fs, ctx)
         && bx.children.iter().all(|c| {
-            // Contenu en-ligne ou remplacé → hauteur réelle.
+            // Contenu en-ligne ou remplacé → hauteur réelle —
+            // sauf s'il est entièrement fantôme §2.3 (R-318).
             if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock) || c.kind.is_inline_level()
             {
-                return false;
+                return child_phantom(bx, c, fs, ctx);
             }
             // Hors-flux et flottants ne contribuent pas — lu
             // au style : `bx.position`/`bx.float` ne sont posés
@@ -2157,11 +2267,16 @@ fn candidate_chain(
     let mut run = MarginRun::default();
     run.add(m.top);
     for c in &bx.children {
-        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
-            || out_of_flow_st(&c.style)
-            || floated_st(&c.style)
-        {
+        if out_of_flow_st(&c.style) || floated_st(&c.style) {
             continue;
+        }
+        // R-318 — une ligne réelle rompt la chaîne ; un
+        // contenu entièrement fantôme §2.3 la traverse.
+        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock) || c.kind.is_inline_level() {
+            if child_phantom(bx, c, fs, ctx) {
+                continue;
+            }
+            break;
         }
         let cfs = font_size_px(&c.style, fs, ctx);
         if chain_transparent(c, cb_w, cb_h, cfs, ctx) {
@@ -2190,11 +2305,15 @@ fn margin_chain(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> Ma
     let mut run = MarginRun::default();
     run.add(m.top);
     for c in &bx.children {
-        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock)
-            || c.out_of_flow()
-            || c.float != Float::None
-        {
+        if c.out_of_flow() || c.float != Float::None {
             continue;
+        }
+        // R-318 — idem chaîne candidate : ligne réelle → stop.
+        if matches!(c.kind, BoxKind::Text | BoxKind::AnonymousBlock) || c.kind.is_inline_level() {
+            if child_phantom(bx, c, fs, ctx) {
+                continue;
+            }
+            break;
         }
         if margin_transparent(c, cb_w, fs, ctx) {
             run.fold(explorer_common::deep(|| margin_chain(c, cb_w, fs, ctx)));
@@ -3479,13 +3598,20 @@ fn flow_children(
         // flux pur : seules ses lignes se rétrécissent dans la
         // bande. Marges nulles — le voisin collapse au travers.
         if kind == BoxKind::AnonymousBlock {
-            let gap = if first && adjoining_top {
+            // R-318 — §2.3 : un bloc anonyme entièrement
+            // fantôme « n'existe pas » pour la fusion des
+            // marges : il ne consomme ni `first` ni la
+            // chaîne en attente et ses lignes sont de
+            // hauteur nulle. Il reste posé (fragments
+            // peignables : outline d'un span vide…).
+            let phantom = child_phantom(bx, &bx.children[i], fs, ctx);
+            let gap = if phantom || (first && adjoining_top) {
                 0.0
             } else {
                 prev_margin.map_or(0.0, MarginRun::value)
             };
             cursor += gap;
-            let used = layout_anon_block(
+            let mut used = layout_anon_block(
                 &mut bx.children[i],
                 content_x,
                 cursor,
@@ -3496,15 +3622,30 @@ fn flow_children(
                 fl,
                 cb_h,
             );
-            inline_anchor = bx.children[i].lines.last().map(|l| l.rect.y);
+            if phantom {
+                for l in &mut bx.children[i].lines {
+                    l.rect.height = 0.0;
+                }
+                used = 0.0;
+            }
             cursor += used;
             flow_bottom = cursor;
+            if phantom {
+                continue;
+            }
+            inline_anchor = bx.children[i].lines.last().map(|l| l.rect.y);
             prev_margin = Some(MarginRun::default());
             first = false;
             continue;
         }
 
         if kind.is_inline_level() {
+            // R-318 — §2.3 : un enfant en-ligne fantôme
+            // n'existe pas pour les marges (cf. bloc
+            // anonyme ci-dessus).
+            if child_phantom(bx, &bx.children[i], fs, ctx) {
+                continue;
+            }
             // Hors-flux d'abord : un enfant en-ligne absolu ne
             // consomme PAS de ligne — placeholder de position
             // statique comme les blocs ci-dessous (§10.6.4).
