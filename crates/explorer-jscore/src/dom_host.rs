@@ -17438,6 +17438,22 @@ fn style_map(dom: &Dom, node: NodeId) -> Vec<(String, String)> {
     dom.attr(node, "style").map_or_else(Vec::new, parse_decls)
 }
 
+/// Sépare la valeur CSS de son suffixe de priorité
+/// `!important` (case-insensitive spec CSS, espaces
+/// tolérés). `el.style` stocke la déclaration brute
+/// (`v: w !important`) ; les accesseurs CSSOM servent la
+/// valeur sans priorité et `getPropertyPriority` rend
+/// `"important"` (verbatim nintendo §B-213).
+fn strip_priority(v: &str) -> (String, bool) {
+    const SUF: &str = "!important";
+    let t = v.trim_end();
+    if t.len() > SUF.len() && t[t.len() - SUF.len()..].eq_ignore_ascii_case(SUF) {
+        (t[..t.len() - SUF.len()].trim_end().to_string(), true)
+    } else {
+        (v.to_string(), false)
+    }
+}
+
 /// Déclarations `k: v` d'une liste `style` — tolérante :
 /// segments sans `:` et noms vides ignorés, noms standard
 /// minuscules, custom `--*` préservées (`prop_key`).
@@ -17932,6 +17948,7 @@ impl Host for StyleHost {
                     | "__lookupSetter__"
                     | "setProperty"
                     | "getPropertyValue"
+                    | "getPropertyPriority"
                     | "removeProperty"
                     | "item"
             )
@@ -17975,6 +17992,10 @@ impl Host for StyleHost {
             }),
             (None, false) => String::new(),
         };
+        // La valeur brute peut porter ` !important`
+        // (`style="x: v !important"`) — le getter nommé
+        // sert la valeur sans priorité (CSSOM).
+        let (v, _) = strip_priority(&v);
         Ok(Some(e.str_val(v)))
     }
 
@@ -18021,6 +18042,22 @@ impl Host for StyleHost {
             "setProperty" => {
                 let k = prop_key(&e.to_js_string(arg(args, 0))?);
                 let v = e.to_js_string(arg(args, 1))?;
+                // Spec CSSOM : le 3ᵉ arg `priority` doit être
+                // `""` ou un match case-insensitive de
+                // `"important"` — toute autre valeur = no-op.
+                // `Undefined` (arg absent) = `""`.
+                let prio = match args.get(2) {
+                    Some(Value::Undefined) | None => String::new(),
+                    Some(v) => e.to_js_string(v.clone())?,
+                };
+                if !prio.is_empty() && !prio.eq_ignore_ascii_case("important") {
+                    return Ok(Some(Value::Undefined));
+                }
+                let v = if prio.is_empty() {
+                    v
+                } else {
+                    format!("{} !important", v.trim_end())
+                };
                 style_set(&mut self.dom.borrow_mut(), self.node, &k, &v);
                 Ok(Some(Value::Undefined))
             }
@@ -18047,12 +18084,41 @@ impl Host for StyleHost {
                     }),
                     (None, false) => String::new(),
                 };
+                // La valeur servie exclut le suffixe
+                // ` !important` (spec `getPropertyValue`).
+                let (v, _) = strip_priority(&v);
                 Ok(Some(e.str_val(v)))
+            }
+            // `getPropertyPriority` — verbatim nintendo
+            // (styled-components/émotion lisent la priorité
+            // pour re-propager `!important`). Spec : `"important"`
+            // ou `""`.
+            "getPropertyPriority" => {
+                let k = prop_key(&e.to_js_string(arg(args, 0))?);
+                let v = {
+                    let d = self.dom.borrow();
+                    style_map(&d, self.node)
+                        .into_iter()
+                        .find(|(kk, _)| kk == &k)
+                        .map(|(_, v)| v)
+                };
+                let prio = match v {
+                    Some(v) if strip_priority(&v).1 => "important",
+                    _ => "",
+                };
+                Ok(Some(e.str_val(prio)))
             }
             "removeProperty" => {
                 let k = prop_key(&e.to_js_string(arg(args, 0))?);
                 let mut d = self.dom.borrow_mut();
                 let mut map = style_map(&d, self.node);
+                // Spec : retourne l'ancienne valeur (sans
+                // suffixe de priorité), `""` si absente.
+                let old = map
+                    .iter()
+                    .find(|(kk, _)| kk == &k)
+                    .map(|(_, v)| strip_priority(v).0)
+                    .unwrap_or_default();
                 map.retain(|(kk, _)| kk != &k);
                 let css = map
                     .iter()
@@ -18064,7 +18130,7 @@ impl Host for StyleHost {
                 } else {
                     d.set_attr(self.node, "style", &css);
                 }
-                Ok(Some(e.str_val("")))
+                Ok(Some(e.str_val(old)))
             }
             // `style.item(i)` — nom de la i-ème déclaration, `""`
             // hors-bornes (spec CSSStyleDeclaration).
@@ -18086,7 +18152,7 @@ impl Host for StyleHost {
     fn has_method(&self, name: &str) -> bool {
         matches!(
             name,
-            "setProperty" | "getPropertyValue" | "removeProperty" | "item"
+            "setProperty" | "getPropertyValue" | "getPropertyPriority" | "removeProperty" | "item"
         )
     }
 }

@@ -8367,6 +8367,29 @@ MCP = adaptateur, jamais la base.
   vide par défaut. Verrou : `navigator_is_fixed_and_poor`
   réécrit. Reliquat : `sec-ch-ua*` absents,
   `navigator.vendor` vide.
+- [x] **Étape 336. §B-213 soldée : surface CSSOM
+  priorité — `getPropertyPriority` + 3ᵉ arg
+  `priority` de `setProperty` + suffixe
+  ` !important` exclu des accesseurs**
+  (`explorer-jscore` `dom_host.rs` `StyleHost`).
+  Verbatim nintendo `main-…:18:79004`
+  (vols 969/973 — démasqué par §B-210 ;
+  stochastique selon le chunk servi). Spec
+  CSSStyleDeclaration : `getPropertyPriority(k)`
+  → `"important"`/`""` ; `setProperty(k,v,p)`
+  → `p` non-`""`/non-`"important"` (case-
+  insensitive) = no-op ; `getPropertyValue`,
+  getter nommé et `removeProperty` servent la
+  valeur SANS suffixe ; `removeProperty`
+  retourne l'ancienne valeur (rendait `""`).
+  `strip_priority` partagé ; le named-getter
+  exclusionne le nom de méthode. Verrou :
+  `b213_style_priority` 2/2 — attr-stored
+  `!important` détecté, round-trip
+  set→get→priority, no-op priorité invalide,
+  `cssText` brut préservé. Sonde release
+  nintendo : verbatim absent (cohérent —
+  stochastique, mais la voie ne jette plus).
 - [x] **Étape 335. §B-170 soldée : `function e(e)` en
   function-expression est LÉGAL — le check
   « nom d'expression ∩ params » (JS-C611) était une
