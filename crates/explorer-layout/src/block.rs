@@ -3858,11 +3858,78 @@ fn flow_children(
         };
         cursor += used;
         flow_bottom = cursor;
-        // `-webkit-center` : enfant bloc in-flow plus étroit
-        // que le conteneur → centré horizontalement (comme
-        // des marges `auto`). La translation s'applique à
-        // tout le sous-arbre (rects posés en absolu).
-        if webkit_center {
+        // `justify-items`/`justify-self` sur boîtes bloc
+        // (css-align §6.1.1 + §7.1) : un enfant bloc in-flow
+        // s'aligne dans l'axe inline de son conteneur.
+        // `justify-self` de l'enfant, sinon `justify-items`
+        // du parent ; auto-size = **fit-content** (approché
+        // par le fragment le plus large posé — rétrécit
+        // seulement quand le contenu prouve qu'il est plus
+        // étroit que la bande) ; les règles §10.3.3
+        // over-constrained cèdent devant l'alignement mais
+        // les marges `auto` gardent la priorité (§10.3.3
+        // résout déjà l'espace libre). Floats, hors-flux,
+        // anonymes et cellules de table sont exclus en amont.
+        let jself = cst
+            .get("justify-self")
+            .or_else(|| bx.style.get("justify-items"))
+            .map_or("normal", |v| v.trim());
+        if !matches!(
+            jself,
+            "" | "normal" | "auto" | "stretch" | "baseline" | "legacy"
+        ) && cst.get("margin-left") != Some("auto")
+            && cst.get("margin-right") != Some("auto")
+        {
+            let (jv, unsafe_) = match jself
+                .strip_prefix("unsafe ")
+                .or_else(|| jself.strip_prefix("safe "))
+            {
+                Some(v) => (v.trim(), jself.starts_with("unsafe")),
+                None => (jself, false),
+            };
+            if matches!(cst.get("width"), None | Some("auto")) {
+                let est = bx.children[i]
+                    .lines
+                    .iter()
+                    .map(|l| l.rect.width)
+                    .chain(bx.children[i].children.iter().map(|c| c.rect.width))
+                    .fold(0.0f32, f32::max);
+                if est > 0.0 && est < bx.children[i].rect.width {
+                    bx.children[i].rect.width = est;
+                }
+            }
+            let ml = side_px(&cst, "margin-left", content_w, cfs, ctx, 0.0);
+            let mr = side_px(&cst, "margin-right", content_w, cfs, ctx, 0.0);
+            let free = content_w - ml - mr - bx.children[i].rect.width;
+            let rtl = cst.get("direction") == Some("rtl");
+            let frac = match jv {
+                "center" => 0.5,
+                "end" | "flex-end" | "self-end" => {
+                    if rtl {
+                        0.0
+                    } else {
+                        1.0
+                    }
+                }
+                "right" => 1.0,
+                "left" => 0.0,
+                _ => {
+                    if rtl {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } // start|self-start|flex-start|inconnues
+            };
+            let dx = if free > 0.0 || unsafe_ {
+                free * frac
+            } else {
+                0.0
+            };
+            if dx != 0.0 {
+                crate::flex::translate_subtree(&mut bx.children[i], dx, 0.0);
+            }
+        } else if webkit_center {
             let cw = bx.children[i].rect.width;
             if cw < content_w {
                 crate::flex::translate_subtree(&mut bx.children[i], (content_w - cw) / 2.0, 0.0);

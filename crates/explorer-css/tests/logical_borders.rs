@@ -131,4 +131,3 @@ fn text_align_match_parent_ltr_gauche() {
     let st = style_of("p { text-align: match-parent }");
     assert_eq!(st.get("text-align"), Some("left"));
 }
-
