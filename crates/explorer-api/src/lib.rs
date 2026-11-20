@@ -208,14 +208,19 @@ fn media_routes() -> Router<ApiState> {
 /// Routeur média autonome pour le loopback embarqué (FFI,
 /// ADR-0029 — l'API reste le contrat, seul le transport
 /// devient in-process). `ApiState` minimale : `egress` et
-/// `console` ne servent aucune route du groupe.
+/// `console` ne servent aucune route du groupe. `/api/status`
+/// est servi en plus (UA-01 : l'hôte y lit l'UA canonique
+/// pour ses fetchs directs — même contrat que le daemon).
 pub fn media_router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
-    media_routes().with_state(ApiState {
-        session,
-        shutdown: None,
-        egress: "embedded".to_string(),
-        console: ConsoleRing::default(),
-    })
+    Router::new()
+        .route("/api/status", get(status))
+        .merge(media_routes())
+        .with_state(ApiState {
+            session,
+            shutdown: None,
+            egress: "embedded".to_string(),
+            console: ConsoleRing::default(),
+        })
 }
 
 /// Routeur avec clé d'API optionnelle (ADR-0003) : si `key`
@@ -430,6 +435,11 @@ async fn status(State(st): State<ApiState>) -> impl IntoResponse {
         "version": env!("CARGO_PKG_VERSION"),
         "tabs": session.tabs(),
         "accept_language": session.accept_language(),
+        // UA-01 — UA canonique du moteur (source unique
+        // `h1::DEFAULT_USER_AGENT`) : les hôtes qui fetch
+        // en direct (lecteur média hors proxy) l'héritent
+        // ici au lieu de dupliquer la chaîne.
+        "user_agent": session.user_agent(),
     }))
 }
 

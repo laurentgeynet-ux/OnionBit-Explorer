@@ -193,6 +193,7 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>((ref) {
           loop: offer.loops,
           referer: referer,
           userAgent: cfg.mediaUserAgent,
+          apiBase: apiBase,
           preload: offer.preload,
           displayPixels: OnionMediaPlayer.displayPixelsFor(offer.rect),
           framedrop: cfg.mediaFramedrop,

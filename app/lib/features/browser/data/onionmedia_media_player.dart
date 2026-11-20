@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
 
@@ -1311,17 +1312,52 @@ class OnionMediaPlayer implements MediaPlayer {
     }
   }
 
+  /// `user_agent` canonique du moteur, résolu une fois par
+  /// base via `GET {apiBase}/api/status` (source unique
+  /// `explorer-net` `h1.rs`, UA-01 — le loopback média FFI
+  /// sert la même route). Indisponible/`apiBase` vide → `''` :
+  /// le proxy média injecte alors l'UA lui-même — jamais de
+  /// chaîne dupliquée côté app.
+  static final Map<String, String> _uaCache = {};
+  static Future<String> _engineUserAgent(String apiBase) async {
+    if (apiBase.isEmpty) return '';
+    final cached = _uaCache[apiBase];
+    if (cached != null) return cached;
+    var ua = '';
+    final http = HttpClient();
+    try {
+      final req = await http
+          .getUrl(Uri.parse('$apiBase/api/status'))
+          .timeout(const Duration(seconds: 5));
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final body = await res.transform(utf8.decoder).join();
+        final j = jsonDecode(body);
+        if (j is Map && j['user_agent'] is String) {
+          ua = j['user_agent'] as String;
+        }
+      }
+    } on Object {
+      // Daemon/loopback injoignable ou export absent — ''.
+    } finally {
+      http.close(force: true);
+    }
+    return _uaCache[apiBase] = ua;
+  }
+
   /// Ouvre `url` (http(s) proxyfiée ou chemin `file`/brut).
   /// `referer`/`userAgent` partent via `set_http_headers`
   /// **avant** l'open — googlevideo et consorts les exigent.
-  /// `StateError` si la DLL ou l'ouverture échoue — la factory
-  /// échoue, l'erreur remonte au claim.
+  /// `userAgent` vide = résolu depuis le moteur (`apiBase`,
+  /// UA-01). `StateError` si la DLL ou l'ouverture échoue —
+  /// la factory échoue, l'erreur remonte au claim.
   static Future<MediaPlayer> create(
     String url, {
     bool hwAccel = false,
     bool loop = false,
     String referer = '',
     String userAgent = '',
+    String apiBase = '',
     String preload = 'auto',
     int displayPixels = 0,
     MediaFramedropConfig? framedrop,
@@ -1376,12 +1412,17 @@ class OnionMediaPlayer implements MediaPlayer {
     try {
       final isHttp = url.startsWith('http');
       if (isHttp) {
+        // UA-01 — `userAgent` vide = UA canonique du moteur
+        // résolu via `{apiBase}/api/status` ; en dernier repli
+        // `''` et le proxy média injecte l'UA à sa place.
+        final ua =
+            userAgent.isNotEmpty ? userAgent : await _engineUserAgent(apiBase);
         _setHttpHeaders(
           lib,
           h,
           [
             if (referer.isNotEmpty) 'Referer: $referer',
-            if (userAgent.isNotEmpty) 'User-Agent: $userAgent',
+            if (ua.isNotEmpty) 'User-Agent: $ua',
           ].join('\n'),
         );
       }

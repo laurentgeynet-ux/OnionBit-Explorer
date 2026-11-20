@@ -319,6 +319,7 @@ fn test_session_policy(
         shed_retry_after_s: 5,
         smooth_scroll_ms: 0,
         anim_pull_idle_ms: 2_000,
+        user_agent: explorer_net::h1::DEFAULT_USER_AGENT,
     })
 }
 
@@ -813,6 +814,7 @@ async fn download_url_bound_fails_mid_stream() {
         shed_retry_after_s: 5,
         smooth_scroll_ms: 0,
         anim_pull_idle_ms: 2_000,
+        user_agent: explorer_net::h1::DEFAULT_USER_AGENT,
     });
     let dir = std::env::temp_dir().join("explorer-dl-174-bound");
     let _ = std::fs::remove_dir_all(&dir);
@@ -8259,6 +8261,7 @@ async fn redirect_commits_final_url_and_fragment() {
             shed_retry_after_s: 5,
             smooth_scroll_ms: 0,
             anim_pull_idle_ms: 2_000,
+            user_agent: explorer_net::h1::DEFAULT_USER_AGENT,
         },
     );
 

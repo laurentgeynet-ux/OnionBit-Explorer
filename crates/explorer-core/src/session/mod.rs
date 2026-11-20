@@ -968,6 +968,11 @@ pub struct Session {
     /// Viewport CSS `(largeur, hauteur)` — partagé par les
     /// onglets au MVP.
     viewport: (f32, f32),
+    /// `User-Agent` de la session (`SessionConfig::user_agent`,
+    /// UA-01 — source unique `h1::DEFAULT_USER_AGENT`) :
+    /// injecté dans chaque moteur au `spawn_engine` et dans
+    /// le proxy média.
+    user_agent: &'static str,
     /// Facteur DPI.
     scale: f32,
     /// Persistance du profil (historique + signets) — `None`
@@ -1394,10 +1399,12 @@ impl Session {
             let tp = transport.clone();
             let cell = media_proxy.clone();
             h.spawn(async move {
-                let ua = concat!("Explorer/", env!("CARGO_PKG_VERSION"));
-                if let Ok(p) =
-                    explorer_net::media_proxy::MediaProxy::spawn(tp, ua.to_string()).await
-                {
+                // UA-01 — même UA canonique que le HTML :
+                // injecté par le proxy quand le lecteur n'en
+                // pose pas (source unique `h1::DEFAULT_USER_AGENT`
+                // via `SessionConfig::user_agent`).
+                let ua = cfg.user_agent.to_string();
+                if let Ok(p) = explorer_net::media_proxy::MediaProxy::spawn(tp, ua).await {
                     let _ = cell.set(p);
                 }
             });
@@ -1415,6 +1422,7 @@ impl Session {
             events,
             next_tab: 1,
             viewport: cfg.viewport,
+            user_agent: cfg.user_agent,
             scale: cfg.scale,
             store: None,
             bookmarks: Vec::new(),
@@ -1619,6 +1627,15 @@ impl Session {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
+    }
+
+    /// `User-Agent` canonique de la session
+    /// (`SessionConfig::user_agent`, UA-01) — servi par
+    /// `GET /api/status` aux hôtes qui doivent fetcher en
+    /// direct (lecteur média hors proxy).
+    #[must_use]
+    pub fn user_agent(&self) -> &'static str {
+        self.user_agent
     }
 
     /// Jar à cookies de la session — l'hôte le partage avec

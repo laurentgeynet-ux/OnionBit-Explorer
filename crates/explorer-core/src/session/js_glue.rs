@@ -1399,6 +1399,10 @@ impl Session {
             let mut e = f();
             e.set_budget(self.js_ops);
             e.set_mem_limit(self.js_mem_bytes);
+            // UA-01 — UA canonique de la session : posé avant
+            // `install_dom` (les props `navigator` sont cuites
+            // à l'install) ; header HTTP == `navigator.userAgent`.
+            e.set_user_agent(self.user_agent);
             // Viewport session (CAP-161) — avant `install_dom`
             // pour que `innerWidth`/`screen.*`/`matchMedia`
             // voient la taille réelle (sinon `(0,0)`).

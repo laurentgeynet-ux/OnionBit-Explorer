@@ -1510,6 +1510,14 @@ pub struct SessionConfig {
     /// fraîche). `0` = jamais de tick pompe (pull seul).
     /// Défaut 2 000 ms.
     pub anim_pull_idle_ms: u64,
+    /// `User-Agent` de la session (UA-01 — source unique
+    /// [`explorer_net::h1::DEFAULT_USER_AGENT`]) : injecté dans
+    /// chaque moteur JS au spawn (`navigator.userAgent` ==
+    /// en-tête HTTP réel, anti-bot) et dans le proxy média
+    /// quand le lecteur n'en pose pas. `&'static` — la config
+    /// reste `Copy` ; un UA runtime passerait par un client
+    /// `HttpConfig` dédié côté `net` de toute façon.
+    pub user_agent: &'static str,
 }
 
 impl Default for SessionConfig {
@@ -1572,6 +1580,7 @@ impl Default for SessionConfig {
             apply_queue_max_bytes: 64 * 1024 * 1024,
             smooth_scroll_ms: 350,
             anim_pull_idle_ms: 2_000,
+            user_agent: explorer_net::h1::DEFAULT_USER_AGENT,
         }
     }
 }

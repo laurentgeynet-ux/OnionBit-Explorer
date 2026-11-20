@@ -126,12 +126,12 @@ class AppConfig {
       'ac-3': 'audio/mp4; codecs="ac-3"',
       'ipcm': 'audio/wav; codecs="ipcm"',
     },
-    // Miroir du défaut `explorer-net` (`h1.rs`) — même UA sur
-    // le HTML et le flux média pour les CDN qui sniffent.
-    this.mediaUserAgent =
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Explorer/0.2 Safari/537.36',
+    // `''` = hérite l'UA canonique du moteur via
+    // `GET {apiBase}/api/status` (source unique `h1.rs`,
+    // UA-01 — servi aussi par le loopback média FFI) ;
+    // le proxy média l'injecte de toute façon quand le
+    // lecteur n'en pose pas. Non vide = override diagnostic.
+    this.mediaUserAgent = '',
     this.mediaFramedrop = const MediaFramedropConfig(),
     this.mediaSkipLoopFilter,
     this.mediaSkipIdct,

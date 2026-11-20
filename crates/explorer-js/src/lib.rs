@@ -1135,6 +1135,14 @@ pub trait JsEngine: Send {
     /// Défaut : no-op (viewport `(0,0)` — queries fausses).
     fn set_viewport(&mut self, _w: u32, _h: u32) {}
 
+    /// `User-Agent` de la session (UA-01) — posé **avant**
+    /// `install_dom` : `navigator.userAgent`/`appVersion`/
+    /// `userAgentData` sont cuits à l'install. La session y
+    /// injecte la chaîne canonique `explorer-net`
+    /// (`h1::DEFAULT_USER_AGENT`) pour garder header HTTP ==
+    /// prop JS. Défaut : no-op (identité standalone du moteur).
+    fn set_user_agent(&mut self, _ua: &str) {}
+
     /// Table de géométrie publiée par la session (issue #19,
     /// JS-8) — cellule partagée pré-remplie au commit paint
     /// (`Arc<Mutex<..>>` : le JS tourne sur worker, aucun appel
@@ -1876,6 +1884,11 @@ enum Cmd {
         ctx: JsCtxId,
         url: String,
         history_len: u32,
+    },
+    /// `User-Agent` poussé avant `install_dom` (UA-01 —
+    /// chaîne canonique de la session).
+    SetUserAgent {
+        ua: String,
     },
     SyncCtxState {
         ctx: JsCtxId,
@@ -2625,6 +2638,9 @@ impl JscoreEngine {
                     }
                     Cmd::SetViewport { w, h } => {
                         eng.set_viewport(w, h);
+                    }
+                    Cmd::SetUserAgent { ua } => {
+                        eng.set_user_agent(&ua);
                     }
                     Cmd::SetGeometry { ctx, slot } => {
                         eng.set_geometry_ctx(ctx, slot);
@@ -3614,6 +3630,10 @@ impl JsEngine for JscoreEngine {
 
     fn set_viewport(&mut self, w: u32, h: u32) {
         let _ = self.tx.send(Cmd::SetViewport { w, h });
+    }
+
+    fn set_user_agent(&mut self, ua: &str) {
+        let _ = self.tx.send(Cmd::SetUserAgent { ua: ua.to_string() });
     }
 
     fn set_geometry_ctx(&mut self, ctx: JsCtxId, slot: explorer_jscore::GeometrySlot) {

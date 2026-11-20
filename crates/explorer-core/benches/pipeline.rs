@@ -136,6 +136,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             rss_shed_mb: 0,
             shed_retry_after_s: 5,
             anim_pull_idle_ms: 2_000,
+            user_agent: explorer_net::h1::DEFAULT_USER_AGENT,
         },
     );
     (s, t)

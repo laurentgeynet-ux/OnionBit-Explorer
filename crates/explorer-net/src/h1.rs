@@ -188,10 +188,26 @@ pub struct HttpConfig {
     /// Taille max du corps déframé (octets).
     pub max_body_bytes: usize,
     /// Valeur `User-Agent` envoyée.
-    pub user_agent: String,
+    pub user_agent: String, // défaut : [`DEFAULT_USER_AGENT`]
     /// Connexions idle max conservées par origine dans le pool.
     pub pool_max_per_origin: usize,
 }
+
+/// `User-Agent` canonique du navigateur — **source unique de
+/// vérité** (UA-01) : `HttpConfig::default()` (en-tête HTTP),
+/// `SessionConfig::user_agent` → `navigator.userAgent`/
+/// `appVersion`/`userAgentData` (injecté dans le moteur JS par
+/// la session), le proxy média et `GET /api/status` en dérivent
+/// tous. Forme mainstream : les anti-bot rejettent les UA
+/// non-navigateur (bras 403 dailymotion embed) et les gates
+/// « navigateur supporté » (whatsapp…) exigent un token nommé
+/// à jour — `Chrome/158` = stable courant (nov 2026), token
+/// `Explorer` suffixé honnêtement sur le motif `Edg/…` réel.
+pub const DEFAULT_USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
+    "AppleWebKit/537.36 (KHTML, like Gecko) ",
+    "Chrome/158.0.0.0 Safari/537.36 Explorer/0.2"
+);
 
 impl Default for HttpConfig {
     fn default() -> Self {
@@ -202,15 +218,9 @@ impl Default for HttpConfig {
             max_head_bytes: 64 * 1024,
             max_body_bytes: 64 * 1024 * 1024,
             // Forme mainstream (bras 403 dailymotion embed — les
-            // anti-bot rejettent les UA non-navigateur) : le token
-            // `Explorer` reste présent honnêtement à côté des
-            // tokens standards que les détecteurs exigent.
-            user_agent: concat!(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
-                "AppleWebKit/537.36 (KHTML, like Gecko) ",
-                "Explorer/0.2 Safari/537.36"
-            )
-            .to_string(),
+            // anti-bot rejettent les UA non-navigateur ; gate UA
+            // whatsapp UA-01 : exige un navigateur nommé à jour).
+            user_agent: DEFAULT_USER_AGENT.to_string(),
             pool_max_per_origin: 4,
         }
     }

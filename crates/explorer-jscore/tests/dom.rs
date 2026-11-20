@@ -348,12 +348,39 @@ fn tag_interfaces_mod_menu_time() {
 
 #[test]
 fn navigator_is_fixed_and_poor() {
-    // `userAgent` identique à l'en-tête HTTP `User-Agent`
-    // (h1.rs) — token `Explorer` honnête conservé, forme
-    // navigateur standard (JS-C493).
+    // `userAgent` = chaîne injectée par l'embedder via
+    // `set_user_agent` **avant** `install_dom` (la session :
+    // l'UA canonique `explorer-net` `h1.rs`, source unique
+    // UA-01). Sentinelle volontairement factice — jscore est
+    // autonome et ne connaît pas la const de `net` : le test
+    // verrouille la propagation embedder→navigator et les
+    // dérivations (`appVersion` = `Mozilla/`→`5.0 ` comme
+    // Chrome réel, `uaFullVersion` = token `Chrome/`), pas
+    // la valeur produite.
+    const UA: &str = "Mozilla/5.0 (X11; TestOS) \
+        AppleWebKit/537.36 (KHTML, like Gecko) \
+        Chrome/999.0.0.0 Safari/537.36 TestUA/0.1";
+    let mut e = Engine::new();
+    e.set_user_agent(UA);
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(PAGE))));
+    assert_eq!(evf(&mut e, "navigator.userAgent"), UA);
     assert_eq!(
-        ev("navigator.userAgent"),
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Explorer/0.2 Safari/537.36"
+        evf(&mut e, "navigator.appVersion"),
+        UA.replace("Mozilla/", "5.0 ")
+    );
+    evf(
+        &mut e,
+        "navigator.userAgentData.getHighEntropyValues(['uaFullVersion'])\
+             .then(u=>window.__uafv=u.uaFullVersion)",
+    );
+    e.run_microtasks().expect("pump uad");
+    assert_eq!(evf(&mut e, "window.__uafv"), "999.0.0.0");
+    // Moteur nu (rien injecté) : identité standalone honnête,
+    // jamais un UA navigateur fabriqué.
+    let mut bare = engine_with(PAGE);
+    assert_eq!(
+        evf(&mut bare, "navigator.userAgent.startsWith('Explorer/')"),
+        "true"
     );
     // `plugins` = PluginArray vide honnête (JS-C495 — les
     // navigateurs réels exposent toujours la collection, même

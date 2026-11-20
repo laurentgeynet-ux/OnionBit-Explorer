@@ -240,6 +240,14 @@ pub(crate) struct BrowserHooks {
     /// l'embedder via [`Engine::set_page_referrer`] — le
     /// moteur ne le déduit jamais lui-même.
     pub page_referrer: String,
+    /// `User-Agent` poussé par l'embedder via
+    /// [`Engine::set_user_agent`] — la session y injecte la
+    /// chaîne canonique d'`explorer-net`
+    /// (`h1::DEFAULT_USER_AGENT`, UA-01) pour garder
+    /// `navigator.userAgent` == en-tête HTTP réel (un écart
+    /// est un signal anti-bot trivial). Engine-global.
+    /// Vide → [`STANDALONE_USER_AGENT`] (moteur nu, harnais).
+    pub user_agent: String,
     /// `document.currentScript` (CAP-168) — nœud `<script>`
     /// en cours d'évaluation, posé autour de
     /// [`Engine::eval_script_el`] (null hors éval, spec ;
@@ -435,6 +443,26 @@ impl Engine {
     /// par la navigation du document (`""` = aucun).
     pub fn set_page_referrer(&mut self, referrer: &str) {
         self.hooks.page_referrer = referrer.to_string();
+    }
+
+    /// `User-Agent` vu de `navigator.*` — poussé par l'embedder
+    /// **avant** `install_dom` (la session : la chaîne
+    /// canonique `explorer-net`, UA-01 — header HTTP et prop
+    /// JS identiques comme dans tout navigateur réel).
+    /// À appeler avant l'install : les props `navigator` sont
+    /// cuites à la pose (comme `page_url`).
+    pub fn set_user_agent(&mut self, ua: &str) {
+        self.hooks.user_agent = ua.to_string();
+    }
+
+    /// UA effectif — poussé par l'embedder, sinon
+    /// [`STANDALONE_USER_AGENT`] (moteur nu).
+    pub(crate) fn user_agent(&self) -> &str {
+        if self.hooks.user_agent.is_empty() {
+            STANDALONE_USER_AGENT
+        } else {
+            &self.hooks.user_agent
+        }
     }
 
     /// Install navigation hooks: `navigate` for `location.*`,
@@ -4239,17 +4267,19 @@ impl Engine {
         self.set_own(g, "document", doc.clone(), true);
 
         // Fixed, low-fingerprint navigator — by design.
-        // `userAgent` aligné sur l'en-tête HTTP `User-Agent`
-        // (h1.rs) : les deux doivent rester identiques comme
-        // dans tout navigateur réel — un écart UA-header/JS est
-        // un signal anti-bot immédiat (et un bug de cohérence).
+        // `userAgent` = la chaîne poussée par l'embedder
+        // (`set_user_agent` : la session injecte l'UA canonique
+        // `explorer-net` — header HTTP et prop JS identiques
+        // comme dans tout navigateur réel, UA-01).
         let nav = self.new_object();
+        let ua = self.user_agent().to_string();
+        let appver = app_version_of(&ua);
         for (k, v) in [
-            ("userAgent", crate::dom_host::EXPLORER_USER_AGENT),
+            ("userAgent", ua.as_str()),
             ("appName", "Netscape"),
             ("platform", "Win32"),
             ("language", "en-US"),
-            ("appVersion", "5.0"),
+            ("appVersion", appver.as_str()),
             // `vendor`/`product*` — props spec lues par les
             // fingerprint/feature-detects réels. `vendor` vide
             // (style Firefox — honnête, pas "Google Inc.") ;
@@ -22229,17 +22259,34 @@ fn nav_unsupported_reject(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<V
     Ok(Value::Obj(pid))
 }
 
-/// `navigator.userAgent` = la chaîne `User-Agent` exacte envoyée
-/// par `explorer-net` (`h1.rs`) — les navigateurs réels gardent
-/// header et prop JS identiques ; un écart est un signal anti-bot
-/// trivial. Dupliquée ici : `explorer-jscore` reste autonome
-/// (aucune dépendance interne — garder les deux en phase à la
-/// main, le token `Explorer` reste honnêtement présent).
-pub(crate) const EXPLORER_USER_AGENT: &str = concat!(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
-    "AppleWebKit/537.36 (KHTML, like Gecko) ",
-    "Explorer/0.2 Safari/537.36"
-);
+/// `navigator.userAgent` quand l'embedder n'a rien poussé —
+/// identité **honnêtement non-navigateur** du moteur nu
+/// (harnais mini-DOM, bancs). La chaîne canonique du produit
+/// vit dans `explorer-net` (`h1::DEFAULT_USER_AGENT` — source
+/// unique UA-01) et arrive ici par injection
+/// (`Engine::set_user_agent`) : `explorer-jscore` reste
+/// autonome, aucune dépendance interne.
+const STANDALONE_USER_AGENT: &str =
+    concat!("Explorer/", env!("CARGO_PKG_VERSION"), " (explorer-jscore)");
+
+/// `navigator.appVersion` = `"5.0 "` + l'UA amputé du préfixe
+/// `Mozilla/` — forme servie par Chrome réel ; l'UA nu sert de
+/// repli (incohérence UA/appVersion = signal anti-bot, UA-01).
+fn app_version_of(ua: &str) -> String {
+    ua.strip_prefix("Mozilla/")
+        .map_or_else(|| ua.to_string(), |rest| format!("5.0 {rest}"))
+}
+
+/// `userAgentData.getHighEntropyValues().uaFullVersion` =
+/// la valeur du token `Chrome/` de l'UA (chaîne réduite
+/// `N.0.0.0` chez Chrome réel) ; `""` sans token — dérivée,
+/// jamais figée (UA-01).
+fn ua_full_version_of(ua: &str) -> String {
+    ua.split_whitespace()
+        .find_map(|t| t.strip_prefix("Chrome/"))
+        .unwrap_or("")
+        .to_string()
+}
 
 /// `navigator.userAgentData` — réponse desktop spec-honnête
 /// (`brands` vide, `mobile:false`, `platform` figé — low-
@@ -22296,7 +22343,13 @@ fn navigator_uad(e: &mut Engine) -> Value {
                 ("architecture", e.str_val("x86")),
                 ("bitness", e.str_val("64")),
                 ("model", e.str_val("")),
-                ("uaFullVersion", e.str_val("0.1.0")),
+                // Dérivé du token `Chrome/` de l'UA injectée
+                // (UA-01) — `brands`/`fullVersionList` restent
+                // vides (low-fingerprint assumé).
+                (
+                    "uaFullVersion",
+                    e.str_val(ua_full_version_of(e.user_agent())),
+                ),
                 ("fullVersionList", e.new_array(vec![])),
                 ("wow64", Value::Bool(false)),
             ];
@@ -22322,12 +22375,14 @@ fn navigator_uad(e: &mut Engine) -> Value {
 /// low-fingerprint que le `navigator` de page.
 pub(crate) fn install_worker_navigator(e: &mut Engine) {
     let nav = e.new_object();
+    let ua = e.user_agent().to_string();
+    let appver = app_version_of(&ua);
     for (k, v) in [
-        ("userAgent", EXPLORER_USER_AGENT),
+        ("userAgent", ua.as_str()),
         ("appName", "Netscape"),
         ("platform", "Win32"),
         ("language", "en-US"),
-        ("appVersion", "5.0"),
+        ("appVersion", appver.as_str()),
         ("vendor", ""),
         ("appCodeName", "Mozilla"),
         ("product", "Gecko"),

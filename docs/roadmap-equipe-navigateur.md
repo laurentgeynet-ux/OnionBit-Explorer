@@ -8348,6 +8348,25 @@ MCP = adaptateur, jamais la base.
   `undefined`. Sonde verbatim vol 958 rejouée sous Node
   et le moteur : rotation 31, clés `DaoeC`/`vRsjj`,
   identiques. Verrou : `b208_fn_decl_rebind` 2/2.
+- [x] **UA-01. User-Agent `Chrome/158` à source unique
+  `h1::DEFAULT_USER_AGENT` — fin de la triple
+  duplication net/jscore/Dart ; vols REST sniffés
+  « Safari » soldés** (`explorer-net` + `explorer-jscore`
+  + `explorer-js` + `explorer-core` + `explorer-api` +
+  `app`). Chaîne `… Chrome/158.0.0.0 Safari/537.36
+  Explorer/0.2` (stable courant nov 2026, token Explorer
+  suffixé motif `Edg/…`) — franchit les gates « navigateur
+  supporté » (whatsapp « Safari 15+ »). Propagation :
+  `SessionConfig::user_agent` → `JsEngine::set_user_agent`
+  avant `install_dom` (`navigator.*` + `WorkerNavigator`,
+  `appVersion`/`uaFullVersion` dérivés — moteur nu =
+  standalone honnête `Explorer/{ver} (explorer-jscore)`) ;
+  même champ → `MediaProxy` ; `GET /api/status` expose
+  `user_agent` (loopback média FFI idem) et l'app le
+  résout par `apiBase` — `mediaUserAgent` Dart = override
+  vide par défaut. Verrou : `navigator_is_fixed_and_poor`
+  réécrit. Reliquat : `sec-ch-ua*` absents,
+  `navigator.vendor` vide.
 - [x] **Étape 327. §B-204 soldée : `TextDecoder`
   `utf-16le`/`utf-16be` implémentés — verbatim diagrams.net
   (Emscripten `UTF16ToString`)** (`explorer-jscore`
