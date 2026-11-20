@@ -849,6 +849,59 @@ fn adopted_sheets_css_extracts_rule_texts() {
 }
 
 #[test]
+fn b152_insertrule_alimente_le_textcontent_du_style() {
+    // §B-152 (styled-components — BBC/CNN) : `sheet.insertRule`
+    // sur un `<style>` miroir régénère son textContent — la
+    // cascade se nourrit du texte sérialisé de la feuille.
+    let html = r"<html><head><style id=st>.x{color:blue}</style></head><body></body></html>";
+    assert_eq!(
+        ev_in(
+            html,
+            "var sh=document.getElementById('st').sheet;\
+             sh.insertRule('a{color:red}');\
+             document.getElementById('st').textContent"
+        ),
+        ".x{color:blue}\na{color:red}"
+    );
+    // Ordre des index préservé (insertion en tête).
+    assert_eq!(
+        ev_in(
+            html,
+            "var sh=document.getElementById('st').sheet;\
+             sh.insertRule('b{margin:0}',0);\
+             document.getElementById('st').textContent"
+        ),
+        "b{margin:0}\n.x{color:blue}"
+    );
+    // `deleteRule` régénère sans la règle retirée.
+    assert_eq!(
+        ev_in(
+            html,
+            "var sh=document.getElementById('st').sheet;\
+             sh.insertRule('a{color:red}');sh.deleteRule(0);\
+             document.getElementById('st').textContent"
+        ),
+        "a{color:red}"
+    );
+    // `<style>` créé par JS (styled-components) : feuille vide
+    // au départ, l'insertion seule compose le texte.
+    assert_eq!(
+        ev_in(
+            html,
+            "var el=document.createElement('style');\
+             document.head.appendChild(el);\
+             el.sheet.insertRule('.c{top:0}');el.textContent"
+        ),
+        ".c{top:0}"
+    );
+    // Feuille sans miroir `<style>` : no-op silencieux.
+    assert_eq!(
+        ev("var s=new CSSStyleSheet();s.insertRule('a{color:red}');'ok'"),
+        "ok"
+    );
+}
+
+#[test]
 fn define_duplicate_throws_domexception_not_supported() {
     // Spec + catalyst github : re-define doit jeter
     // `DOMException`/`NotSupportedError` — le catch de catalyst

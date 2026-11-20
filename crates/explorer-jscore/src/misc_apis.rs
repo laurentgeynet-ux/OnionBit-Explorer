@@ -2731,7 +2731,7 @@ pub(crate) fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> 
     } else {
         e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as usize
     };
-    let Some(rid) = sheet_rules(e, this) else {
+    let Some(rid) = sheet_rules(e, this.clone()) else {
         return Err(e.type_error("insertRule: no cssRules"));
     };
     let rule = e.new_object();
@@ -2761,13 +2761,74 @@ pub(crate) fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> 
             0
         }
     };
+    reflect_sheet_to_style(e, this, None);
     Ok(Value::Num(at as f64))
+}
+
+/// §B-152 — transport cascade vers le `<style>` miroir :
+/// `insertRule`/`deleteRule`/`replace*` ne touchent pas le
+/// `textContent` de l'élément chez un navigateur réel (CSSOM
+/// distinct du DOM) — mais notre pipeline de style se nourrit
+/// du texte sérialisé de la feuille. On le régénère depuis
+/// `cssRules[*].cssText` (l'ordre des index est préservé,
+/// `deleteRule` couvert par la même régénération) ; `text`
+/// sert pour `replace*` dont les règles sont vidées par spec.
+/// No-op hors miroir DOM ou quand `ownerNode` n'est pas un
+/// `<style>` (`<link>`/feuilles construites — celles adoptées
+/// transitent déjà par `adopted_sheets_css`).
+fn reflect_sheet_to_style(e: &mut Engine, this: Value, text: Option<&str>) {
+    let Value::Obj(sid) = this else { return };
+    let Ok(own) = e.get_prop_value(Value::Obj(sid), "ownerNode") else {
+        return;
+    };
+    let Some(node) = crate::dom_host::node_for(e, own) else {
+        return;
+    };
+    let Some((dom, _)) = e.dom_ctx.clone() else {
+        return;
+    };
+    {
+        let d = dom.borrow();
+        if d.nodes.get(node as usize).map(|n| n.tag.as_str()) != Some("style") {
+            return;
+        }
+    }
+    let text = if let Some(t) = text {
+        t.to_string()
+    } else {
+        let Some(rid) = sheet_rules(e, Value::Obj(sid)) else {
+            return;
+        };
+        let rule_ids: Vec<ObjId> = match e.heap.obj(rid).map(|o| &o.kind) {
+            Some(crate::heap::ObjKind::Array(elems)) => elems
+                .stored_vals()
+                .filter_map(|el| match el {
+                    Value::Obj(id) => Some(*id),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let mut parts = Vec::new();
+        for oid in rule_ids {
+            if let Some(t) = e
+                .get_prop_value(Value::Obj(oid), "cssText")
+                .ok()
+                .and_then(|v| e.to_js_string(v).ok())
+            {
+                parts.push(t);
+            }
+        }
+        parts.join("\n")
+    };
+    let t = dom.borrow_mut().create_text(&text);
+    dom.borrow_mut().replace_children(node, &[t]);
 }
 
 /// `deleteRule(index)` — borne `idx < len` sinon `IndexSizeError`.
 pub(crate) fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let idx = e.to_number(arg(args, 0))? as usize;
-    let Some(rid) = sheet_rules(e, this) else {
+    let Some(rid) = sheet_rules(e, this.clone()) else {
         return Err(e.type_error("deleteRule: no cssRules"));
     };
     let Some(o) = e.heap.obj_mut(rid) else {
@@ -2778,6 +2839,7 @@ pub(crate) fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> 
             elems.remove_at(idx);
         }
     }
+    reflect_sheet_to_style(e, this, None);
     Ok(Value::Undefined)
 }
 
@@ -2806,13 +2868,14 @@ fn sheet_set_text(e: &mut Engine, this: Value, text: &str) -> JsResult<()> {
     };
     let t = e.str_val(text);
     e.set_own(id, "__text", t, false);
-    if let Some(rid) = sheet_rules(e, this) {
+    if let Some(rid) = sheet_rules(e, this.clone()) {
         if let Some(o) = e.heap.obj_mut(rid) {
             if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
                 elems.clear();
             }
         }
     }
+    reflect_sheet_to_style(e, this, Some(text));
     Ok(())
 }
 

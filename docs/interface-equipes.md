@@ -4366,3 +4366,24 @@ contrôle posable).
 - Test session ajouté côté **`explorer-core`**
   (`b192_sync_miroir_conserve_le_mode_standards`) — verrou
   e2e du contrat miroir→apply, aucun changement d'API.
+
+## 2026-11-20 — Fix NAV §B-152-classe (CSS runtime non cascadé) par PIPELINE
+
+- **`explorer-jscore`** (`misc_apis.rs`) : `insertRule`/
+  `deleteRule`/`replace*` sur une feuille adossée à un
+  `<style>` régénèrent désormais son `textContent` depuis
+  `cssRules[*].cssText` (`reflect_sheet_to_style`) — la
+  cascade se nourrit du texte sérialisé de la feuille, les
+  règles injectées par CSSOM (styled-components : BBC, CNN)
+  la rejoignent enfin. Ordre des index préservé ; no-op
+  borné hors miroir DOM ou sans `<style>` en `ownerNode`
+  (les `adoptedStyleSheets` transitent déjà par
+  `adopted_sheets_css` — CAP-195). Déviation assumée :
+  `el.textContent` reflète les règles insérées (un
+  navigateur réel garde CSSOM et DOM disjoints) — le canal
+  sérialisation est le seul transport vers la cascade.
+  Mesure site réel bbc.com : `computed>12` 0 → 2434/2544,
+  doc 31 102 → 9 037 px.
+- Verrou dans **`explorer-jscore/tests/dom.rs`**
+  (`b152_insertrule_alimente_le_textcontent_du_style`) —
+  aucun changement d'API publique, `explorer-core` inchangé.
