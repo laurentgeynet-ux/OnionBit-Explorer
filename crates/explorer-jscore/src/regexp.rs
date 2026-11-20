@@ -2416,8 +2416,12 @@ fn translate_group(
             // pur — tout le corpus `remove-*` l'utilise) ; les
             // deux listes sont disjointes (`(?i-i:x)` →
             // `SyntaxError`).
+            // Les deux côtés vides ensemble → `SyntaxError`
+            // (`(?-:x)` — early error des deux
+            // `RegularExpressionFlags` vides, spec modifiers).
             if cs.get(j) != Some(&':')
                 || (add.is_empty() && !saw_dash)
+                || (add.is_empty() && sub.is_empty())
                 || add.iter().any(|f| sub.contains(f))
             {
                 return Err(err());
@@ -2802,6 +2806,20 @@ impl Trans {
                     | 'p'
                     | 'P'
             );
+            if self.class_depth > 0 {
+                // En corps de classe `\b` = backspace (U+0008)
+                // et `\B` n'existe pas : `u` → SyntaxError,
+                // sloppy → identité `B` (Annex B ClassEscape).
+                if c == 'b' {
+                    return Ok(("\\x{8}".into(), i + 2));
+                }
+                if c == 'B' {
+                    if self.unicode {
+                        return Err(format!("invalid escape `\\B` in `u` class /{src}/"));
+                    }
+                    return Ok(("B".into(), i + 2));
+                }
+            }
             if self.unicode && !known {
                 return Err(format!("invalid escape `\\{c}` in `u` regex /{src}/"));
             }
@@ -2817,6 +2835,31 @@ impl Trans {
         }
         if !self.unicode && !c.is_ascii() {
             return Ok((c.to_string(), i + 2));
+        }
+        if self.unicode {
+            // `IdentityEscape[U]` restreint : `SyntaxCharacter`
+            // ∪ `/` (+ `-` en corps de classe) — tout autre
+            // `\<c>` est un `SyntaxError` (`\a`, `\ `, `\é`).
+            let ok = matches!(
+                c,
+                '^' | '$'
+                    | '\\'
+                    | '.'
+                    | '*'
+                    | '+'
+                    | '?'
+                    | '('
+                    | ')'
+                    | '['
+                    | ']'
+                    | '{'
+                    | '}'
+                    | '|'
+                    | '/'
+            ) || (c == '-' && self.class_depth > 0);
+            if !ok {
+                return Err(format!("invalid escape `\\{c}` in `u` regex /{src}/"));
+            }
         }
         Ok((format!("\\{c}"), i + 2))
     }

@@ -15779,6 +15779,29 @@ chaque gain rapporté contre les **deux** archétypes.
   named-groups` skippés (feature non supportée). RegExp+
   String nogen : pas de régression (échecs = pools
   catalogués).
+- [x] **JS-C633 — contrôles syntaxiques restreints :
+  `(?-:…)` rejeté (les deux listes de flags vides) et
+  `IdentityEscape[U]` exact — `u`-mode atomes =
+  `SyntaxCharacter` ∪ `/` seuls, `+ -` en classe,
+  `[\b]` = backspace, `[\B]` invalide — 12 → 14/14**
+  (`regexp.rs` `escape()` + parseur modifiers, gate
+  `tests/c633_syntax_edges.rs` **3/3**).
+  **`RegularExpressionFlags`** : au moins une lettre
+  `i`/`m`/`s` exigée d'un côté — `(?-:x)` → `SyntaxError`
+  (add et remove vides ensemble), `(?i:x)`/`(?-i:x)`
+  valides, même lettre des deux côtés → `SyntaxError`.
+  **`IdentityEscape` restreint `u`** : en atome, seuls
+  `^ $ \ . * + ? ( ) [ ] { } |` et `/` passent —
+  `\ ` `\%` `\a` `\8` `\é` → `SyntaxError`
+  (itéré 0x00–0x7F par le corpus) ; en corps de classe
+  `-` est admis en plus (`[\-]`), `\-` en atome reste
+  refusé. **`ClassEscape`** : `[\b]` = U+0008 backspace
+  (`\x{8}` explicite), `[\B]` = `SyntaxError` sous `u`
+  / identité `B` sloppy (Annex B). Sloppy inchangé :
+  identité libre hors `u`.
+  **Mesures** : `unicode_restricted_identity_escape{,_alpha,
+  _c,_u,_x}` + `arithmetic-modifiers-both-empty` ×2 (7
+  fichiers) **14/14** — cluster soldé.
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,
