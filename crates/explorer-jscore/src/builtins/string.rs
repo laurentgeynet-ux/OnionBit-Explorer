@@ -801,35 +801,60 @@ pub(crate) fn match_result(
 }
 
 pub(crate) fn regexp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    // `new RegExp(re)` clones the pattern; `RegExp(str, flags)`.
-    let (pat, flags) = match arg(args, 0) {
-        v @ Value::Obj(_) => {
-            if let Some(r) = re_of(e, v.clone()) {
-                let flags = match arg(args, 1) {
-                    Value::Undefined => r.flag_string(),
-                    f => e.to_js_string(f)?,
-                };
-                (JsStr::new(r.source.clone(), &e.str_acct), flags)
-            } else {
-                let p = e.to_js_jstr(v)?;
-                (p, String::new())
+    // Spec `RegExp(pattern, flags)` (JS-C634) :
+    // 1. `patternIsRegExp = IsRegExp(pattern)` — `@@match`
+    //    observable (`Get`).
+    // 2. `patternIsRegExp && flags === undefined` →
+    //    `Get(pattern, "constructor")` ; `SameValue(newTarget,
+    //    ctor)` → **rendre `pattern` tel quel**.
+    // 3. `pattern` porte `[[RegExpMatcher]]` →
+    //    `[[OriginalSource]]`/`[[OriginalFlags]]`.
+    // 4. sinon regexp-like → `Get(source)`, `Get(flags)`.
+    // 5. sinon → `ToString` (`undefined` → `(?:)`).
+    let pattern = arg(args, 0);
+    let flags = arg(args, 1);
+    let is_re = is_regexp_spec(e, pattern.clone())?;
+    if is_re {
+        if matches!(flags, Value::Undefined) {
+            let pctor = e.get_prop_value(pattern.clone(), "constructor")?;
+            let intrinsic = e
+                .realm_global_own(e.cur_ctx, "RegExp")
+                .ok_or_else(|| e.type_error("missing %RegExp% intrinsic"))?;
+            if pctor == intrinsic {
+                return Ok(pattern);
             }
         }
-        Value::Undefined => (JsStr::new("", &e.str_acct), String::new()),
-        v => {
-            let p = e.to_js_jstr(v)?;
-            (p, String::new())
+        if let Some(r) = re_of(e, pattern.clone()) {
+            let f = if matches!(flags, Value::Undefined) {
+                r.flag_string()
+            } else {
+                e.to_js_string(flags.clone())?
+            };
+            let p = JsStr::new(r.source.clone(), &e.str_acct);
+            return e.make_regexp_jstr(&p, &f);
         }
-    };
-    let flags = if flags.is_empty() {
-        match arg(args, 1) {
-            Value::Undefined => flags,
-            f => e.to_js_string(f)?,
-        }
+        // RegExp-like : source/flags par `Get`.
+        let src = e.get_prop_value(pattern.clone(), "source")?;
+        let p = e.to_js_jstr(src)?;
+        let f = if matches!(flags, Value::Undefined) {
+            let fl = e.get_prop_value(pattern.clone(), "flags")?;
+            e.to_js_string(fl)?
+        } else {
+            e.to_js_string(flags.clone())?
+        };
+        return e.make_regexp_jstr(&p, &f);
+    }
+    let p = if matches!(pattern, Value::Undefined) {
+        JsStr::new("", &e.str_acct)
     } else {
-        flags
+        e.to_js_jstr(pattern.clone())?
     };
-    e.make_regexp_jstr(&pat, &flags)
+    let f = if matches!(flags, Value::Undefined) {
+        String::new()
+    } else {
+        e.to_js_string(flags)?
+    };
+    e.make_regexp_jstr(&p, &f)
 }
 
 /// `RegExp.prototype.compile(pattern, flags)` — Annex B.2.4
@@ -1074,6 +1099,14 @@ fn re_get(e: &mut Engine, this: Value) -> JsResult<std::rc::Rc<crate::regexp::Js
 /// les units exacts du littéral (surrogate isolé verbatim —
 /// `EscapeRegExpPattern` n'y touche pas — test262 A2).
 pub(crate) fn re_source_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    // Spec `get source` : `%RegExp.prototype%` n'a pas de slot
+    // `[[OriginalSource]]` — le getter rend `"(?:)"` (pas
+    // `TypeError`) quand `this` est le proto (JS-C634).
+    if let Value::Obj(id) = this {
+        if id == e.protos.regexp {
+            return Ok(e.str_val_lit("(?:)"));
+        }
+    }
     let re = re_get(e, this)?;
     Ok(e.str_val_lit(&if re.source.is_empty() {
         "(?:)".to_string()
@@ -1088,7 +1121,16 @@ pub(crate) fn re_flags_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResul
     // `Get` + `ToBoolean` dans l'ordre `dgimsuvy` (JS-C625 —
     // `flags/coercion-*` test262).
     match this {
-        Value::Obj(_) => {}
+        Value::Obj(id) => {
+            // Un Symbol est `Value::Obj`+`ObjKind::Symbol` —
+            // ce n'est PAS un objet aux yeux de la spec.
+            if matches!(
+                e.heap.obj(id).map(|o| &o.kind),
+                Some(ObjKind::Symbol { .. })
+            ) {
+                return Err(e.type_error("RegExp.prototype.flags called on non-object"));
+            }
+        }
         _ => return Err(e.type_error("RegExp.prototype.flags called on non-object")),
     }
     let mut f = String::new();

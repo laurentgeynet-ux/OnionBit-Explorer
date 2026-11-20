@@ -60,7 +60,10 @@ pub(crate) fn install(e: &mut Engine) {
         (e.protos.symbol, "Symbol"),
         (e.protos.error, "Error"),
         (e.protos.date, "Date"),
-        (e.protos.regexp, "RegExp"),
+        // `%RegExp.prototype%` n'a PAS de `@@toStringTag`
+        // (spec — les instances sont brandées par leur kind,
+        // `Object.prototype.toString.call(RegExp.prototype)`
+        // = `"[object Object]"`, JS-C634 `15.10.6`).
         (e.protos.promise, "Promise"),
         (e.protos.map, "Map"),
         (e.protos.set, "Set"),

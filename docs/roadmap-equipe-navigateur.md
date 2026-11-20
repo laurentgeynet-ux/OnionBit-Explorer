@@ -15779,6 +15779,33 @@ chaque gain rapporté contre les **deux** archétypes.
   named-groups` skippés (feature non supportée). RegExp+
   String nogen : pas de régression (échecs = pools
   catalogués).
+- [x] **JS-C634 — `RegExp(pattern, flags)` spec :
+  `IsRegExp` (`@@match` observable), early-return sur
+  `SameValue(newTarget, pattern.constructor)`, regexp-like
+  par `Get(source)`/`Get(flags)` — +20 fichiers,
+  RegExp+String nogen 4 617 → **4 657/4 927****
+  (`builtins/string.rs` `regexp_ctor` + accesseurs,
+  `builtins/mod.rs` `@@toStringTag`, gate
+  `tests/c634_ctor_rxlike.rs` **3/3**).
+  **Ctor** : `IsRegExp` lit `pattern[Symbol.match]` par `Get`
+  (truthy de tout type) ; flags absent + `SameValue(newTarget,
+  Get(pattern,"constructor"))` → le pattern est **rendu tel
+  quel** — accesseur `constructor` observable avant toute
+  lecture de slot ; vrai RegExp → `[[OriginalSource]]`/
+  `[[OriginalFlags]]` ; regexp-like → `Get("source")`/
+  `Get("flags")` (erreurs propagées, override `flags` ne lit
+  pas la prop) ; sinon `ToString`. **Accesseurs** :
+  `get source` sur `%RegExp.prototype%` = `"(?:)"` (pas de
+  slot, avant `TypeError`) ; `get flags` rejette un receiver
+  Symbol (`Obj`+`ObjKind::Symbol` n'est pas un objet spec).
+  **`@@toStringTag`** retiré de `%RegExp.prototype%` —
+  `Object.prototype.toString.call(RegExp.prototype)` =
+  `"[object Object]"` (les instances restent `"[object
+  RegExp]"` par leur kind).
+  **Mesures** : liste ciblée (14 fichiers `from-regexp-like`,
+  `call_with_non_regexp_same_ctor`, this-val `source`/`flags`,
+  `prototype/15.10.6`) **28/28** ; RegExp+String nogen
+  **4 657/4 927** (+40 modes, zéro régression observée).
 - [x] **JS-C633 — contrôles syntaxiques restreints :
   `(?-:…)` rejeté (les deux listes de flags vides) et
   `IdentityEscape[U]` exact — `u`-mode atomes =
