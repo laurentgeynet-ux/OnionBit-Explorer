@@ -71,6 +71,16 @@ pub(crate) fn strict_eq(l: &Value, r: &Value, heap: &Heap) -> bool {
     }
 }
 
+/// `SameValue` (spec §7.2.10) : `NaN` égale `NaN`, `-0` diffère
+/// de `+0`, `BigInt` compare les chiffres via le tas — le reste
+/// coincide avec `===` hors numéros (contenu `Str`, identité `Obj`).
+pub(crate) fn same_value(l: &Value, r: &Value, heap: &Heap) -> bool {
+    if let (Value::Num(a), Value::Num(b)) = (l.unhole(), r.unhole()) {
+        return a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan());
+    }
+    strict_eq(l, r, heap)
+}
+
 /// `[[OwnPropertyKeys]]` order : indices-entiers croissants, puis
 /// strings par ordre d'insertion, puis symboles (clés sentinelle
 /// privée) par insertion. Les `props` du heap gardant l'ordre

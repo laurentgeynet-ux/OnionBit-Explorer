@@ -8819,16 +8819,23 @@ impl Engine {
         // `arguments` mappé : l'indice renvoie au slot env du
         // paramètre formel (spec `MappedArgumentsObject` [[Get]]).
         if let Some(i) = ai {
-            let mapped = self.heap.obj(id).and_then(|o| {
-                o.args_map.as_ref().and_then(|(env, map)| {
+            let (mapped, st) = self.heap.obj(id).map_or((None, None), |o| {
+                let st = match &o.kind {
+                    ObjKind::Array(elems) => elems.attrs_of(i as u32),
+                    _ => None,
+                };
+                let m = o.args_map.as_ref().and_then(|(env, map)| {
                     map.get(i).and_then(|n| n.clone().map(|n| (env.clone(), n)))
-                })
+                });
+                (m, st)
             });
             if let Some((env, name)) = mapped {
                 let v = self.env_get(&env, &name).unwrap_or(Value::Undefined);
                 return Some(Prop::Data {
                     value: v,
-                    attrs: crate::heap::PropAttrs::FULL,
+                    // Attributs posés par `defineProperty` sur
+                    // l'index mappé (JS-C644) — `FULL` sinon.
+                    attrs: st.unwrap_or(crate::heap::PropAttrs::FULL),
                 });
             }
         }
@@ -8868,6 +8875,11 @@ impl Engine {
                         return Some(p);
                     }
                 }
+                // Attributs par index (`defineProperty` — JS-C644)
+                // sous le plancher d'intégrité : `seal`/`freeze`
+                // ne réécrivent pas la table, les flags servis
+                // en résultent (`freeze` ⇒ `¬w,¬c`, `seal` ⇒ `¬c`).
+                let st = elems.attrs_of(i as u32);
                 return elems
                     .get(i)
                     .cloned()
@@ -8875,10 +8887,11 @@ impl Engine {
                     .map(|value| Prop::Data {
                         value,
                         attrs: crate::heap::PropAttrs {
-                            writable: o.elem_integrity & 2 == 0,
-                            enumerable: true,
+                            writable: st.is_none_or(|a| a.writable) && o.elem_integrity & 2 == 0,
+                            enumerable: st.is_none_or(|a| a.enumerable),
                             // `seal`/`freeze` → éléments non-config.
-                            configurable: o.elem_integrity.trailing_zeros() >= 2,
+                            configurable: st.is_none_or(|a| a.configurable)
+                                && o.elem_integrity.trailing_zeros() >= 2,
                         },
                     });
             }
@@ -11529,6 +11542,12 @@ impl Engine {
                 if o.elem_integrity & 2 != 0 && i < elems.len() as usize {
                     return Ok(false);
                 }
+                // `[[Set]]` sur index `writable:false` posé par
+                // `defineProperty` (JS-C644) — `false` remonte au
+                // `TypeError` strict de l'appelant.
+                if elems.has(i as u32) && elems.attrs_of(i as u32).is_some_and(|a| !a.writable) {
+                    return Ok(false);
+                }
                 // Ajout hors bornes → met à jour `length` — refusé
                 // si cible non-extensible ou `length` verrouillée.
                 if i >= elems.len() as usize && (!o.extensible || o.elem_integrity & 4 != 0) {
@@ -11791,6 +11810,17 @@ impl Engine {
             }
         }
         if let Some(o) = self.heap.obj_mut(id) {
+            // Ombre-acc (bit 8) : l'index vit dans `props` —
+            // `delete` l'enlève là (`remove_own` honore
+            // `configurable`; `4-265` : delete d'un accesseur
+            // configurable d'index réussit). Vérifié avant
+            // l'emprunt `&mut` du backing.
+            let shadowed = matches!(o.kind, ObjKind::Array(_))
+                && o.elem_integrity & 8 != 0
+                && o.find(key).is_some();
+            if shadowed {
+                return o.remove_own(key);
+            }
             if let ObjKind::Array(elems) = &mut o.kind {
                 if key == "length" {
                     return false;
@@ -11800,6 +11830,13 @@ impl Engine {
                     // la suppression est refusée (spec) — trou ou
                     // absent → supprimable librement.
                     if o.elem_integrity & 3 != 0 && elems.has(i as u32) {
+                        return false;
+                    }
+                    // `configurable:false` posé par `defineProperty`
+                    // (JS-C644) — même refus spec.
+                    if elems.has(i as u32)
+                        && elems.attrs_of(i as u32).is_some_and(|a| !a.configurable)
+                    {
                         return false;
                     }
                     // `arguments` mappé : `delete` retire le
@@ -11914,6 +11951,11 @@ impl Engine {
             match &o.kind {
                 ObjKind::Array(elems) => {
                     for (i, _) in elems.present() {
+                        // `enumerable:false` posé par
+                        // `defineProperty` (JS-C644).
+                        if elems.attrs_of(i).is_some_and(|a| !a.enumerable) {
+                            continue;
+                        }
                         out.push(i.to_string());
                     }
                 }
@@ -12193,6 +12235,11 @@ impl Engine {
             } else if let Some(o) = self.heap.obj(cid) {
                 if let ObjKind::Array(elems) = &o.kind {
                     for (i, _) in elems.present() {
+                        // `enumerable:false` posé par
+                        // `defineProperty` (JS-C644).
+                        if elems.attrs_of(i).is_some_and(|a| !a.enumerable) {
+                            continue;
+                        }
                         if seen.insert(i.to_string()) {
                             out.push(i.to_string());
                         }

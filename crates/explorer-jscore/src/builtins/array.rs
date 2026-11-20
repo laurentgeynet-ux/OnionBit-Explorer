@@ -296,9 +296,24 @@ pub(crate) fn array_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     // `ArraySpeciesCreate(this, out.len)` — sous-classes.
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
+        put_cdp(e, &a_v, i, v.clone())?;
     }
     Ok(a_v)
+}
+
+/// `CreateDataPropertyOrThrow` sur index — éléments du résultat
+/// `species_array` posés en `{v, t, t, t}` (spec
+/// `[[DefineOwnProperty]]`, jamais `[[Set]]`) : une data-prop
+/// non-writable **héritée** ne bloque pas, un index own
+/// configurable est redéfini (`concat`/`slice`/`map`/`filter` —
+/// `15.4.4.4-5-b-iii-3-b-1`, `target-array-with-non-writable-*`).
+fn put_cdp(e: &mut Engine, a: &Value, i: usize, v: Value) -> JsResult<()> {
+    if let Value::Obj(aid) = a {
+        if !e.create_data_prop_spec_on(*aid, &i.to_string(), v)? {
+            return Err(e.type_error("cannot define index on result array"));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -352,7 +367,7 @@ pub(crate) fn array_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
+        put_cdp(e, &a_v, i, v.clone())?;
     }
     Ok(a_v)
 }
@@ -514,7 +529,7 @@ pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
     }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
+        put_cdp(e, &a_v, i, v.clone())?;
     }
     Ok(a_v)
 }
@@ -540,7 +555,7 @@ pub(crate) fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
-        e.set_prop_value(a_v.clone(), &i.to_string(), v.clone())?;
+        put_cdp(e, &a_v, i, v.clone())?;
     }
     Ok(a_v)
 }

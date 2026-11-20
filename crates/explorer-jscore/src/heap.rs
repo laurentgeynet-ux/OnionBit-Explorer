@@ -1288,6 +1288,21 @@ pub struct Arr {
     dense: Vec<Value>,
     hi: Option<std::collections::BTreeMap<u32, Value>>,
     len: u32,
+    /// Attributs par index posés via `[[DefineOwnProperty]]`
+    /// (`Object.defineProperty(a, "0", {…})`) : la représentation
+    /// dense/map ne porte que des valeurs — les flags
+    /// `{writable, enumerable, configurable}` demandés vivent ici,
+    /// clés **positionnelles** (la spec attache les attributs à la
+    /// propriété, pas à la valeur : `shift`/`splice` déplacent les
+    /// valeurs sous les attributs de la position — `[[Set]]`
+    /// préserve, `[[Delete]]` supprime). `None` tant qu'aucun
+    /// `defineProperty` n'a touché un index — le cas commun
+    /// (littéraux, `push`, `[[Set]]`) garde le défaut `FULL`.
+    /// La map est boxée : `BTreeMap` pèse 24 octets en ligne dans
+    /// `Obj`, le `Box` n'en coûte que 8 — le comptage mémoire du GC
+    /// mesure `Obj` à la cellule, pas par allocation interne.
+    #[allow(clippy::box_collection)]
+    attrs: Option<Box<std::collections::BTreeMap<u32, PropAttrs>>>,
 }
 
 impl Arr {
@@ -1298,6 +1313,7 @@ impl Arr {
             dense,
             hi: None,
             len,
+            attrs: None,
         }
     }
 
@@ -1308,6 +1324,7 @@ impl Arr {
             dense: Vec::new(),
             hi: None,
             len,
+            attrs: None,
         }
     }
 
@@ -1403,6 +1420,12 @@ impl Arr {
                 self.hi = None;
             }
         }
+        if let Some(a) = &mut self.attrs {
+            a.split_off(&n);
+            if a.is_empty() {
+                self.attrs = None;
+            }
+        }
     }
 
     /// Ajout en queue (`push`/`concat`) — l'index `len` prend
@@ -1429,6 +1452,14 @@ impl Arr {
         let v = self.get(i as usize).cloned().unwrap_or(Value::Hole);
         self.delete(i);
         self.len -= 1;
+        // Élague les trous terminaux périmés — `dense` peut
+        // dépasser `len` (`delete` marque sans tronquer ; les
+        // entrées non-Hole d'`arguments` via `set_keep_len`
+        // sont des propriétés réelles, conservées).
+        while self.dense.len() > self.len as usize && self.dense.last().is_some_and(Value::is_hole)
+        {
+            self.dense.pop();
+        }
         v
     }
 
@@ -1442,6 +1473,47 @@ impl Arr {
             if h.is_empty() {
                 self.hi = None;
             }
+        }
+        if let Some(a) = &mut self.attrs {
+            a.remove(&i);
+        }
+    }
+
+    /// Attributs stockés à l'index `i` (`defineProperty`), `None`
+    /// si l'index garde les attributs par défaut `FULL`.
+    pub fn attrs_of(&self, i: u32) -> Option<PropAttrs> {
+        self.attrs.as_ref().and_then(|a| a.get(&i).copied())
+    }
+
+    /// Pose les attributs effectifs de l'index `i` (spec
+    /// `[[DefineOwnProperty]]` — fusion desc/existant déjà faite
+    /// par l'appelant). `FULL` (= le défaut lu par `attrs_of`)
+    /// n'est pas stocké : `None` couvre le cas commun —
+    /// `CreateDataPropertyOrThrow` des méthodes de tableau pose
+    /// `{v,t,t,t}` sur chaque élément résultat.
+    pub fn set_attrs(&mut self, i: u32, attrs: PropAttrs) {
+        if attrs == PropAttrs::FULL {
+            if let Some(a) = &mut self.attrs {
+                a.remove(&i);
+            }
+            return;
+        }
+        self.attrs
+            .get_or_insert_with(|| Box::new(std::collections::BTreeMap::new()))
+            .insert(i, attrs);
+    }
+
+    /// Rétracte la table d'attributs : les entrées d'index devenus
+    /// absents (trou déplacé par `insert`/`remove_at`/`reverse`)
+    /// sont supprimées — une propriété inexistante n'a pas
+    /// d'attributs (spec `[[Delete]]`).
+    pub fn prune_attrs(&mut self) {
+        let Some(mut a) = self.attrs.take() else {
+            return;
+        };
+        a.retain(|&k, _| self.has(k));
+        if !a.is_empty() {
+            self.attrs = Some(a);
         }
     }
 
@@ -1468,15 +1540,17 @@ impl Arr {
     }
 
     /// Matérialise `0..len` (`Hole` aux absents) — borne
-    /// `alloc_guard` à la charge de l'appelant.
+    /// `alloc_guard` à la charge de l'appelant. `dense` peut
+    /// contenir des trous au-delà de `len` (`delete`/`pop` marquent
+    /// sans tronquer) — la copie est bornée à `len`.
     pub fn to_vec(&self) -> Vec<Value> {
         let mut v = Vec::with_capacity(self.dense.len().min(self.len as usize));
         v.resize(self.len as usize, Value::Hole);
-        for (i, val) in self.dense.iter().enumerate() {
+        for (i, val) in self.dense.iter().enumerate().take(self.len as usize) {
             v[i] = val.clone();
         }
         if let Some(h) = &self.hi {
-            for (&k, val) in h {
+            for (&k, val) in h.range(..self.len) {
                 v[k as usize] = val.clone();
             }
         }
@@ -1491,15 +1565,28 @@ impl Arr {
     }
 
     /// `reverse` : les présents d'index `i` passent à `len-1-i`,
-    /// les trous restent absents (spec).
+    /// les trous restent absents (spec). Seul `0..len` est
+    /// permuté — `dense`/`hi` peuvent porter des entrées au-delà
+    /// (trous périmés, props `arguments` de `set_keep_len`) que
+    /// l'inversion ne touche pas.
     pub fn reverse(&mut self) {
-        self.dense.reverse();
+        let n = (self.len as usize).min(self.dense.len());
+        self.dense[..n].reverse();
         if let Some(h) = self.hi.take() {
             if !h.is_empty() {
-                let n = self.len;
-                self.hi = Some(h.into_iter().map(|(k, v)| (n - 1 - k, v)).collect());
+                let len = self.len;
+                self.hi = Some(
+                    h.into_iter()
+                        .map(|(k, v)| (if k < len { len - 1 - k } else { k }, v))
+                        .collect(),
+                );
             }
         }
+        // Attributs positionnels : les valeurs se déplacent, les
+        // attributs restent à leur index — les trous miroirés sur
+        // une position attributée la font disparaître (spec
+        // `[[Delete]]` de l'algorithme).
+        self.prune_attrs();
     }
 
     /// Octets de stockage éléments — `cell_bytes` : capacité
@@ -1545,6 +1632,10 @@ impl Arr {
             self.set(at as u32, v);
         }
         self.len = self.len.saturating_add(1);
+        // Attributs positionnels : les valeurs glissent d'un cran,
+        // les positions gardent leurs attributs (spec `[[Set]]`) ;
+        // un trou glissé sur une position attributée la supprime.
+        self.prune_attrs();
     }
 
     /// `remove(at)` — retire l'index, décale `> at` de −1
@@ -1575,6 +1666,13 @@ impl Arr {
             }
         }
         self.len = self.len.saturating_sub(1);
+        // Attributs positionnels : la position supprimée est
+        // l'ancien sommet (`[[Delete]]` de l'algorithme de
+        // décalage) ; les trous déplacés sont élagués.
+        if let Some(a) = &mut self.attrs {
+            a.remove(&self.len);
+        }
+        self.prune_attrs();
         out
     }
 
@@ -2287,7 +2385,7 @@ impl Object {
                         {
                             return false;
                         }
-                        if !a.writable && *v != value {
+                        if !a.writable && !v.same_value(&value) {
                             return false;
                         }
                         *v = value;

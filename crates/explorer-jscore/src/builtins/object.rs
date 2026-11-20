@@ -442,13 +442,27 @@ pub(crate) fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
 /// `null`; the optional map applies `defineProperties` semantics.
 pub(crate) fn object_create(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let proto = match arg(args, 0) {
-        v @ Value::Obj(_) => v,
-        Value::Null | Value::Undefined => Value::Null,
+        // Cellule Symbol : primitive malgré l'`ObjId` — pas un
+        // proto valide (spec `ObjectCreate` exige Object|null ;
+        // `15.2.3.5-1-1` — `undefined`/`Symbol` → `TypeError`).
+        v @ Value::Obj(pid) => {
+            if let Some(ObjKind::Symbol { .. }) = e.heap.obj(pid).map(|o| &o.kind) {
+                return Err(e.type_error("Object.create: proto must be an object"));
+            }
+            v
+        }
+        Value::Null => Value::Null,
         _ => return Err(e.type_error("Object.create: proto must be an object")),
     };
     let id = e.heap.alloc_obj(Object::ordinary(proto));
-    if let Value::Obj(_) = arg(args, 1) {
-        define_props_from_map(e, id, arg(args, 1))?;
+    // `Properties === undefined` → skip ; TOUT le reste passe
+    // `ToObject` (spec `ObjectDefineProperties`) — `null` →
+    // TypeError (`15.2.3.5-4-3`), primitive → wrapper vide
+    // (no-op) sauf string non-vide (indices énumérables →
+    // descripteurs non-objets → TypeError).
+    match arg(args, 1) {
+        Value::Undefined | Value::Hole => {}
+        map => define_props_from_map(e, id, map)?,
     }
     Ok(Value::Obj(id))
 }
@@ -465,6 +479,12 @@ pub(crate) fn object_define_property(e: &mut Engine, _t: Value, args: &[Value]) 
     let Value::Obj(desc_id) = arg(args, 2) else {
         return Err(e.type_error("property descriptor must be an object"));
     };
+    // Les cellules Symbol vivent en `ObjKind::Symbol` — un symbole
+    // n'est PAS un objet descripteur (spec — `property-description
+    // -must-be-an-object-not-symbol`).
+    if let Some(ObjKind::Symbol { .. }) = e.heap.obj(desc_id).map(|o| &o.kind) {
+        return Err(e.type_error("property descriptor must be an object"));
+    }
     if !define_one_prop(e, id, &key, desc_id)? {
         return Err(e.type_error(format!("cannot define property `{key}`")));
     }
@@ -655,18 +675,18 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
         e.deleg_hop(&mut depth)?;
     }
     let desc = Value::Obj(desc_id);
-    let (has_value, has_writable, has_enumerable, has_configurable, has_get, has_set) = {
-        let o = e.heap.obj(desc_id);
-        let h = |k: &str| o.is_some_and(|o| o.find(k).is_some());
-        (
-            h("value"),
-            h("writable"),
-            h("enumerable"),
-            h("configurable"),
-            h("get"),
-            h("set"),
-        )
-    };
+    // `HasProperty` sur la chaîne entière (spec
+    // `ToPropertyDescriptor` — un champ hérité du proto du
+    // descripteur compte : `Object/create/15.2.3.5-4-102`,
+    // `descObj` hérite `configurable:true` de son proto).
+    let (has_value, has_writable, has_enumerable, has_configurable, has_get, has_set) = (
+        e.has_prop(desc_id, "value")?,
+        e.has_prop(desc_id, "writable")?,
+        e.has_prop(desc_id, "enumerable")?,
+        e.has_prop(desc_id, "configurable")?,
+        e.has_prop(desc_id, "get")?,
+        e.has_prop(desc_id, "set")?,
+    );
     let cur = e.find_own(id, key);
     // Flags absents du descripteur → valeur de la prop existante,
     // `false` sinon (spec `[[DefineOwnProperty]]`).
@@ -818,22 +838,80 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                 return Ok(false);
             }
             if let Some(n) = new_len {
-                // Scellé : la réduction supprime les éléments
-                // `>= n` — échec seulement si l'un est *présent*
-                // (les trous se suppriment librement, spec).
-                if integ & 3 != 0 && (n as usize) < len {
-                    let blocked = e.heap.obj(id).is_some_and(|o| match &o.kind {
-                        ObjKind::Array(a) => a.any_present_from(n),
-                        _ => false,
+                // `writable:false` s'applique AVANT la suppression
+                // d'éléments (spec `ArraySetLength` : le verrou
+                // survit à l'échec partiel —
+                // `defineProperties/15.2.3.7-6-a-164/176`).
+                if has_writable && !writable {
+                    if let Some(o) = e.heap.obj_mut(id) {
+                        o.elem_integrity |= 4;
+                    }
+                }
+                let mut bl = n;
+                let blocked;
+                if (n as usize) < len {
+                    // Suppression décroissante des index `>= n`,
+                    // arrêt au premier non-supprimable (accesseur
+                    // indexé ou élément `configurable:false` —
+                    // `4-168`, `4-174`) ; `length` retombe sur
+                    // blocker+1 puis `TypeError`. Les trous se
+                    // suppriment librement.
+                    let (bl2, doomed, blk) = e.heap.obj(id).map_or((n, Vec::new(), false), |o| {
+                        let bl2 = n;
+                        let mut doomed = Vec::new();
+                        let mut i = len as u32;
+                        while i > n {
+                            i -= 1;
+                            if o.elem_integrity & 8 != 0 {
+                                if let Some(p) = o.find(&i.to_string()) {
+                                    if p.configurable() {
+                                        doomed.push(i.to_string());
+                                        continue;
+                                    }
+                                    return (i + 1, doomed, true);
+                                }
+                            }
+                            if let ObjKind::Array(elems) = &o.kind {
+                                if elems.has(i) {
+                                    let ok = elems.attrs_of(i).is_none_or(|a| a.configurable)
+                                        && o.elem_integrity.trailing_zeros() >= 2;
+                                    if ok {
+                                        continue;
+                                    }
+                                    return (i + 1, doomed, true);
+                                }
+                            }
+                        }
+                        (bl2, doomed, false)
                     });
+                    bl = bl2;
+                    blocked = blk;
+                    if let Some(o) = e.heap.obj_mut(id) {
+                        for k in &doomed {
+                            o.remove_own(k);
+                        }
+                        if let Some((_, map)) = o.args_map.as_mut() {
+                            if let Some(m) = std::rc::Rc::get_mut(map) {
+                                for i in bl..len as u32 {
+                                    if let Some(entry) = m.get_mut(i as usize) {
+                                        *entry = None;
+                                    }
+                                }
+                            }
+                        }
+                        if let ObjKind::Array(elems) = &mut o.kind {
+                            elems.set_len(bl);
+                        }
+                    }
                     if blocked {
                         return Ok(false);
                     }
-                }
-                // Croissance sparse : aucune densification — `len`
-                // est découplée du backing (JS-C613).
-                if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
-                    elems.set_len(n);
+                } else {
+                    // Croissance sparse : aucune densification —
+                    // `len` est découplée du backing (JS-C613).
+                    if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
+                        elems.set_len(bl);
+                    }
                 }
             }
             if has_writable && !writable {
@@ -847,7 +925,7 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
     if let Some(i) = crate::interp::array_index(key) {
         let is_arr = matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_)));
         if is_arr {
-            let (integ, len, cur_v) = e
+            let (integ, len, ext, cur_v) = e
                 .heap
                 .obj(id)
                 .map(|o| {
@@ -855,15 +933,23 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                         (
                             o.elem_integrity,
                             elems.len() as usize,
+                            o.extensible,
                             elems.get(i).cloned(),
                         )
                     } else {
-                        (0, 0, None)
+                        (0, 0, false, None)
                     }
                 })
                 .unwrap_or_default();
-            let _ = cur_v;
-            if has_acc {
+            // Descripteur « générique » (ni `value`/`writable` ni
+            // `get`/`set`) sur un accesseur d'index existant : le
+            // type est préservé — traité comme un descripteur
+            // d'accesseur (spec `[[DefineOwnProperty]]` —
+            // `4-271` : `{enumerable:false}` sur un set-accessor
+            // d'index garde le setter).
+            let treat_as_acc =
+                has_acc || (matches!(cur, Some(crate::heap::Prop::Acc { .. })) && !has_data);
+            if treat_as_acc {
                 // Spec `[[DefineOwnProperty]]` : un accesseur est
                 // légal sur un index d'array — `ArraySetLength`
                 // ne s'applique qu'aux data. Sous seal/freeze les
@@ -871,7 +957,14 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                 // non-extensible → refus ; sinon l'accesseur vit
                 // dans `props`, ombre l'élément via le bit 8 de
                 // `elem_integrity` (JS-C627, `array-key-get-error`).
-                if integ & 3 != 0 {
+                // Type-switch data→acc sur un index
+                // non-configurable → refus (spec — `4-241`,
+                // `4-339`) ; la compat acc-sur-acc (flags figés,
+                // get/set `SameValue`) est tranchée par
+                // `define_accessor_strict`.
+                if integ & 3 != 0
+                    || matches!(cur, Some(crate::heap::Prop::Data { ref attrs, .. }) if !attrs.configurable)
+                {
                     return Ok(false);
                 }
                 return Ok(e.heap.obj_mut(id).is_some_and(|o| {
@@ -894,37 +987,102 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
                             elems.set_len(i as u32 + 1);
                         }
                     }
+                    // `arguments` mappé : un accesseur sur l'index
+                    // SUPPRIME le mapping paramètre (spec 10.6
+                    // [[DefineOwnProperty]] 5.a.i — `4-325-1`).
+                    if let Some((_, map)) = o.args_map.as_mut() {
+                        if let Some(m) = std::rc::Rc::get_mut(map).and_then(|m| m.get_mut(i)) {
+                            *m = None;
+                        }
+                    }
                     o.elem_integrity |= 8;
                     true
                 }));
             }
-            // Descripteur demandant `configurable:true` sur élément
-            // sealé/gelé, `writable:true` sur gelé, ou une autre
-            // valeur sur gelé → refus spec.
-            if integ & 3 != 0 && has_configurable && configurable {
-                return Ok(false);
+            // JS-C644 — compatibilité `[[DefineOwnProperty]]` sur
+            // élément. `cur` porte les attributs effectifs
+            // (table `Arr::attrs_of` sous plancher d'intégrité —
+            // `find_own_ai`) : non-configurable ⇒ flags figés ;
+            // `writable:false` ⇒ la valeur doit être `SameValue`
+            // (`NaN` égale `NaN`, `-0` diffère de `+0` —
+            // `Object/create/15.2.3.5-4-102`, `…6-4-215`).
+            match &cur {
+                Some(crate::heap::Prop::Data { attrs: ca, .. }) => {
+                    if !ca.configurable
+                        && ((has_configurable && configurable)
+                            || (has_enumerable && enumerable != ca.enumerable)
+                            || (has_writable && writable && !ca.writable)
+                            || (!ca.writable
+                                && has_value
+                                && !crate::interp::same_value(
+                                    &v,
+                                    cur_v.as_ref().unwrap_or(&Value::Undefined),
+                                    &e.heap,
+                                )))
+                    {
+                        return Ok(false);
+                    }
+                }
+                Some(crate::heap::Prop::Acc { attrs: ca, .. }) => {
+                    // Ombre-acc (bit 8) + descripteur data explicite
+                    // : le switch de type exige un accesseur
+                    // configurable (spec), puis l'élément revit.
+                    if !ca.configurable {
+                        return Ok(false);
+                    }
+                    if let Some(o) = e.heap.obj_mut(id) {
+                        o.remove_own(key);
+                    }
+                }
+                _ => {
+                    // Index absent (hors-bornes ou trou) : cible
+                    // non-extensible ou `length` verrouillée au-delà
+                    // → refus (`ArraySetLength`, spec).
+                    if !ext || (i >= len && integ & 4 != 0) {
+                        return Ok(false);
+                    }
+                }
             }
-            if integ & 2 != 0 && has_writable && writable {
-                return Ok(false);
+            // `[[DefineOwnProperty]]` — écriture own directe de
+            // l'élément : jamais `[[Set]]` (les accesseurs de la
+            // chaîne proto sont invisibles ici, JS-C615). Valeur
+            // posée quand le descripteur la porte OU quand la prop
+            // est créée (absente ⇒ `undefined`, spec) — `v` a déjà
+            // été fusionné (valeur courante sinon `undefined`), la
+            // réécriture d'une valeur conservée est sans effet.
+            // Pas de garde d'alloc (JS-C613) : les indices hauts
+            // vivent dans la map sparse de `Arr`. Les attributs
+            // fusionnés sont persistés dans la table par index.
+            // `arguments` mappé : le descripteur data écrit À
+            // TRAVERS le mapping — le paramètre formel prend la
+            // valeur (spec 10.6 5.a.i — `4-333-11` : `obj[0]` lit
+            // `2010` en passant par l'env). Le mapping survit.
+            let mapped = e.heap.obj(id).and_then(|o| {
+                o.args_map.as_ref().and_then(|(env, map)| {
+                    map.get(i).and_then(|n| n.clone().map(|n| (env.clone(), n)))
+                })
+            });
+            // `writable:false` demandé sur un index mappé → le
+            // mapping est SUPPRIMÉ (spec 10.6 — `4-293-3` :
+            // `a` garde la valeur écrite, le paramètre se
+            // désynchronise de `arguments[i]`).
+            let drop_mapping = mapped.is_some() && has_writable && !writable;
+            if let Some(o) = e.heap.obj_mut(id) {
+                if let ObjKind::Array(elems) = &mut o.kind {
+                    elems.set(i as u32, v.clone());
+                    elems.set_attrs(i as u32, attrs);
+                }
+                if drop_mapping {
+                    if let Some((_, map)) = o.args_map.as_mut() {
+                        if let Some(m) = std::rc::Rc::get_mut(map).and_then(|m| m.get_mut(i)) {
+                            *m = None;
+                        }
+                    }
+                }
             }
-            if integ & 2 != 0 && has_value && !e.strict_eq(&v, &cur_v.unwrap_or(Value::Undefined)) {
-                return Ok(false);
-            }
-            // Hors-bornes → ajout interdit (cible non-extensible
-            // sous seal/freeze ; sinon extension normale via set).
-            if i >= len && integ & 3 != 0 {
-                return Ok(false);
-            }
-            if has_value {
-                // `[[DefineOwnProperty]]` — écriture own directe
-                // de l'élément : jamais `[[Set]]` (les accesseurs
-                // de la chaîne proto sont invisibles ici, JS-C615)
-                // et stockage effectif quel que soit `i` (avant :
-                // `i >= len` retournait vrai sans rien écrire).
-                // Pas de garde d'alloc (JS-C613) : les indices
-                // hauts vivent dans la map sparse de `Arr`.
-                if let Some(ObjKind::Array(elems)) = e.heap.obj_mut(id).map(|o| &mut o.kind) {
-                    elems.set(i as u32, v);
+            if let Some((env, name)) = mapped {
+                if has_value {
+                    e.env_set(&env, &name, v)?;
                 }
             }
             return Ok(true);
@@ -972,11 +1130,33 @@ pub(crate) fn object_define_properties(
 /// Chaque phase qui jette est journalisée (sonde JS-C313) — la
 /// composition de mixin se coupe ici à mi-itération.
 pub(crate) fn define_props_from_map(e: &mut Engine, id: ObjId, map: Value) -> JsResult<()> {
-    let Value::Obj(mid) = map else {
-        return Err(e.type_error("property map must be an object"));
+    // `ToObject(Properties)` (spec `ObjectDefineProperties`) :
+    // `defineProperties(o, false)` → wrapper Boolean frais —
+    // aucune clé propre énumérable → no-op silencieux
+    // (`Object/defineProperties/15.2.3.7-2-3`, JS-C644).
+    let mid = match map {
+        Value::Obj(mid) => mid,
+        Value::Null | Value::Undefined | Value::Hole => {
+            return Err(e.type_error("Cannot convert undefined or null to object"));
+        }
+        prim => {
+            let proto = match &prim {
+                Value::Num(_) => e.protos.number,
+                Value::Str(_) => e.protos.string,
+                Value::Bool(_) => e.protos.boolean,
+                Value::Big(_) => e.protos.bigint,
+                _ => return Err(e.type_error("property map must be an object")),
+            };
+            let wid = e.new_object();
+            if let Some(o) = e.heap.obj_mut(wid) {
+                o.proto = Value::Obj(proto);
+            }
+            e.set_own(wid, crate::builtins::ctors::PRIM, prim, false);
+            wid
+        }
     };
     for k in e.own_enum_keys_trapped(mid)? {
-        let dv = match e.get_prop_value(map.clone(), &k) {
+        let dv = match e.get_prop_value(Value::Obj(mid), &k) {
             Ok(dv) => dv,
             Err(t) => {
                 crate::defprop_note(format!(
@@ -990,6 +1170,9 @@ pub(crate) fn define_props_from_map(e: &mut Engine, id: ObjId, map: Value) -> Js
             crate::defprop_note(format!("defprops #{id} `{k}` desc non-object"));
             return Err(e.type_error(format!("descriptor for `{k}` must be an object")));
         };
+        if let Some(ObjKind::Symbol { .. }) = e.heap.obj(did).map(|o| &o.kind) {
+            return Err(e.type_error(format!("descriptor for `{k}` must be an object")));
+        }
         if !define_one_prop(e, id, &k, did)? {
             return Err(e.type_error(format!("cannot define property `{k}`")));
         }

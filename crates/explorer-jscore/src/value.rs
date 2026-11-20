@@ -478,6 +478,23 @@ impl Value {
     /// `Hole → Undefined` — lecture d'un trou (itérateurs,
     /// valeurs retournées par `pop`/`at`/spread…).
     #[must_use]
+    /// `SameValue` au niveau `Value` pur (spec §7.2.10) :
+    /// `NaN` égale `NaN`, `-0` diffère de `+0` ; `Str`/`Big`
+    /// comparent le contenu via l'égalité dérivée, `Obj` l'identité.
+    /// `Big` compare l'`ObjId` — deux cellules à chiffres égaux mais
+    /// distincts sont distinguées ici ; l'appelant qui voit le tas
+    /// préfère `interp::same_value` (résout les chiffres).
+    pub fn same_value(&self, other: &Value) -> bool {
+        let (l, r) = (self.unhole(), other.unhole());
+        match (&l, &r) {
+            (Value::Num(a), Value::Num(b)) => {
+                a.to_bits() == b.to_bits() || (a.is_nan() && b.is_nan())
+            }
+            _ => l == r,
+        }
+    }
+
+    #[must_use]
     pub fn unhole(&self) -> Value {
         if self.is_hole() {
             Value::Undefined

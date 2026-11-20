@@ -16293,6 +16293,55 @@ chaque gain rapporté contre les **deux** archétypes.
   en `u`/`v` → `SyntaxError` (`\pL`, le backend le
   lisait `\p{L}`). Passthrough non-`u` (§B-210/§B-212)
   inchangé.
+- [x] **JS-C644 — sémantique des descripteurs de
+  propriété : attributs par index de tableau,
+  `SameValue` à la re-définition, accesseurs sur
+  index, `ArraySetLength` à effacement partiel,
+  `Object.create`/`defineProperties` stricts —
+  sous-ensemble `defineProperty`/`defineProperties`/
+  `create` (2 083 fichiers) : 3 787 → **4 154/4 154
+  passes-mode, 0 échec** (`heap.rs` `Arr.attrs`,
+  `interp/mod.rs` `find_own_ai`/`[[Set]]`/`[[Delete]]`,
+  `interp/ops.rs` `same_value` tas, `builtins/object.rs`
+  `define_one_prop_impl`/`object_create`/shrink, gate
+  `tests/c644_index_desc.rs` **9/9**). **`Arr.attrs`** :
+  map positionnelle sparse `{writable, enumerable,
+  configurable}` par index (`None` tant qu'aucun
+  `defineProperty` n'a touché un index — défaut `FULL`),
+  boxée pour garder `Obj` compact (comptage GC à la
+  cellule). **Index absent** : `{value:…}` crée un
+  élément `{f,f,f}` ; **index existant** : les champs
+  omis préservent l'état courant ; `writable:false`
+  + `value` non-`SameValue` → `TypeError` (`NaN`
+  reconnu égal via `same_value` tas — BigInt par
+  contenu). **Accesseurs sur index** : stockés dans
+  `props`, ils occultent l'élément — `[[Get]]`,
+  `[[Set]]` (setter appelé), `[[Delete]]` et
+  `find_own_ai` les respectent ; définir un accesseur
+  hors-bornes grandit `length`. **Champs hérités**
+  du descripteur : présence via `HasProperty`, valeur
+  par `Get` ordinaire (getters/proto observables).
+  **`arguments` mappé** : `defineProperty` index →
+  maj du slot lié ; accesseur ou `{writable:false}`
+  → détachement du mapping. **`Object.create`** :
+  `undefined`/`Symbol` en prototype → `TypeError` ;
+  `Properties` présent non-`undefined` → `ToObject` +
+  `define_props_from_map`. **`ArraySetLength`** :
+  shrink par suppression descendante partielle —
+  élément/accesseur non-configurable bloque, `length`
+  retombe à bloqueur+1, `writable:false` s'applique
+  avant l'échec → `TypeError` après état partiel.
+  **Blast-radius soldé** : panic latent `Arr::to_vec`
+  (`dense` > `len` via trous `pop`/`delete` ou props
+  `arguments` de `set_keep_len` — copie/`reverse`/`pop`
+  bornés à `0..len`) ; `concat`/`slice`/`map`/`filter`
+  écrivent le résultat en `CreateDataPropertyOrThrow`
+  (proto non-writable ignoré, index configurable
+  redéfini — 5 fichiers repris). Vague `Object`+`Array`
+  +`Function`+`for-in` (7 122 fichiers) : échecs restants
+  = pools pré-existants (`this` primitif non-coercé,
+  bornes 2^53, `resizable-buffer`, `fromAsync`,
+  `for-in` dstr — clusters suivants).
 - [x] **JS-C618 — `@@match`/`@@matchAll`/`@@replace`/`@@search`
   + `String.prototype.{split,match,matchAll,replace,replaceAll,
   search}` spec : boucles `RegExpExec` dynamiques (exec custom,
