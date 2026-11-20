@@ -1655,6 +1655,7 @@ impl GExec {
                         .unwrap_or_else(|| f.env.clone());
                     let cenv = Env::block(penv);
                     e.predeclare_slots(&cenv, cbody.as_ptr() as usize);
+                    e.block_instantiate(&cenv, &cbody);
                     e.bind_pat(
                         &cenv,
                         self.this.clone(),
@@ -1704,6 +1705,7 @@ impl GExec {
                         .unwrap_or_else(|| f.env.clone());
                     let fenv = Env::block(penv);
                     e.predeclare_slots(&fenv, fin.as_ptr() as usize);
+                    e.block_instantiate(&fenv, &fin);
                     self.stack.push(GFrame {
                         list: Rc::new(fin),
                         pc: 0,
@@ -2453,6 +2455,7 @@ impl GExec {
                     let penv = env.borrow().parent.clone().unwrap_or_else(|| env.clone());
                     let fenv = Env::block(penv);
                     e.predeclare_slots(&fenv, fin.as_ptr() as usize);
+                    e.block_instantiate(&fenv, &fin);
                     self.stack.push(GFrame {
                         list: Rc::new(fin),
                         pc: 0,
@@ -2673,7 +2676,7 @@ impl GExec {
     /// au lieu de `extra`. Corps non-bloc : aucune déclaration
     /// lexicale possible — l'env reste un pass-through non
     /// câblé (`extra` vide, lookup remonte direct).
-    fn frame_env(e: &Engine, env: &EnvRef, body: &Stmt) -> EnvRef {
+    fn frame_env(e: &mut Engine, env: &EnvRef, body: &Stmt) -> EnvRef {
         // §B-211 — `Block`, pas `Local` : un `var` dans le corps
         // se déclare au scope fonction (le `Local` l'avalait —
         // `{var x}`/`if(var)`/`for{var}` async rendaient
@@ -2681,6 +2684,11 @@ impl GExec {
         let fenv = Env::block(env.clone());
         if let Stmt::Block(l) = body {
             e.predeclare_slots(&fenv, l.as_ptr() as usize);
+            // §B-216 — `BlockDeclarationInstantiation` : les
+            // `function` du corps liées+initialisées à l'entrée
+            // (même traitement que `exec.rs` — `n.dn(u)` webpack
+            // dans un `try` d'async module).
+            e.block_instantiate(&fenv, l);
         }
         fenv
     }
@@ -2800,6 +2808,7 @@ impl GExec {
                 // `x` perdu hors bloc).
                 let benv = Env::block(env.clone());
                 e.predeclare_slots(&benv, l.as_ptr() as usize);
+                e.block_instantiate(&benv, l);
                 self.stack.push(GFrame {
                     list: Rc::new(l.clone()),
                     pc: 0,
@@ -2972,6 +2981,10 @@ impl GExec {
                 // avalait les `var` du try.
                 let benv = Env::block(env.clone());
                 e.predeclare_slots(&benv, block.as_ptr() as usize);
+                // §B-216 — verbatim ars : `try{ … n.dn(u) …
+                // await …; function u(){} }` — la fn du try
+                // instanciée à l'entrée du bloc lazy.
+                e.block_instantiate(&benv, block);
                 self.stack.push(GFrame {
                     list: Rc::new(block.clone()),
                     pc: 0,
@@ -3051,6 +3064,10 @@ impl GExec {
                         // en sync : `Local` avalait les `var`.
                         let senv = Env::block(env.clone());
                         e.predeclare_slots(&senv, cases.as_ptr() as usize);
+                        // §B-216 — bloc unique partagé par les
+                        // cases : les `function` de TOUTES les
+                        // cases y sont instanciées à l'entrée.
+                        e.block_instantiate(&senv, &flat);
                         self.stack.push(GFrame {
                             list: Rc::new(flat),
                             pc: 0,

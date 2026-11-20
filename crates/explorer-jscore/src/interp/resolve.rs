@@ -423,6 +423,18 @@ fn block_names_ord(stmts: &[Stmt]) -> Vec<Rc<str>> {
                     }
                 }
             }
+            // §B-216 — `function` de bloc = liaison lexicale du
+            // bloc (spec `BlockDeclarationInstantiation`,
+            // initialisée à l'entrée) : le resolver doit la voir
+            // ici, sinon `f()` dans le bloc résolvait vers la
+            // liaison `var` Annex-B du scope fonction → `undefined`.
+            Stmt::FunctionDecl(f) => {
+                if let Some(n) = &f.name {
+                    if !out.iter().any(|x| x == n) {
+                        out.push(n.clone());
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -1071,17 +1083,12 @@ impl Resolver {
                 }
                 let mut ord = Vec::new();
                 for c in cases {
-                    for st in &c.body {
-                        if let Stmt::Lexical { decls, .. } | Stmt::Using { decls, .. } = st {
-                            for d in decls {
-                                pat_names_ord(&d.pat, &mut ord);
-                            }
-                        } else if let Stmt::ClassDecl(cl) = st {
-                            if let Some(n) = &cl.name {
-                                if !ord.iter().any(|x| x == n) {
-                                    ord.push(n.clone());
-                                }
-                            }
+                    // §B-216 — `block_names_ord` inclut les
+                    // `function` des cases (liaison lexicale de
+                    // l'env unique du switch).
+                    for n in block_names_ord(&c.body) {
+                        if !ord.iter().any(|x| x == &n) {
+                            ord.push(n);
                         }
                     }
                 }

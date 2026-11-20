@@ -666,6 +666,16 @@ impl Engine {
                         let fv = self.make_function(f, env, Value::Undefined);
                         self.env_set(env, name, fv)?;
                     }
+                    // §B-216 Annex B.3.3 — sloppy : la position de
+                    // la déclaration assigne aussi la liaison `var`
+                    // du scope fonction (`hoist_vars_only` l'a
+                    // pré-déclarée) — `{ function g(){} } g()` marche
+                    // hors du bloc ; strict : la fn reste bloc-scopée.
+                    if !self.strict {
+                        if let Some(v) = self.env_get(env, name) {
+                            self.env_set_varscope(env, name, v)?;
+                        }
+                    }
                 }
                 Ok(Flow::Normal)
             }
@@ -692,6 +702,10 @@ impl Engine {
                 let benv = Env::block(env.clone());
                 // JS-C502 — positions de slots canoniques.
                 self.predeclare_slots(&benv, stmts.as_ptr() as usize);
+                // §B-216 — `BlockDeclarationInstantiation` : les
+                // `function` du bloc sont initialisées AVANT tout
+                // statement (`{ f(); function f(){} }` → f existe).
+                self.block_instantiate(&benv, stmts);
                 // JS-C460 — dispatch pur : le frame du bloc ne
                 // tient rien pendant les sous-statements.
                 self.young_stack[yslot] = u64::MAX;
@@ -1370,6 +1384,7 @@ impl Engine {
                 // pour leurs `let`/`const` (même règle que Block).
                 let benv = Env::block(env.clone());
                 self.predeclare_slots(&benv, block.as_ptr() as usize);
+                self.block_instantiate(&benv, block);
                 // JS-C460 — dispatch pur des trois corps.
                 self.young_stack[yslot] = u64::MAX;
                 // JS-C628 — `B`/`C`/`F` sont trois complétions
@@ -1381,6 +1396,7 @@ impl Engine {
                     if let Some((pat, cbody)) = catch {
                         let cenv = Env::block(env.clone());
                         self.predeclare_slots(&cenv, cbody.as_ptr() as usize);
+                        self.block_instantiate(&cenv, cbody);
                         // Param en liaison lexicale : `bind_pat Var`
                         // traverserait le bloc vers le scope fonction.
                         if let Err(e) = self.bind_pat(
@@ -1419,6 +1435,7 @@ impl Engine {
                     };
                     let fenv = Env::block(env.clone());
                     self.predeclare_slots(&fenv, fbody.as_ptr() as usize);
+                    self.block_instantiate(&fenv, fbody);
                     self.young_stack[yslot] = u64::MAX;
                     let (fr, fv) = self.exec_body_isolated(&fenv, this, fbody);
                     self.young_stack[yslot] = self.heap.alloc_seq();
@@ -1484,6 +1501,12 @@ impl Engine {
                 // visible des suivants, jamais du scope englobant).
                 let senv = Env::block(env.clone());
                 self.predeclare_slots(&senv, cases.as_ptr() as usize);
+                // §B-216 — les `function` des cases vivent dans
+                // l'env unique du switch (même règle que les
+                // `let` partagées entre cases).
+                for c in cases {
+                    self.block_instantiate(&senv, &c.body);
+                }
                 // JS-C421 : `dv` vit à travers les corps de cases.
                 self.safepoint_roots.push(dv);
                 // JS-C628 — `CaseBlockEvaluation` : `V` démarre à

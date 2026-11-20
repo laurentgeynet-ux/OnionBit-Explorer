@@ -13939,6 +13939,106 @@ impl Engine {
         }
     }
 
+    /// §B-216 — spec `BlockDeclarationInstantiation` : à l'entrée
+    /// d'un bloc, chaque `FunctionDecl` top-level du corps est liée
+    /// lexicalement **et initialisée immédiatement** — un appel
+    /// avant sa position lit la fonction (`try{ f() ; function
+    /// f(){} }` → 42, verbatim ars `n.dn(u)` ×2 + hulu §B-199).
+    /// `let`/`const`/`class` restent aux slots `Uninit`
+    /// (`predeclare_slots`) — TDZ géré par les envs `block_tdz`.
+    /// La closure capture l'env du bloc (spec — sa portée de
+    /// définition). Annex B : la liaison `var` du scope fonction
+    /// n'est PAS touchée ici (elle prend la valeur à la position
+    /// de la déclaration — `env_set_varscope` au bras
+    /// `Stmt::FunctionDecl`).
+    pub(crate) fn block_instantiate(&mut self, env: &EnvRef, stmts: &[Stmt]) {
+        for s in stmts {
+            if let Stmt::FunctionDecl(f) = s {
+                if let Some(name) = &f.name {
+                    Self::env_declare_lex(env, name, true);
+                    let fv = self.make_function(f, env, Value::Undefined);
+                    let _ = self.env_set(env, name, fv);
+                }
+            }
+        }
+    }
+
+    /// §B-216 Annex B.3.3 — sloppy uniquement : la position d'une
+    /// `FunctionDecl` de bloc assigne la valeur à la liaison `var`
+    /// du scope fonction (`hoist_vars_only` l'a pré-déclarée).
+    /// Marche : envs `Block` porteurs du nom = liaisons
+    /// **lexicales** (fn-decl/`let`/`const`) → sautés ; env `With`
+    /// porteur → `SetMutableBinding` écrit la prop de l'objet ;
+    /// premier `Local`/`Global` porteur → écrit.
+    pub(crate) fn env_set_varscope(&mut self, env: &EnvRef, name: &str, v: Value) -> JsResult<()> {
+        let mut cur = Some(env.clone());
+        while let Some(e) = cur {
+            enum Next {
+                Up(Option<EnvRef>),
+                Write(EnvRef),
+                // Env `Global` : la liaison `var` peut vivre en
+                // prop propre de `globalThis` (env_declare →
+                // `CreateGlobalVarBinding`, hors map déclarative).
+                Global(EnvRef),
+            }
+            let (with_oid, next) = {
+                let b = e.borrow();
+                match &b.kind {
+                    EnvKind::With(oid) => (Some(*oid), None),
+                    // La liaison `var` vit toujours plus haut que
+                    // les blocs (let/const/fn-decl du bloc sont
+                    // lexicaux, jamais la cible Annex B).
+                    EnvKind::Block(_) => (None, Some(Next::Up(b.parent.clone()))),
+                    EnvKind::Local(m) => {
+                        if m.get(name).is_some() {
+                            (None, Some(Next::Write(e.clone())))
+                        } else {
+                            (None, Some(Next::Up(b.parent.clone())))
+                        }
+                    }
+                    EnvKind::Global(m) => {
+                        if m.get(name).is_some() {
+                            (None, Some(Next::Write(e.clone())))
+                        } else {
+                            (None, Some(Next::Global(e.clone())))
+                        }
+                    }
+                }
+            };
+            if let Some(oid) = with_oid {
+                if self.with_has(oid, name)? {
+                    self.set_prop(oid, name, v)?;
+                    return Ok(());
+                }
+                cur = {
+                    let b = e.borrow();
+                    b.parent.clone()
+                };
+                continue;
+            }
+            match next {
+                Some(Next::Up(p)) => cur = p,
+                Some(Next::Write(t)) => return self.env_set(&t, name, v),
+                Some(Next::Global(t)) => {
+                    // Prop propre de `globalThis` = la liaison var
+                    // top-level ; `env_set` la maintient (sa branche
+                    // Global écrit l'objet hors map).
+                    let g = self.global;
+                    let owns = self.heap.obj(g).is_some_and(|o| o.find(name).is_some());
+                    if owns {
+                        return self.env_set(&t, name, v);
+                    }
+                    cur = {
+                        let b = t.borrow();
+                        b.parent.clone()
+                    };
+                }
+                None => return Ok(()),
+            }
+        }
+        Ok(())
+    }
+
     /// `var` hoisting is function-scoped: walk nested statements too.
     pub(crate) fn hoist_vars_only(&mut self, body: &[Stmt], env: &EnvRef) {
         // JS-C121 : récursion sur l'arbre Stmt — segment tas
