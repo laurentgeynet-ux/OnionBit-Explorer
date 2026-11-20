@@ -1247,6 +1247,27 @@ fn init_custom_event_carries_detail() {
     );
 }
 
+/// §B-196 — `initUIEvent` (DOM L2 dépréciée) : clientlib AEM
+/// samsung l'appelle sur un event `createEvent` — absent →
+/// `is not a function` uncaught ×3 vols. Spec : même init
+/// qu'`initEvent` + `view`/`detail` exposés au listener.
+#[test]
+fn init_ui_event_carries_view_and_detail() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');            var got = '';            b.addEventListener('uev', function (ev) {                got = ev.type + ':' + ev.bubbles + ':' + (ev.detail && ev.detail.n)                    + ':' + (ev.view === window);            });            var ev = document.createEvent('UIEvents');            ev.initUIEvent('uev', true, false, window, {n: 4});            b.dispatchEvent(ev); got"),
+        "uev:true:4:true"
+    );
+}
+
+/// §B-196 — même méthode via `new UIEvent()` (proto `WebIDL`).
+#[test]
+fn init_ui_event_on_ctor_path() {
+    assert_eq!(
+        ev("var ev = new UIEvent('u2');            ev.initUIEvent('u2', false, true, null, 'd');            ev.type + ':' + ev.cancelable + ':' + ev.detail"),
+        "u2:true:d"
+    );
+}
+
 // -- timers (JS-3) -----------------------------------------------------------
 
 #[test]

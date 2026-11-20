@@ -6379,6 +6379,12 @@ impl Engine {
                 }
                 if name == "UIEvent" {
                     ui_proto = Some(p.clone());
+                    // `initUIEvent` (DOM L2 dépréciée — §B-196) :
+                    // spec sur `UIEvent.prototype`.
+                    if let Value::Obj(pid) = p {
+                        let f = self.native_fn("initUIEvent", event_init_ui);
+                        self.set_own(pid, "initUIEvent", f, true);
+                    }
                 }
                 if name == "MouseEvent" {
                     mouse_proto = Some(p.clone());
@@ -17130,6 +17136,7 @@ impl Host for EventHost {
                 | "composedPath"
                 | "initEvent"
                 | "initCustomEvent"
+                | "initUIEvent"
         )
     }
 
@@ -17176,7 +17183,7 @@ impl Host for EventHost {
                     .collect();
                 Ok(Some(e.new_array(vals)))
             }
-            "initEvent" | "initCustomEvent" => {
+            "initEvent" | "initCustomEvent" | "initUIEvent" => {
                 let ty = e.to_js_string(arg(args, 0))?;
                 *self.state.ty.borrow_mut() = ty;
                 self.state.bubbles.set(e.to_boolean(arg(args, 1)));
@@ -17193,6 +17200,16 @@ impl Host for EventHost {
                     let mut p = self.state.props.borrow_mut();
                     p.retain(|(k, _)| k != "detail");
                     p.push(("detail".to_string(), arg(args, 3)));
+                }
+                // DOM L2 `initUIEvent` (dépréciée — §B-196,
+                // clientlib AEM samsung) : args 3/4 = `view`/
+                // `detail`, exposés en props comme l'init du
+                // ctor `UIEvent`.
+                if name == "initUIEvent" {
+                    let mut p = self.state.props.borrow_mut();
+                    p.retain(|(k, _)| k != "view" && k != "detail");
+                    p.push(("view".to_string(), arg(args, 3)));
+                    p.push(("detail".to_string(), arg(args, 4)));
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -21261,6 +21278,28 @@ fn event_init(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         Value::Bool(e.to_boolean(arg(args, 1))),
     )?;
     e.set_prop_value(this, "cancelable", Value::Bool(e.to_boolean(arg(args, 2))))?;
+    Ok(Value::Undefined)
+}
+
+/// `ev.initUIEvent(type, bubbles, cancelable, view, detail)` —
+/// héritage DOM Level 2 déprécié (§B-196, clientlib AEM
+/// samsung) : `initEvent` + `view`/`detail` posés en props.
+fn event_init_ui(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    let tv = e.str_val(ty);
+    e.set_prop_value(this.clone(), "type", tv)?;
+    e.set_prop_value(
+        this.clone(),
+        "bubbles",
+        Value::Bool(e.to_boolean(arg(args, 1))),
+    )?;
+    e.set_prop_value(
+        this.clone(),
+        "cancelable",
+        Value::Bool(e.to_boolean(arg(args, 2))),
+    )?;
+    e.set_prop_value(this.clone(), "view", arg(args, 3))?;
+    e.set_prop_value(this, "detail", arg(args, 4))?;
     Ok(Value::Undefined)
 }
 

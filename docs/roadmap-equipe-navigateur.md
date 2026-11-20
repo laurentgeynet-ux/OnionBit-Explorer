@@ -8288,6 +8288,16 @@ MCP = adaptateur, jamais la base.
   (`parse_http_date` + `Max-Age`) — une expiration hors
   domaine est une non-expiration honnête. Verrou :
   `b194_expirations_extremes_saturent_sans_panic`.
+- [x] **Étape 324. §B-196 soldée : `initUIEvent` (DOM L2
+  dépréciée) implémentée** — clientlib AEM samsung
+  `is not a function` uncaught ×3 vols (938/946/949).
+  `document.createEvent('UIEvents')` +
+  `initUIEvent(type, bubbles, cancelable, view, detail)` —
+  `view`/`detail` posés en props d'event dans le dispatch
+  `EventHost`, méthode aussi sur `UIEvent.prototype`
+  (position spec). Verrous :
+  `init_ui_event_carries_view_and_detail` +
+  `init_ui_event_on_ctor_path`.
 - [x] **Étape 321. §B-175-bis : cibles d'import map résolues
   contre la base du document — windy `@leafletGl` soldé**
   (`module.rs` `resolve_bare` + `session/scripts.rs`
