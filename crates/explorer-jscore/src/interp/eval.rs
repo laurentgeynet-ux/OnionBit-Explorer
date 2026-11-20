@@ -2034,14 +2034,18 @@ impl Engine {
                     .bigint_of(bv)
                     .is_some_and(|v| v == num_bigint::BigInt::from(u8::from(b))))
             }
-            (Value::Num(_), Value::Str(_))
-            | (Value::Str(_), Value::Num(_))
-            | (Value::Bool(_), _)
-            | (_, Value::Bool(_)) => {
+            (Value::Num(_), Value::Str(_)) | (Value::Str(_), Value::Num(_)) => {
                 let ln = self.to_number(l)?;
                 let rn = self.to_number(r)?;
                 Ok(ln == rn)
             }
+            // Spec `IsLooselyEqual` : Bool → `ToNumber` puis re-tour
+            // **récursif**. `to_number` des deux côtés rendait
+            // `null == false` vrai (`to_number(Null)=0`) — cassait le
+            // `isType` des schémas yup (`null==e` basculait sur la
+            // branche nullable/optional) — §B-205, raven/fr24.
+            (Value::Bool(b), _) => self.loose_eq(Value::Num(u8::from(b) as f64), r),
+            (_, Value::Bool(b)) => self.loose_eq(l, Value::Num(u8::from(b) as f64)),
             (Value::Obj(_), Value::Num(_) | Value::Str(_) | Value::Big(_)) => {
                 let p = self.to_primitive(l, PrimHint::Default)?;
                 // `to_primitive` ne rend qu'une primitive, ou un

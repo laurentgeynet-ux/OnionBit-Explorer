@@ -8310,6 +8310,22 @@ MCP = adaptateur, jamais la base.
   `ignoreBOM` était inversé — `true` conserve le BOM, le
   défaut le retire (utf-8 + utf-16). Verrou :
   `b204_textdecoder_utf16` 2/2.
+- [x] **Étape 328. §B-205 soldée : `null == false`
+  rendait vrai — `IsLooselyEqual` Bool → `ToNumber`
+  puis re-tour récursif (verbatim fr24, raven/yup
+  `doNotTrack` cast boolean)** (`explorer-jscore`
+  `interp/eval.rs`). Le bras `(Bool, _)` appliquait
+  `to_number` aux DEUX opérandes : `to_number(Null)=0`
+  = `to_number(false)` → égal. Conséquence terrain : le
+  `isType` yup (`null==e` en garde) classait tout
+  `false` en null/optional → `TypeError ... schema type:
+  "boolean"` sur `{cookieDeprecationLabel, doNotTrack,
+  thirdPartyCookies}`. Fix : Bool converti puis re-tour
+  — `null==false` → `0==null` → faux ; famille Bool×
+  {Num,Str,Obj} inchangée (`false==0`, `false=='0'`,
+  `false==[]` vrais ; `false=='false'` → NaN → faux).
+  Verrou : `b205_null_loose_eq` 3/3 (matrice
+  null/undefined × falsy, Bool famille, cast yup complet).
 - [x] **Étape 326. §B-203 soldée :
   `document.implementation.createDocument(ns, qname,
   doctype)` implémenté — verbatim abcnews (DOMPurify
