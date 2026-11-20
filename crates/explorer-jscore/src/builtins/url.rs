@@ -52,14 +52,17 @@ pub(crate) fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) ->
 }
 
 /// `localeCompare` (déviation documentée : ordre par point de
-/// code Unicode, pas de collation CLDR) — `-1/0/1`.
+/// code Unicode **sur la forme NFC** — pas de collation CLDR ;
+/// la normalisation livre l'équivalence canonique `o+◌̈` = `ö`,
+/// test262 `15.5.4.9_CE`) — `-1/0/1`.
 pub(crate) fn string_locale_compare(
     e: &mut Engine,
     this: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    let o = e.to_js_string(arg(args, 0))?;
+    use unicode_normalization::UnicodeNormalization;
+    let s: String = this_str(e, this)?.nfc().collect();
+    let o: String = e.to_js_string(arg(args, 0))?.nfc().collect();
     let r = match s.cmp(&o) {
         std::cmp::Ordering::Less => -1.0,
         std::cmp::Ordering::Equal => 0.0,

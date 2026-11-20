@@ -16020,6 +16020,49 @@ chaque gain rapporté contre les **deux** archétypes.
   capturants (T15, incompressible — captures
   observables), quantificateur lazy nullable
   (`nullable-quantifier`), T18.
+- [x] **JS-C640 — cluster String résiduel soldé :
+  sous-ensemble `built-ins/String` (1 223 fichiers)
+  2 411 → **2 439/2 439** ; coercions Symbol+wrappers
+  987 → 999/1 127 — zéro régression**
+  (`builtins/string.rs`, `extras.rs`, `clone.rs`,
+  `ctors.rs`, `object.rs`, `bigint.rs`, `species.rs`,
+  `url.rs`, `arities.rs`, `interp/mod.rs`, `lexer.rs`,
+  gate `tests/c640_string_residual.rs` **16/16**).
+  **Coercions** : `@@toPrimitive`/`valueOf`/`toString`
+  servis par `Get` (getters observables — `trim*`,
+  `position-tointeger-errors`) ; un **Symbol rendu par
+  `OrdinaryToPrimitive` est primitif** → `ToNumber`
+  `TypeError` au lieu de `toString` → `NaN`.
+  **Wrappers String** : `StringGetOwnProperty` complet —
+  index `{w:false,e:true,c:false}` dans `find_own`,
+  `hasOwnProperty`, `propertyIsEnumerable`, **for-in**
+  (`enum_keys`), `getOwnPropertyDescriptor` ;
+  `PRIM` → sentinelle `\u{f120}prim` (fuyait dans
+  `getOwnPropertyNames`). **`Object.prototype.toString`**
+  : `@@toStringTag` dynamique + cross-kind ; `Arguments`
+  non-Array/iterable. **Ctor** : `String(sym)` vs
+  `new String(sym)` → `TypeError`. **Méthodes** :
+  positions `ToIntegerOrInfinity` + UTF-16 units
+  (`charAt`, `charCodeAt`, `codePointAt`, `slice`,
+  `substring`, `substr`, `indexOf`, `lastIndexOf(NaN)`
+  → fin) ; `IsRegExp` (`@@match` observable) devant
+  `includes`/`startsWith`/`endsWith`/`search`/`match`/
+  `replace`/`split` ; `repeat` NaN→`""`/négatif→
+  `RangeError` receiver-first ; `pad*` arité 1 ;
+  `fromCharCode` `ToUint16` ; `isWellFormed`/
+  `toWellFormed` surrogates isolés ; `normalize`
+  `RequireObjectCoercible` ; `String.raw` `ToLength` +
+  segments servis après épuisement des substitutions +
+  TRV `\r\n`→`\n` (lexer) ; `localeCompare` NFC ;
+  `@@match` JsStr (surrogate isolé préservé, pas
+  U+FFFD) ; `Final_Sigma` avec `Case_Ignorable`
+  MidNumLet/`U+180E`/marques ; arités corpus.
+  **Mesures** : String 1 223 fichiers **2 439/2 439**
+  (2 skips `regexp-duplicate-named-groups`) ;
+  Symbol+Number+Boolean+BigInt blast-radius 987 →
+  **999/1 127** (+12 modes, 0 nouvel échec — restes =
+  cross-realm Symbol, `asIntN`, `description`,
+  catalogués).
 - [x] **JS-C639 — `Symbol.matchAll` `IsRegExp` :
   appel unique via `Construct`, ordre observable
   `ToString(arg)`→`Get(flags)`→`@@match`, propagation

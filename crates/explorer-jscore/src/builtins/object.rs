@@ -20,6 +20,10 @@ pub(crate) fn object_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
         Value::Bool(_) => "Boolean",
         Value::Str(_) => "String",
         Value::Big(_) => "BigInt",
+        // Arguments exotiques : `builtinTag = "Arguments"` (spec
+        // `Object.prototype.toString` §19.1.3.6) — discriminé par
+        // `args_map` (posé sur mapped ET unmapped).
+        Value::Obj(id) if e.heap.obj(id).is_some_and(|o| o.args_map.is_some()) => "Arguments",
         Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::Array(_)) => "Array",
             Some(ObjKind::Fun(_)) => "Function",
@@ -47,51 +51,70 @@ pub(crate) fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> J
     // conversion `ToString` (TypeError spuri — trigger réel :
     // `hasOwnProperty.call(t, Symbol())` dans catalyst/GitHub).
     let key = e.prop_key(arg(args, 0))?;
-    let has = match this {
-        // Proxy : `hasOwnProperty` passe par la trap
-        // `getOwnPropertyDescriptor` (spec `[[GetOwnProperty]]`).
-        Value::Obj(id)
-            if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) =>
-        {
-            e.get_own_prop(id, &key)?.is_some()
+    // `StringGetOwnProperty` : l'index d'un wrapper
+    // `new String(s)` (PRIM = Str) est own, hors `props`.
+    let str_idx = match &this {
+        Value::Obj(id) => {
+            e.heap
+                .obj(*id)
+                .and_then(|o| match o.get_own(crate::builtins::ctors::PRIM) {
+                    Some(Value::Str(sid)) => crate::interp::array_index(&key)
+                        .filter(|i| *i < sid.u16_len())
+                        .map(|_| true),
+                    _ => None,
+                })
         }
-        Value::Obj(id) => match e.heap.obj(id) {
-            Some(o) => match &o.kind {
-                ObjKind::Array(elems) => {
-                    key == "length"
-                        || crate::interp::array_index(&key)
-                            .is_some_and(|i| elems.get(i).is_some_and(|v| !v.is_hole()))
-                        || o.find(&key).is_some()
-                }
-                // Index canonique d'une vue typée : own ssi index
-                // **vivant** (`-0`/`-1`/`1.5`/`NaN` sont canoniques
-                // mais invalides → `false`) — borne lue sur la
-                // région réelle du buffer (détaché → vidé, RAB
-                // rétréci, spec `IsValidIntegerIndex`, JS-C606) ;
-                // clé non-canonique → prop ordinaire.
-                ObjKind::TypedArray {
-                    ta,
-                    buffer,
-                    offset,
-                    len,
-                    auto,
-                } => match crate::interp::canonical_numeric_index(&key) {
-                    Some(n) => {
-                        crate::interp::ta_live_index(&e.heap, *ta, buffer, *offset, *len, *auto, n)
-                            .is_some()
+        _ => None,
+    };
+    let has = match str_idx {
+        Some(true) => true,
+        _ => match this {
+            // Proxy : `hasOwnProperty` passe par la trap
+            // `getOwnPropertyDescriptor` (spec `[[GetOwnProperty]]`).
+            Value::Obj(id)
+                if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Proxy { .. })) =>
+            {
+                e.get_own_prop(id, &key)?.is_some()
+            }
+            Value::Obj(id) => match e.heap.obj(id) {
+                Some(o) => match &o.kind {
+                    ObjKind::Array(elems) => {
+                        key == "length"
+                            || crate::interp::array_index(&key)
+                                .is_some_and(|i| elems.get(i).is_some_and(|v| !v.is_hole()))
+                            || o.find(&key).is_some()
                     }
-                    None => o.find(&key).is_some(),
+                    // Index canonique d'une vue typée : own ssi index
+                    // **vivant** (`-0`/`-1`/`1.5`/`NaN` sont canoniques
+                    // mais invalides → `false`) — borne lue sur la
+                    // région réelle du buffer (détaché → vidé, RAB
+                    // rétréci, spec `IsValidIntegerIndex`, JS-C606) ;
+                    // clé non-canonique → prop ordinaire.
+                    ObjKind::TypedArray {
+                        ta,
+                        buffer,
+                        offset,
+                        len,
+                        auto,
+                    } => match crate::interp::canonical_numeric_index(&key) {
+                        Some(n) => crate::interp::ta_live_index(
+                            &e.heap, *ta, buffer, *offset, *len, *auto, n,
+                        )
+                        .is_some(),
+                        None => o.find(&key).is_some(),
+                    },
+                    _ => o.find(&key).is_some(),
                 },
-                _ => o.find(&key).is_some(),
+                None => false,
             },
-            None => false,
+            // Primitif string : `length` et les indices sont des
+            // props propres du wrapper `ToObject` (spec).
+            Value::Str(sid) => {
+                key == "length"
+                    || crate::interp::array_index(&key).is_some_and(|i| i < sid.u16_len())
+            }
+            _ => false,
         },
-        // Primitif string : `length` et les indices sont des
-        // props propres du wrapper `ToObject` (spec).
-        Value::Str(sid) => {
-            key == "length" || crate::interp::array_index(&key).is_some_and(|i| i < sid.u16_len())
-        }
-        _ => false,
     };
     Ok(Value::Bool(has))
 }
@@ -1073,9 +1096,10 @@ pub(crate) fn object_get_own_property_descriptors(
             }
         };
     for k in keys {
-        // Clés internes `\u{f131}…` (privés, métadonnées classe) :
-        // jamais exposées comme descripteurs.
-        if k.starts_with('\u{f131}') {
+        // Clés internes/symboles sentinelles (`\u{f120}…\u{f13f}` —
+        // privés, métadonnées classe, `PRIM`) : jamais exposées
+        // comme descripteurs.
+        if crate::builtins::bigint::is_sentinel_key(&k) {
             continue;
         }
         let kv = e.str_val(k.clone());

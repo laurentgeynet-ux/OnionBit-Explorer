@@ -46,7 +46,7 @@ pub(crate) fn array_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
 /// Propriété cachée portant `[[PrimitiveValue]]` des wrappers
 /// `new String/Number/Boolean` — sans elle, `valueOf`/`toString`
 /// retomberaient sur `ToPrimitive(this)` → boucle infinie.
-pub(crate) const PRIM: &str = "__prim";
+pub(crate) const PRIM: &str = "\u{f120}prim";
 
 /// `this` est-il l'objet frais d'un `new` sur le proto donné ?
 /// Deux signaux : le proto exact (`new String()`…) ou
@@ -110,12 +110,21 @@ pub(crate) fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<
         return Ok(wrap_or_prim(e, t, e.protos.string, prim));
     }
     let v = arg(args, 0);
+    // Spec `StringConstructor` : la description `"Symbol(d)"`
+    // n'existe que pour **l'appel** — en construction le
+    // `ToString` ordinaire s'applique et `Symbol` → `TypeError`
+    // (`new String(Symbol())`, test262 `symbol-wrapping`).
+    let is_new = constructed_this(e, t.clone(), e.protos.string).is_some();
     let prim = if let Some(d) = sym_desc(e, v.clone()) {
-        e.str_val(if d.is_empty() {
-            "Symbol()".to_string()
+        if is_new {
+            e.to_str_val(v)?
         } else {
-            format!("Symbol({d})")
-        })
+            e.str_val(if d.is_empty() {
+                "Symbol()".to_string()
+            } else {
+                format!("Symbol({d})")
+            })
+        }
     } else {
         e.to_str_val(v)?
     };

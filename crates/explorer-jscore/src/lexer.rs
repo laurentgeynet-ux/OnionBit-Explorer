@@ -1130,7 +1130,12 @@ impl Lexer<'_> {
                 None => return Err(self.err("unterminated template literal")),
                 Some('`') => {
                     // Backtick ASCII — `byte_pos - 1` = borne exacte.
-                    let raw = self.src[seg_start_b..self.byte_pos - 1].to_string();
+                    // TRV (spec `TemplateRawValue`) : les fins de
+                    // ligne `<CR><LF>`/`<CR>` du source deviennent
+                    // `<LF>` dans le raw — String.raw les expose.
+                    let raw = self.src[seg_start_b..self.byte_pos - 1]
+                        .replace("\r\n", "\n")
+                        .replace('\r', "\n");
                     parts.push(TplPart::Str(cur, raw));
                     return Ok(Tok::Tpl(parts.into()));
                 }
@@ -1138,7 +1143,9 @@ impl Lexer<'_> {
                     self.bump();
                     // `$` et `{` consommés (2 octets ASCII) — le
                     // chunk brut s'arrête avant le `$`.
-                    let raw = self.src[seg_start_b..self.byte_pos - 2].to_string();
+                    let raw = self.src[seg_start_b..self.byte_pos - 2]
+                        .replace("\r\n", "\n")
+                        .replace('\r', "\n");
                     parts.push(TplPart::Str(std::mem::take(&mut cur), raw));
                     let src = self.template_expr_src()?;
                     // Ré-entrée du lexer pour le contenu — profon-

@@ -7038,6 +7038,20 @@ impl Engine {
         let elems = std::mem::take(&mut *la.args.borrow_mut());
         let argc = elems.len();
         let a = self.new_array(elems);
+        // Spec : `arguments` hérite de `%Object.prototype%`, pas
+        // `Array.prototype` (`Object.prototype.toString` →
+        // "Arguments" via `args_map`, `join` absent) ; `@@iterator`
+        // reçoit la valeur `%Array.prototype.values%` en propre.
+        if let Value::Obj(aid) = a {
+            let (ap, op) = (self.protos.array, self.protos.object);
+            let values = self
+                .get_prop_value(Value::Obj(ap), "values")
+                .unwrap_or(Value::Undefined);
+            if let Some(o) = self.heap.obj_mut(aid) {
+                o.proto = Value::Obj(op);
+            }
+            self.set_own(aid, SYM_ITERATOR, values, false);
+        }
         if let Value::Obj(aid) = a {
             let simple = la
                 .lit
@@ -8754,6 +8768,15 @@ impl Engine {
             }
         }
         let o = self.heap.obj(id)?;
+        // `StringGetOwnProperty` (spec §10.4.3) — wrapper
+        // `new String(s)` : l'index sert l'unité UTF-16 en prop
+        // own `{w:false, e:true, c:false}`, sans matérialisation.
+        // Extrait pendant que `o` vit (le service alloue →
+        // `&mut self`).
+        let str_prim = match o.get_own(crate::builtins::ctors::PRIM) {
+            Some(Value::Str(sid)) => Some(sid),
+            _ => None,
+        };
         if let ObjKind::Array(elems) = &o.kind {
             if key == "length" {
                 return Some(Prop::Data {
@@ -8889,6 +8912,25 @@ impl Engine {
                     configurable: true,
                 },
             });
+        }
+        // `StringGetOwnProperty` : un index **canonique** dans
+        // les bornes → prop exotique (ombre toute prop homonyme
+        // — spec : non-config). Hors-bornes → repli ordinaire
+        // (un `defineProperty` au-delà de `len` est licite).
+        if let (Some(sid), Some(i)) = (&str_prim, ai) {
+            if i < sid.u16_len() {
+                if let Some(w) = sid.u16_at(i) {
+                    let v = self.str_val_units(vec![w]);
+                    return Some(Prop::Data {
+                        value: v,
+                        attrs: crate::heap::PropAttrs {
+                            writable: false,
+                            enumerable: true,
+                            configurable: false,
+                        },
+                    });
+                }
+            }
         }
         if let Some(p) = o.find(key) {
             return Some(p);
@@ -11785,6 +11827,13 @@ impl Engine {
                 }
                 _ => {}
             }
+            // Index des wrappers String (spec `OwnPropertyKeys` —
+            // mêmes props exotiques que `find_own_ai`).
+            if let Some(Value::Str(sid)) = o.get_own(crate::builtins::ctors::PRIM) {
+                for i in 0..sid.u16_len() {
+                    out.push(i.to_string());
+                }
+            }
             for (k, _) in &o.props {
                 rest.push(k.to_string());
             }
@@ -11816,6 +11865,12 @@ impl Engine {
                     }
                 }
                 _ => {}
+            }
+            // Index énumérables des wrappers String.
+            if let Some(Value::Str(sid)) = o.get_own(crate::builtins::ctors::PRIM) {
+                for i in 0..sid.u16_len() {
+                    out.push(i.to_string());
+                }
             }
             let mut rest = Vec::new();
             for (k, p) in &o.props {
@@ -12078,6 +12133,15 @@ impl Engine {
                         }
                     }
                 }
+                // Index énumérables des wrappers String (spec
+                // `StringGetOwnProperty` — `for-in` les voit).
+                if let Some(Value::Str(sid)) = o.get_own(crate::builtins::ctors::PRIM) {
+                    for i in 0..sid.u16_len() {
+                        if seen.insert(i.to_string()) {
+                            out.push(i.to_string());
+                        }
+                    }
+                }
                 let pkeys: Vec<String> = o
                     .props
                     .iter()
@@ -12153,7 +12217,25 @@ impl Engine {
             // tombait sur le fast-path → `"[object Object]"`
             // au lieu de lancer le getter (test262
             // `argument-validation-failure-closes-underlying`).
-            if matches!(o.kind, ObjKind::Ordinary)
+            // `o.proto == protos.object` ne suffit pas : le proto
+            // peut avoir `toString`/`valueOf` **réécrits**
+            // (`Object.prototype.toString = fn` — test262
+            // `S15.5.2.1_A1_T7`) — le fast-path exige les natives
+            // d'origine toujours installées sur le proto.
+            let proto_stock = self.heap.obj(self.protos.object).is_some_and(|po| {
+                let stock = |k: &str, nat: crate::heap::NativeFn| {
+                    po.find(k).and_then(|p| p.data_value()).is_some_and(|pv| {
+                        matches!(&pv, Value::Obj(fid)
+                            if matches!(self.heap.obj(*fid).map(|fo| &fo.kind),
+                                Some(ObjKind::Fun(crate::heap::Fun::Native { f, .. }))
+                                if *f as usize == nat as usize))
+                    })
+                };
+                stock("toString", crate::builtins::object::object_to_string)
+                    && stock("valueOf", crate::builtins::object::object_value_of)
+            });
+            if proto_stock
+                && matches!(o.kind, ObjKind::Ordinary)
                 && matches!(o.proto, Value::Obj(p) if p == self.protos.object)
                 && o.find(SYM_TO_PRIMITIVE).is_none()
                 && o.find("valueOf").is_none()
@@ -12164,21 +12246,32 @@ impl Engine {
                 return Ok(s);
             }
         }
-        // `@@toPrimitive(hint)` prend le pas (spec `ToPrimitive`).
-        if let Some(f) = self.get_prop(id, SYM_TO_PRIMITIVE) {
-            if self.is_callable(f.clone()) {
-                let h = match hint {
-                    PrimHint::String => "string",
-                    PrimHint::Number => "number",
-                    PrimHint::Default => "default",
-                };
-                let hv = self.str_val(h.to_string());
-                let r = self.call_value(f, v, &[hv])?;
-                if r.is_object() {
-                    return Err(self.type_error("Symbol.toPrimitive must return a primitive"));
-                }
-                return Ok(r);
+        // `@@toPrimitive(hint)` prend le pas (spec `ToPrimitive` —
+        // `GetMethod` : les accesseurs sont déclenchés et une
+        // valeur non-callable ≠ undefined → TypeError).
+        let exo = self.get_prop_value(v.clone(), SYM_TO_PRIMITIVE)?;
+        if !matches!(exo, Value::Undefined | Value::Null) {
+            if !self.is_callable(exo.clone()) {
+                return Err(self.type_error("Symbol.toPrimitive is not callable"));
             }
+            let h = match hint {
+                PrimHint::String => "string",
+                PrimHint::Number => "number",
+                PrimHint::Default => "default",
+            };
+            let hv = self.str_val(h.to_string());
+            let r = self.call_value(exo, v, &[hv])?;
+            // `ObjKind::Symbol` est une primitive JS malgré sa
+            // boîte `Obj` — un `@@toPrimitive` qui rend `Symbol()`
+            // est valide (spec : `Type(result) is Primitive`).
+            if r.is_object()
+                && !matches!(&r, Value::Obj(rid)
+                    if matches!(self.heap.obj(*rid).map(|o| &o.kind),
+                        Some(ObjKind::Symbol { .. })))
+            {
+                return Err(self.type_error("Symbol.toPrimitive must return a primitive"));
+            }
+            return Ok(r);
         }
         let order: [&str; 2] = if matches!(hint, PrimHint::String) {
             ["toString", "valueOf"]
@@ -12195,7 +12288,15 @@ impl Engine {
             let f = self.get_prop_value(v.clone(), m)?;
             if self.is_callable(f.clone()) {
                 let r = self.call_value(f, v.clone(), &[])?;
-                if !r.is_object() {
+                // `Symbol` est primitif (spec `OrdinaryToPrimitive`)
+                // — `valueOf(){return Symbol()}` doit faire échouer
+                // le `ToNumber` en `TypeError`, pas glisser sur
+                // `toString` → "[object Object]".
+                if !r.is_object()
+                    || matches!(&r, Value::Obj(rid)
+                        if matches!(self.heap.obj(*rid).map(|o| &o.kind),
+                            Some(ObjKind::Symbol { .. })))
+                {
                     return Ok(r);
                 }
             }

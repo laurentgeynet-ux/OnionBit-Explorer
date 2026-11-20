@@ -939,7 +939,13 @@ pub(crate) fn array_is_array(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
             return Ok(Value::Bool(false));
         };
         match e.heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::Array(_)) => return Ok(Value::Bool(true)),
+            // `arguments` porte `args_map` — pas un Array exotic
+            // (spec `IsArray` → `false`).
+            Some(ObjKind::Array(_)) => {
+                return Ok(Value::Bool(
+                    e.heap.obj(id).is_some_and(|o| o.args_map.is_none()),
+                ));
+            }
             Some(ObjKind::Proxy { target, handler }) => {
                 if handler.is_none() {
                     return Err(e.type_error("cannot perform operation on a revoked proxy"));
@@ -1195,6 +1201,12 @@ pub(crate) fn string_includes(e: &mut Engine, this: Value, args: &[Value]) -> Js
     } else {
         None
     };
+    // `IsRegExp(searchString)` — **avant** `ToString(search)`
+    // (spec `includes`) : lit `@@match` (getter observable,
+    // erreurs propagées) ; `true` → `TypeError`.
+    if crate::builtins::species::is_regexp_spec(e, arg(args, 0))? {
+        return Err(e.type_error("searchString must not be a RegExp"));
+    }
     let needle = e.to_js_jstr(arg(args, 0))?;
     // `from` en code units (spec) → préfixe units puis recherche.
     let from = match arg(args, 1) {
@@ -1231,6 +1243,9 @@ pub(crate) fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) ->
     } else {
         None
     };
+    if crate::builtins::species::is_regexp_spec(e, arg(args, 0))? {
+        return Err(e.type_error("searchString must not be a RegExp"));
+    }
     let needle = e.to_js_jstr(arg(args, 0))?;
     let start = match arg(args, 1) {
         Value::Undefined => 0usize,
@@ -1289,6 +1304,9 @@ pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> J
     } else {
         None
     };
+    if crate::builtins::species::is_regexp_spec(e, arg(args, 0))? {
+        return Err(e.type_error("searchString must not be a RegExp"));
+    }
     let needle = e.to_js_jstr(arg(args, 0))?;
     let end_arg = arg(args, 1);
     // Comparaison **exacte** en units dès qu'un côté porte des
@@ -1335,7 +1353,18 @@ pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> J
 }
 
 pub(crate) fn string_repeat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // Spec : `RequireObjectCoercible(this)` + `ToString(this)`
+    // **avant** `ToInteger(count)` — `repeat.call(Symbol(), 0)`
+    // → `TypeError` (receiver), pas `RangeError` (compte).
+    let this = if let Value::Str(_) = this {
+        this
+    } else {
+        Value::Str(this_jstr(e, this)?)
+    };
+    // Spec : `ToIntegerOrInfinity(count)` — `NaN` → **+0** → `""`,
+    // négatif/infini → `RangeError`, fraction tronquée.
     let n = e.to_number(arg(args, 0))?;
+    let n = if n.is_nan() { 0.0 } else { n };
     if n < 0.0 || !n.is_finite() {
         return Err(e.range_error("repeat count out of range"));
     }

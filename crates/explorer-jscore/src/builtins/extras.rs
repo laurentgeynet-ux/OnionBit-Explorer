@@ -512,10 +512,23 @@ pub(crate) fn string_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
 /// lead surrogate suivi d'un trail → le code point complet ;
 /// sinon le code unit lui-même.
 pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // `ToIntegerOrInfinity` : `NaN` → +0 ; **négatif →
+    // undefined** (`codePointAt(-1)`, spec) ; troncature.
+    let raw_i = {
+        let n = e.to_number(arg(args, 0))?;
+        if n.is_nan() {
+            0.0
+        } else {
+            n.trunc()
+        }
+    };
+    if raw_i < 0.0 {
+        return Ok(Value::Undefined);
+    }
     // Str direct : la vue `units` porte les surrogates isolés
     // (le `String` lossy les aurait déjà en U+FFFD).
     if let Value::Str(id) = this {
-        let i = e.to_number(arg(args, 0))?.max(0.0) as usize;
+        let i = raw_i as usize;
         let u = id.units_view();
         let Some(&w) = u.get(i) else {
             return Ok(Value::Undefined);
@@ -524,7 +537,7 @@ pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) 
         return Ok(Value::Num(f64::from(cp)));
     }
     let s = this_str(e, this)?;
-    let i = e.to_number(arg(args, 0))?.max(0.0) as usize;
+    let i = raw_i as usize;
     // `encode_utf16().skip(i)` : O(i) sans matérialiser (§B-59).
     let mut it = s.encode_utf16().skip(i);
     let Some(w) = it.next() else {
@@ -645,16 +658,34 @@ pub(crate) fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) 
 /// and `.length`, so array-likes work too).
 pub(crate) fn string_raw(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let raw = e.get_prop_value(arg(args, 0), "raw")?;
+    // Spec `ToLength` : `ToNumber` (Symbol → `TypeError`
+    // propagé), troncature, borné à 2⁵³-1, `NaN`/négatif → +0.
     let n = match e.get_prop_value(raw.clone(), "length")? {
-        Value::Num(n) => n.max(0.0) as usize,
-        _ => 0,
+        Value::Undefined | Value::Null => 0,
+        v => {
+            let n = e.to_number(v)?;
+            if n > 0.0 {
+                n.min(9_007_199_254_740_991.0) as usize
+            } else {
+                0
+            }
+        }
     };
     let mut out = String::new();
     for i in 0..n {
         let seg = e.get_prop_value(raw.clone(), &i.to_string())?;
         out.push_str(&e.to_js_string(seg)?);
-        if let Some(v) = args.get(i + 1) {
-            out.push_str(&e.to_js_string(v.clone())?);
+        // Spec : la substitution n'entre que si le segment n'est
+        // **pas** le dernier (`k+1 < literalSegments`) — le
+        // `args.get` inconditionnel collait une substitution en
+        // trop (`{raw:['a','b','c']},X,Y,Z` → `aXbYcZ` au lieu
+        // de `aXbYc`).
+        if i + 1 < n {
+            // Substitution manquante → `""` (spec — la boucle de
+            // segments **continue**, cf. `return-the-string-value`).
+            if let Some(v) = args.get(i + 1) {
+                out.push_str(&e.to_js_string(v.clone())?);
+            }
         }
     }
     Ok(e.str_val(out))

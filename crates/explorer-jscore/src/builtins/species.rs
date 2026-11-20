@@ -340,9 +340,12 @@ pub(crate) fn re_sym_match(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
             return Ok(if n == 0 { Value::Null } else { a });
         }
         let m0 = e.get_prop_value(result, "0")?;
-        let match_str = e.to_js_string(m0)?;
-        let mv = e.str_val(match_str.clone());
-        if !e.create_data_prop_spec_on(aid, &n.to_string(), mv)? {
+        // `matchStr` reste un `JsStr` (units préservées) — le
+        // passage par `String` remplaçait les surrogates isolés
+        // par U+FFFD (non-`u` : `.` matche **1 code unit**, cf.
+        // `match/regexp-prototype-match-v-u-flag`).
+        let match_str = e.to_js_jstr(m0)?;
+        if !e.create_data_prop_spec_on(aid, &n.to_string(), Value::Str(match_str.clone()))? {
             return Err(e.type_error("match: element is not creatable"));
         }
         if match_str.is_empty() {

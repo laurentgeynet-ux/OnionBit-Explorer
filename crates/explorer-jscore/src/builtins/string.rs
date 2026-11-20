@@ -17,9 +17,18 @@ pub(crate) fn string_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
 }
 
 pub(crate) fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // `ToIntegerOrInfinity` : troncature vers zéro — `-0.9` → -0
+    // → index 0 (`charAt(-0.9)` = 'a') ; `NaN` → +0 (spec).
     let i = match arg(args, 0) {
         Value::Undefined => 0.0,
-        v => e.to_number(v)?,
+        v => {
+            let n = e.to_number(v)?;
+            if n.is_nan() {
+                0.0
+            } else {
+                n.trunc()
+            }
+        }
     };
     // §B-59 : lecture en place — `charAt` en boucle clonait la
     // chaîne entière par appel via `this_str` (churn commit).
@@ -48,9 +57,18 @@ pub(crate) fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsR
 }
 
 pub(crate) fn string_char_code_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // `ToIntegerOrInfinity` (voir `charAt`) — `NaN` → +0 →
+    // index 0 → `'a'.charCodeAt(NaN)` = 97, pas NaN (spec).
     let i = match arg(args, 0) {
         Value::Undefined => 0.0,
-        v => e.to_number(v)?,
+        v => {
+            let n = e.to_number(v)?;
+            if n.is_nan() {
+                0.0
+            } else {
+                n.trunc()
+            }
+        }
     };
     // §B-59 : lecture en place (voir `string_char_at`).
     if let Value::Str(id) = this {
@@ -84,12 +102,33 @@ pub(crate) fn str_index_of(
     if matches!(this, Value::Undefined | Value::Null) {
         return Err(e.type_error("String method called on null/undefined"));
     }
+    // Spec : `ToString(this)` **avant** `ToString(searchString)`
+    // — observable sur `this` objet (ordre de `valueOf`).
+    let s_pre = if matches!(this, Value::Str(_)) {
+        None
+    } else {
+        Some(this_str(e, this.clone())?)
+    };
     let needle = e.to_js_jstr(arg(args, 0))?;
     let from = match arg(args, 1) {
         // `lastIndexOf` sans position → depuis la fin (spec).
         Value::Undefined if last => usize::MAX,
         Value::Undefined => 0usize,
-        v => (e.to_number(v)?.max(0.0)) as usize,
+        v => {
+            let n = e.to_number(v)?;
+            // Spec `lastIndexOf` : `NaN` → **+∞** (toute la
+            // chaîne) ; `indexOf` : `NaN` → +0. Troncature
+            // `ToInteger` pour les fractions.
+            if n.is_nan() {
+                if last {
+                    usize::MAX
+                } else {
+                    0
+                }
+            } else {
+                n.trunc().max(0.0) as usize
+            }
+        }
     };
     // §B-59 : recherche **en place** sur la cellule — le chemin
     // `this_str` clonait toute la chaîne par appel (décodeur
@@ -109,7 +148,7 @@ pub(crate) fn str_index_of(
         return Ok(Value::Num(-1.0));
     }
     let needle = needle.as_str();
-    let s = this_str(e, this)?;
+    let s = s_pre.unwrap_or_default();
     let byte_from = JsStr::u16_pos_to_byte(&s, from);
     let pos = if needle.len() > s.len() {
         None
@@ -269,14 +308,47 @@ pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
 fn case_map(e: &mut Engine, s: &JsStr, upper: bool) -> Value {
     let mut out = Vec::with_capacity(s.u16_len());
     let mut buf = [0u16; 2];
-    for cp in s.iter_code_points() {
-        let mapped = if cp.len() == 1 && (0xD800..0xE000).contains(&cp[0]) {
-            None
-        } else {
-            String::from_utf16(&cp).ok().and_then(|t| t.chars().next())
-        };
-        match mapped {
+    // Contexte `Final_Sigma` (spec `toLowerCase`, mapping
+    // contextuel Unicode) : `Σ` → `ς` quand précédé — en
+    // ignorant les `Case_Ignorable` — d'une lettre cased et non
+    // suivi d'une cased ; `σ` sinon. Points matérialisés pour le
+    // regard avant/arrière (surrogates isolés → `None`, neutres).
+    let cps: Vec<Vec<u16>> = s.iter_code_points();
+    let dec: Vec<Option<char>> = cps
+        .iter()
+        .map(|cp| {
+            if cp.len() == 1 && (0xD800..0xE000).contains(&cp[0]) {
+                None
+            } else {
+                String::from_utf16(cp).ok().and_then(|t| t.chars().next())
+            }
+        })
+        .collect();
+    let cased = |d: &Option<char>| d.is_some_and(|c| c.is_lowercase() || c.is_uppercase());
+    let final_sigma = |idx: usize| {
+        let before = dec[..idx]
+            .iter()
+            .rev()
+            .find(|d| !d.is_some_and(case_ignorable))
+            .is_some_and(cased);
+        let after = dec[idx + 1..]
+            .iter()
+            .find(|d| !d.is_some_and(case_ignorable))
+            .is_none_or(|d| !cased(d));
+        before && after
+    };
+    for (i, cp) in cps.iter().enumerate() {
+        match dec[i] {
             Some(c) => {
+                if !upper && c == '\u{03a3}' {
+                    let ch = if final_sigma(i) {
+                        '\u{03c2}'
+                    } else {
+                        '\u{03c3}'
+                    };
+                    out.extend_from_slice(ch.encode_utf16(&mut buf));
+                    continue;
+                }
                 let m: Vec<char> = if upper {
                     c.to_uppercase().collect()
                 } else {
@@ -286,10 +358,28 @@ fn case_map(e: &mut Engine, s: &JsStr, upper: bool) -> Value {
                     out.extend_from_slice(mc.encode_utf16(&mut buf));
                 }
             }
-            None => out.extend_from_slice(&cp),
+            None => out.extend_from_slice(cp),
         }
     }
     e.str_val_units(out)
+}
+
+/// Approximation `Case_Ignorable` (Unicode) — marques combinantes
+/// (Mn/Mc/Me), lettres modificatrices (Lm), format `Cf` et
+/// apostrophes/ponct `MidLetter` — suffisant pour le contexte
+/// `Final_Sigma` (test262 `unicode-180e` : U+180E est `Cf`).
+fn case_ignorable(c: char) -> bool {
+    unicode_normalization::char::is_combining_mark(c)
+        || matches!(c,
+            '\u{0027}' | '\u{002e}' | '\u{003a}' | '\u{00ad}'
+            | '\u{00b7}' | '\u{0387}' | '\u{02b0}'..='\u{02ff}'
+            | '\u{0559}' | '\u{05f3}' | '\u{05f4}'
+            | '\u{2019}' | '\u{2024}' | '\u{2027}'
+            | '\u{180e}' | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}' | '\u{fe00}'..='\u{fe0f}'
+            | '\u{fe52}' | '\u{feff}' | '\u{ff0e}' | '\u{ff1a}'
+            | '\u{fff9}'..='\u{fffb}')
 }
 
 pub(crate) fn string_to_lower(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -1054,18 +1144,61 @@ pub(crate) fn regexp_escape(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
     Ok(e.str_val(out))
 }
 
-/// `s.isWellFormed()` — nos `char` sont toujours des scalaires
-/// valides : `true` (les surrogates orphelins dégradent en
-/// U+FFFD au lexing).
+/// `s.isWellFormed()` — scan des **code units** (spec
+/// `IsStringWellFormedUnicode`) : un haut-surrogate exige un
+/// bas-surrogate adjacent ; un bas-surrogate seul → `false`.
 pub(crate) fn string_is_well_formed(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    this_str(e, this)?;
+    let id = this_jstr(e, this)?;
+    let u = id.units_view();
+    let mut i = 0;
+    while i < u.len() {
+        match u[i] {
+            0xD800..=0xDBFF => {
+                if u.get(i + 1).is_some_and(|t| (0xDC00..=0xDFFF).contains(t)) {
+                    i += 2;
+                } else {
+                    return Ok(Value::Bool(false));
+                }
+            }
+            0xDC00..=0xDFFF => return Ok(Value::Bool(false)),
+            _ => i += 1,
+        }
+    }
     Ok(Value::Bool(true))
 }
 
-/// `s.toWellFormed()` — identité (même raison).
+/// `s.toWellFormed()` — mêmes units : paires valides conservées,
+/// surrogate isolé → `U+FFFD` (spec `String.prototype.toWellFormed`).
 pub(crate) fn string_to_well_formed(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
-    Ok(e.str_val(s))
+    let id = this_jstr(e, this)?;
+    let u = id.units_view();
+    let mut out = Vec::with_capacity(u.len());
+    let mut i = 0;
+    while i < u.len() {
+        match u[i] {
+            w @ 0xD800..=0xDBFF => {
+                if let Some(&t) = u.get(i + 1) {
+                    if (0xDC00..=0xDFFF).contains(&t) {
+                        out.push(w);
+                        out.push(t);
+                        i += 2;
+                        continue;
+                    }
+                }
+                out.push(0xFFFD);
+                i += 1;
+            }
+            0xDC00..=0xDFFF => {
+                out.push(0xFFFD);
+                i += 1;
+            }
+            w => {
+                out.push(w);
+                i += 1;
+            }
+        }
+    }
+    Ok(e.str_val_units(out))
 }
 
 pub(crate) fn regexp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -1258,7 +1391,14 @@ pub(crate) fn string_from_char_code(e: &mut Engine, _t: Value, args: &[Value]) -
     e.alloc_guard(args.len().saturating_mul(4))?;
     let mut units = Vec::with_capacity(args.len());
     for a in args {
-        units.push(e.to_number(a.clone())? as u16);
+        let n = e.to_number(a.clone())?;
+        // Spec `ToUint16` : `ToInteger` puis **mod 2¹⁶** ;
+        // `NaN`/infini → +0. `-1` → 65535, `65537` → 1.
+        units.push(if n.is_finite() {
+            n.trunc().rem_euclid(65536.0) as u16
+        } else {
+            0
+        });
     }
     // Spec : code units directs — surrogate isolé préservé
     // (`str_val_units`), pas de perte en U+FFFD.

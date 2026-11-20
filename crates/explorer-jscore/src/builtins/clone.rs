@@ -520,7 +520,9 @@ pub(crate) fn finreg_cleanup(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
 /// toute composition (jamais U+FFFD).
 pub(crate) fn string_normalize(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     use unicode_normalization::UnicodeNormalization;
-    let j = e.to_js_jstr(this)?;
+    // `RequireObjectCoercible` (spec) — `null`/`undefined` →
+    // `TypeError`, pas `ToString` ("null").
+    let j = this_jstr(e, this)?;
     let form = match arg(args, 0) {
         Value::Undefined => "NFC".to_string(),
         v => e.to_js_string(v)?,
