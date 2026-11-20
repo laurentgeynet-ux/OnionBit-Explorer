@@ -34,32 +34,41 @@ crates/
   explorer-dom       arène DOM + NodeId générationnels (ADR-0008)
   explorer-html      tokenizer + tree-builder HTML → explorer-dom
   explorer-css       tokenizer, parser, sélecteurs, cascade
-  explorer-js        trait JsEngine + adaptateur DilloEngine +
+  explorer-js        trait JsEngine + adaptateur JscoreEngine +
                      NullEngine — équipe NAVIGATEUR (§10)
-  explorer-jscore           moteur JavaScript autonome — équipe
+  explorer-jscore    moteur JavaScript autonome — équipe
                      NAVIGATEUR, spécialiste JS (ADR-0007)
   explorer-layout    arbre de boîtes, block/inline, dimensionnement
   explorer-render    display list → framebuffer RGBA → PNG
   explorer-core      session : onglets, navigation, pipeline, events
   explorer-api       REST + SSE (axum) — couture unique vers l'UI
   explorer-cli       binaire de dev/debug (fetch, dump DOM, shot)
-  explorer-daemon    binaire hôte : moteur + API loopback
+  explorer-daemon    binaire hôte : moteur + API loopback + EAP
+  explorer-agent     protocole agent WS à handles (EAP, ADR-0035)
+                     — second client de Session
+  explorer-launcher  lanceur du bundle portable Windows (relaie
+                     vers l'app embarquée) — sans dépendance interne
   explorer-ffi       mode in-process cdylib (ADR-0018)
   explorer-test-support  transports simulés, fixtures — partagé (§10)
 app/                 app Flutter : lib/core (api, design tokens, di)
                      + lib/features/<feature>/ (clean architecture)
 docs/architecture/   ADR (decisions/) + architecture.md
 docs/                documents de référence, roadmaps par équipe
-                     (pipeline / navigateur), interface-equipes.md
+                     (pipeline / navigateur) + annexes (arène,
+                     profil, vitesse JS…), interface-equipes.md
                      (journal des coutures)
 fuzz/                cibles cargo-fuzz (hors workspace)
-scripts/             verify_all.ps1 + utilitaires
-.github/CODEOWNERS   périmètres des deux équipes (§10)
+scripts/             verify_all.ps1 + outillage terrain (smokes,
+                     vols, audits BCD/oracle/probes en .mjs — Node requis)
+.github/             CODEOWNERS (§10) + workflows (ci,
+                     nightly-terrain) + dependabot
 ```
 
 Sens de dépendance strictement descendant :
 `common ← net|dom ← html|css ← layout ← render ← core ← api ← daemon`,
-`common ← dom ← js ← core`, `explorer-jscore ← js`, `net ← core`. Jamais
+`common ← dom ← js ← core`, `explorer-jscore ← js`, `net ← core`,
+`core ← agent ← daemon` (agent consomme aussi `net`/`layout`
+directement) ; `explorer-launcher` est une feuille autonome. Jamais
 de dépendance montante ni latérale ; le code partagé descend d'une
 couche (ou ADR). `explorer-jscore` est autonome (aucune dépendance interne,
 son mini-DOM est un harnais de test). `explorer-net` est le seul
@@ -77,26 +86,23 @@ cargo doc --workspace --no-deps   # zéro warning
 cd app; flutter analyze; flutter test
 ```
 
-Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
+Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1` — enchaîne
+les quatre gates cargo, le **cliquet BCD** (`node
+scripts/bcd_coverage.mjs --gate`, sauté si `npm i` n'a pas été fait
+dans `scripts/`) puis `flutter analyze`/`test` si `app/` est présent.
 
-**Suites lourdes** : `cargo test` en profil debug fait tourner
-l'interpréteur non optimisé (~10-20× plus lent — la suite
-`hostile` jscore passe de ~10 min à ~30 s en `--release`).
-Pour le diagnostic itératif : `cargo test -p explorer-jscore
---test <suite> --release` (le gate verify_all garde le profil
-debug — il vérifie les tests, pas la perf). **Piège asymétrique
-(mesuré 2026-11-08)** : `--release` n'accélère que
-l'*exécution* — la *compilation* des ~50 binaires de test
-jscore en mode optimisé dépasse l'heure (jamais menée à terme :
-tuée à 18 min puis à ~1 h). **Ne jamais lancer `cargo test
---release` sans filtre `--test <suite>`** ; le gate correct reste
-debug `--lib` + smokes ciblés en release. Per-test timings :
-`cargo nextest run`. **Instrumentation** : les compteurs J17_*
-(allocs par site, JS-C306+) sont **désarmés par défaut** —
-les armer coûte un `fetch_add` atomique par événement chaud ;
-profils : `EXPLORER_J17_PROF=1` (daemon/binaires) ou
-`j17_enable()` (bancs). L'allocateur `stats_alloc` est global
-dès `explorer-common` — `EXPLORER_ALLOC_TRACE=1` pour
+**Suites lourdes** : `cargo test` en debug fait tourner
+l'interpréteur non optimisé (~10-20× plus lent — `hostile`
+jscore : ~10 min → ~30 s en `--release`). Diagnostic itératif :
+`cargo test -p explorer-jscore --test <suite> --release` —
+mais la *compilation* release des ~50 binaires de test dépasse
+l'heure : **jamais `cargo test --release` sans filtre
+`--test <suite>`**. Le gate `verify_all` reste en debug (il
+vérifie les tests, pas la perf) ; per-test timings :
+`cargo nextest run`. **Instrumentation** : compteurs `J17_*`
+(allocs par site) désarmés par défaut — `EXPLORER_J17_PROF=1`
+(binaires) ou `j17_enable()` (bancs) ; `stats_alloc` global
+dès `explorer-common`, `EXPLORER_ALLOC_TRACE=1` pour
 l'attribution par phase.
 
 ## 4. Règles dures
@@ -119,8 +125,8 @@ l'attribution par phase.
 4. **`CHANGELOG.md` à jour** (Keep a Changelog) à chaque changement
    visible, dans le même commit. Chaque entrée porte le numéro
    d'étape de sa piste (`Étape NN` navigateur, `R-N` pipeline,
-   `JS-CNN` piste JS) — le fichier est union-mergé
-   (`.gitattributes`).
+   `JS-CNN` piste JS, `B-NN` piste bugs — §10.5) — le fichier est
+   union-mergé (`.gitattributes`).
 5. **La roadmap de l'équipe cochée dans le même commit** que
    l'étape terminée (`docs/roadmap-equipe-pipeline.md` ou
    `docs/roadmap-equipe-navigateur.md` — §10). `ROADMAP.md` reste
@@ -174,17 +180,14 @@ l'attribution par phase.
 
 ## 6. Clean architecture
 
-- **Domaine** (`dom`, `css`, `layout`) : pur, aucun I/O, aucune
-  dépendance async — testable à la nanoseconde.
-- **Application** (`core`) : cas d'usage (navigate, new_tab…) et
-  ports (`HttpTransport`, `JsEngine`) — orchestre, ne sait pas
-  comment on ouvre une socket.
-- **Infrastructure** (`net`, `render`, `js` impl) : implémentations
-  des ports — tokio, rustls, tiny-skia.
-- **Interface** (`api`, `daemon`, `cli`, `app/`) : adaptateurs —
-  REST/SSE côté moteur, widgets côté Flutter.
-- Règle de dépendance : les couches internes ne connaissent jamais
-  les couches externes. Les DTO de l'API ne fuient pas dans le core.
+Quatre couches, la dépendance ne pointe que vers l'intérieur
+(la chaîne concrète est en §2) : **domaine** (`dom`, `css`,
+`layout` — pur, zéro I/O/async) ← **application** (`core` :
+cas d'usage et ports `HttpTransport`/`JsEngine`) ←
+**infrastructure** (`net`, `render`, impl `js` — tokio,
+rustls, tiny-skia) ← **interface** (`api`, `daemon`, `cli`,
+`app/` — adaptateurs). Les DTO de l'API ne fuient pas dans le
+core.
 
 ## 7. Côté Flutter (`app/`)
 
@@ -192,7 +195,7 @@ l'attribution par phase.
   `domain` (entités, use-cases), `data` (repos, sources API),
   `presentation` (widgets, providers Riverpod).
 - `lib/core/` : `api/` (client REST + SSE), `design/` (tokens +
-  thème), `config/`, `di/`, `router/`, `theme/`.
+  thème), `config/`, `di/`, `l10n/`, `platform/`, `settings/`.
 - **Design tokens** : source de vérité = `app/assets/design/
   tokens.json` (ADR-0005), chargé au démarrage — aucune couleur,
   espacement ou rayon en dur dans les widgets.
@@ -241,50 +244,42 @@ l'attribution par phase.
 
 ## 9. Ce qui n'est PAS ce projet
 
-- Pas un port de Dillo — `explorer-jscore` a une histoire dans un chantier
-  de port voisin mais aucune architecture n'en est importée :
-  l'adaptation passe par le trait `JsEngine` (ADR-0007). Provenance
-  figée dans ADR-0020 ; renommage en `explorer-jscore` décidé,
-  séquencé avant release 0.2.
-- Pas un navigateur Tor ni proxy : la politique réseau (mandataire,
-  filtrage, `.onion`) est déléguée à l'application qui embarque le
-  moteur — garder les coutures ouvertes (`HttpTransport` injectable,
-  `http_proxy`/`no_proxy` honorés, profil déplaçable).
-- Pas de moteur tiers (ADR-0001) — le cap est la compatibilité avec
-  le web moderne : toutes les couches de la roadmap convergent vers
-  la navigation réelle. Cap exprimé en **direction asymptotique** :
-  « tous les sites » est un horizon (aucun moteur hors des trois
-  grands n'y parvient), piloté par paliers mesurés sur corpus
-  (ADR-0010), pas une promesse.
+- Pas un port de Dillo : `explorer-jscore` a une histoire dans
+  un chantier voisin, aucune architecture importée —
+  provenance ADR-0020, adaptation via `JsEngine` (ADR-0007).
+- Pas un navigateur Tor ni proxy : politique réseau
+  (mandataire, filtrage, `.onion`) déléguée à l'hôte —
+  coutures ouvertes (`HttpTransport` injectable,
+  `http_proxy`/`no_proxy`, profil déplaçable).
+- Pas de moteur tiers (§1/ADR-0001) ; « tous les sites » est
+  un horizon asymptotique piloté par corpus (ADR-0010),
+  pas une promesse.
 
 ## 10. Organisation deux équipes (depuis 2026-10-19)
 
-Le projet est piloté par **deux équipes à taille comparable**,
-découpées sur l'axe de la clean architecture (§6) — le domaine
-pur d'un côté, la plateforme produit de l'autre.
-
-> « Équipe » = une **piste de travail parallèle** (session/agent
-> dédié) travaillant dans le même arbre — pas un groupe de
-> personnes. Les règles ci-dessous gouvernent le *code* : qui
-> touche quoi, dans quel ordre, sous quels contrats — c'est du
-> contrôle de concurrence, pas de l'organisation humaine. Pas de
-> réunion : le journal `docs/interface-equipes.md` et le
-> `CHANGELOG` **sont** la synchronisation, asynchrone ; la revue
-> se fait au rythme de l'opérateur.
+Le projet est piloté par **deux équipes** découpées sur l'axe
+de la clean architecture (§6) — domaine pur d'un côté,
+plateforme produit de l'autre. « Équipe » = une **piste de
+travail parallèle** (session/agent dédié) dans le même arbre :
+contrôle de concurrence du code, pas organisation humaine.
+La synchronisation est asynchrone — `docs/interface-equipes.md`
+et le `CHANGELOG` la **sont** ; la revue suit le rythme de
+l'opérateur.
 
 - **Équipe PIPELINE** — le domaine pur (zéro I/O, zéro async) :
   `explorer-common`, `explorer-dom`, `explorer-html`,
   `explorer-css`, `explorer-layout`, `explorer-render`.
   Des octets aux pixels : parse, cascade, boîtes, display list,
   raster. Roadmap : `docs/roadmap-equipe-pipeline.md` — étapes
-  **R-1+**.
+  **R-315+**.
 - **Équipe NAVIGATEUR** — la plateforme produit (tout l'I/O et
   l'orchestration) : `explorer-net`, `explorer-core`,
-  `explorer-api`, `explorer-daemon`, `explorer-cli`,
-  `explorer-ffi`, `app/`, `scripts/`, `fuzz/`, **+ toute la
+  `explorer-api`, `explorer-agent`, `explorer-daemon`,
+  `explorer-cli`, `explorer-ffi`, `explorer-launcher`,
+  `app/`, `scripts/`, `fuzz/`, **+ toute la
   surface JS** (`explorer-js`, `explorer-jscore`). Roadmap :
   `docs/roadmap-equipe-navigateur.md` — piste produit
-  **étapes 50+**, piste JS **JS-C26+**.
+  **étapes 320+**, piste JS **JS-C630+**, piste bugs **B-190+**.
 - **`explorer-test-support` = partagé** : feuille à zéro
   dépendance consommée en `dev-dependencies` par les deux
   équipes (fixtures Ahem/TTF côté PIPELINE, transports simulés
@@ -292,7 +287,8 @@ pur d'un côté, la plateforme produit de l'autre.
   **additifs** ; changement structurel via le journal.
 - **Spécialiste JS** : rôle nommé au sein de NAVIGATEUR (pas une
   équipe séparée) — il tient la piste JS-Cxx. La profondeur de
-  `explorer-jscore` (32 000 lignes) exige un détenteur du contexte ;
+  `explorer-jscore` (~133 000 lignes src, ~187 000 avec tests)
+  exige un détenteur du contexte ;
   sa file est ordonnée par les besoins produit, la couverture
   langue est strictement réactive aux sites réels.
 
@@ -316,51 +312,32 @@ Règles de la coexistence :
    partagées, worktrees) — les règles ne gouvernent que ce
    qui atterrit sur `main`.
    - **Worktree = chemin absolu, jamais imbriqué** :
-     `git worktree add C:\OnionBit-Explorer-<nom> <ref>` à la
-     racine du lecteur. Un chemin relatif lancé depuis un
-     worktree crée l'arbre *à l'intérieur* de celui-ci —
-     copies/indexeurs/outils récursent alors dans le projet
-     entier (station gelée, deux crashs mesurés le
-     2026-11-09). `.gitignore` couvre `OnionBit-Explorer-*/`
-     en filet de sécurité ; vérifier `git worktree list` si
-     un doute subsiste.
-   - **Sortie de build — aucun chemin commité** :
-     `.cargo/config.toml` n'épingle **aucun**
-     `target-dir` (l'ancien épinglage d'un dossier
-     partagé entre worktrees exécutait les
-     binaires/tests d'un autre worktree à la place
-     des vôtres — race réelle `tree_construction`
-     « corpus dir NotFound » : autre
-     `CARGO_MANIFEST_DIR`, fixtures absentes). La
-     source unique = la config cargo de la
-     **machine** (`~/.cargo/config.toml`) — aucun
-     épinglage dans le dépôt (ni `.cargo/config.toml`
-     de projet, ni chemin codé dans les scripts) :
-     chaque arbre — projet ou worktree — écrit dans
-     son `target/<profil>` local, isolation
-     automatique (un worktree éphémère de vol ne
-     partage ni n'écrase le binaire d'une autre
-     piste ; sccache amortit les builds à froid).
-     L'ancien modèle (`build-dir` hashé
-     `{workspace-path-hash}` + `build.target`
-     épinglé → sous-dossier `<triple>`) est
-     retiré — chemin frais par vol = build froid
-     et exe périmés sous `C:\cargo-target`
-     (vol 814). **Scripts** : l'exe se résout via
-     `cargo metadata` (`target_directory`) +
-     repli `<target>/<triple>/<profil>` ; jamais
-     de chemin `target/<profil>` en dur.
-     `CARGO_TARGET_DIR` par session reste honoré
-     (l'env prime toute config).
+     dossier **frère** du repo — `<repo>-wt-<agent>` pour les
+     pistes d'équipe, `<repo>-vol<N>-wt` pour les worktrees
+     éphémères de vol (étape 317, `scripts/vol_start.ps1`).
+     Un chemin relatif depuis un worktree crée l'arbre *dans*
+     celui-ci — copies/outils récursent alors dans le projet
+     entier (station gelée, deux crashs mesurés).
+     `.gitignore` couvre `wt-*/` et `OnionBit-Explorer-*/`
+     en filet ; vérifier `git worktree list` en cas de doute.
+   - **Sortie de build — aucun chemin commité** : ni
+     `.cargo/config.toml` de projet ni `target-dir` codé
+     dans les scripts — la source unique est la config
+     cargo **machine** (`~/.cargo/config.toml`) et chaque
+     arbre écrit dans son `target/<profil>` local (un
+     épinglage partagé exécutait les binaires/tests d'un
+     autre worktree — race réelle `tree_construction` ;
+     l'ancien modèle `build-dir` est retiré, vol 814).
+     **Scripts** : l'exe se résout via `cargo metadata`
+     (`target_directory`) + repli `<target>/<triple>/<profil>` ;
+     jamais de `target/<profil>` en dur. `CARGO_TARGET_DIR`
+     par session reste honoré (l'env prime toute config).
    - **Gate entier avant push** : `verify_all` complet, pas
-     seulement son crate — le couplage est asymétrique :
-     PIPELINE (amont) peut casser des tests `explorer-core`
-     en aval par un changement de sortie légitime ; l'inverse
-     à la *compilation* est impossible (l'aval ne compile pas
-     l'amont) — **sauf via `explorer-test-support` partagé**,
-     où un changement NAV peut casser les tests PIPE : même
-     règle, l'équipe causale répare ou revert. La suite
-     downstream fait partie du contrat.
+     seulement son crate — PIPELINE (amont) peut casser les
+     tests `explorer-core` en aval ; l'inverse est impossible
+     sauf via `explorer-test-support` partagé (même règle :
+     l'équipe causale répare ou revert). La suite downstream
+     fait partie du contrat.
    - **Carve-out tests** : quand un changement légitime
      modifie une sortie consommée en aval (ou un stub/fixture
      partagé), l'équipe causale met à jour les tests
@@ -373,13 +350,14 @@ Règles de la coexistence :
    - **`Cargo.lock` en conflit** : jamais de fusion à la
      main — `cargo check`/`cargo update` régénère un
      lockfile cohérent.
-   - **Pas de CI distante** (dépôt mono-machine) : « main
-     vert » est garanti par le gate `verify_all` manuel.
-     `scripts/verify_all.ps1` est conçu CI-ready — le jour
-     où un remote existe, il devient le job CI tel quel ;
-     la CI posera `CARGO_TARGET_DIR` et/ou
-     `CARGO_BUILD_BUILD_DIR` selon sa machine (l'env
-     prime sur toute config).
+   - **CI provisionnée dans le dépôt** : `ci.yml` rejoue
+     fmt/clippy/doc, les tests (jscore en job dédié), flutter
+     et `cargo audit` sur push/PR ; `nightly-terrain.yml`
+     lance `site_smoke` + `geo_smoke` chaque nuit et rapporte
+     sur l'issue radar. **`verify_all` reste le gate de
+     référence avant push** — ce clone n'a pas de remote, la
+     CI s'exécute côté hébergeur (`CARGO_TARGET_DIR` posé
+     selon sa machine, l'env prime toute config).
 4. **Fichiers partagés** : `CHANGELOG.md` est union-mergé ;
    `Cargo.lock` se régénère (règle §10.3) ;
    `[workspace.dependencies]` et `AGENTS.md`/ADR relèvent du
@@ -388,7 +366,8 @@ Règles de la coexistence :
 5. **Numéros d'étapes immuables et uniques** — référence stable
    dans commits, bugs et conversations ; jamais réutilisés.
    Préfixes : `Étape NN` (navigateur), `R-N` (pipeline),
-   `JS-CNN` (piste JS de navigateur).
+   `JS-CNN` (piste JS de navigateur), `B-NN` (piste bugs
+   transverse — entrées dans la roadmap navigateur).
 5b. **Livré = consommé en session** : une capacité domaine
    (PIPE) n'est pas livrée tant qu'aucun chemin produit ne la
    consomme — le domaine seul ne peint rien. Anti-pattern
